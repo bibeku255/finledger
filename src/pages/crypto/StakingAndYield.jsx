@@ -77,7 +77,7 @@ const StakingAndYield = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
-  const [customUserCoins, setCustomUserCoins] = useState([]); // Needed for Contract fetching
+  const [customUserCoins, setCustomUserCoins] = useState([]); 
 
   const [livePrices, setLivePrices] = useState({});
   const [fiatRate, setFiatRate] = useState(1);
@@ -94,7 +94,7 @@ const StakingAndYield = () => {
 
   const todayDate = new Date().toISOString().split('T')[0];
 
-  // 🚀 CRASH FIX: Extracting string symbols safely from context objects
+  // 🚀 Extracting string symbols safely from context objects
   const cryptoSymbols = useMemo(() => {
     return selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
   }, [selectedCryptos]);
@@ -102,7 +102,6 @@ const StakingAndYield = () => {
   const activeCryptos = cryptoSymbols.length > 0 ? cryptoSymbols : ['USDT', 'BNB', 'FEY', 'BTC'];
   const rewardOptions = Array.from(new Set([...activeCryptos, 'CTC', 'USDT']));
 
-  // 🚀 ADVANCED STATE FOR ALL MODES
   const [formData, setFormData] = useState({
     earningType: 'stake', // 'stake', 'pool', 'affiliate'
     coin: activeCryptos[0],
@@ -117,11 +116,13 @@ const StakingAndYield = () => {
     startDate: todayDate
   });
 
+  // 🚀 NAYA STATE FOR CLAIMING REWARDS (Multi-Coin Support for Affiliate)
   const [claimData, setClaimData] = useState({ 
     claimCoin: '', 
     amountClaimed: '', 
-    platformFeePercent: '10', // Default 10% fee common in Faucets
-    date: todayDate 
+    platformFeePercent: '10', 
+    date: todayDate,
+    multipleClaims: [] // Array of { claimCoin: '', amountClaimed: '' }
   });
 
   useEffect(() => {
@@ -163,7 +164,7 @@ const StakingAndYield = () => {
     return Array.from(coinMap.values());
   }, [customUserCoins, selectedCryptos]);
 
-  // 🚀 REBUILT: HYBRID SMART PRICE FETCHER (Object Safe)
+  // 🚀 HYBRID SMART PRICE FETCHER
   useEffect(() => {
     const fetchLivePrices = async () => {
       try {
@@ -172,6 +173,7 @@ const StakingAndYield = () => {
         const userBaseRate = fiatData.rates[baseCurrency] || 1;
         setFiatRate(userBaseRate);
 
+        // Fetch prices for all coins currently in use (in dashboard or in active claims)
         const coinsToFetch = Array.from(new Set([
           ...activeCryptos, formData.coin, formData.rewardCoin, formData.poolCoin2,
           ...stakes.flatMap(s => [s.coin, s.rewardCoin, s.poolCoin2])
@@ -193,7 +195,6 @@ const StakingAndYield = () => {
            }
         });
 
-        // 1. Fetch Normal Coins (CoinGecko)
         if (normalCoins.length > 0) {
            try {
              const ids = [...new Set(normalCoins)].join(',');
@@ -204,7 +205,6 @@ const StakingAndYield = () => {
            } catch(e) { console.warn("CoinGecko API Limit Reached"); }
         }
 
-        // 2. Fetch Custom Contract Coins (GeckoTerminal)
         for (const customCoin of contractCoins) {
            try {
               const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${customCoin.network}/tokens/${customCoin.contractAddress}`);
@@ -214,7 +214,7 @@ const StakingAndYield = () => {
                     usd: parseFloat(gtJson.data.attributes.price_usd)
                  };
               }
-           } catch (error) { console.warn(`GeckoTerminal failed for ${customCoin.symbol}`); }
+           } catch (error) {}
         }
 
         const priceMap = {};
@@ -232,7 +232,6 @@ const StakingAndYield = () => {
               priceUsd = cgJson[searchId]?.usd;
           }
 
-          // Binance Fallback
           if (!priceUsd) {
             try {
               const bSym = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
@@ -258,7 +257,7 @@ const StakingAndYield = () => {
     };
     if (!isLoading) {
         fetchLivePrices();
-        const interval = setInterval(fetchLivePrices, 60000); // 60s Refresh
+        const interval = setInterval(fetchLivePrices, 60000); 
         return () => clearInterval(interval);
     }
   }, [isLoading, activeCryptos, baseCurrency, formData.coin, formData.rewardCoin, formData.poolCoin2, stakes, fullDatabase]);
@@ -269,7 +268,6 @@ const StakingAndYield = () => {
       return (price !== undefined && !isNaN(price)) ? price : (0.01 * fiatRate); 
   };
 
-  // 🚀 SMART PROJECTION CALCULATION
   const projection = useMemo(() => {
     if (formData.earningType === 'affiliate') return { dailyFiat: 0, monthlyFiat: 0, yearlyFiat: 0 };
 
@@ -277,7 +275,6 @@ const StakingAndYield = () => {
     const price1 = getLivePrice(formData.coin);
     let tvlFiat = principal1 * price1;
 
-    // Add 2nd coin for LP
     if (formData.earningType === 'pool') {
       const principal2 = parseFloat(formData.poolPrincipal2) || 0;
       const price2 = getLivePrice(formData.poolCoin2);
@@ -313,7 +310,6 @@ const StakingAndYield = () => {
              totalRewardsClaimedFiat += (parseFloat(h.amount) || 0) * getLivePrice(h.coin);
          });
       } else {
-         // Legacy fallback
          totalRewardsClaimedFiat += (parseFloat(s.totalClaimed) || 0) * getLivePrice(s.rewardCoin || s.coin);
       }
     });
@@ -321,7 +317,6 @@ const StakingAndYield = () => {
     return { totalValueLocked, totalRewardsClaimedFiat, totalDailyPassiveIncome };
   }, [stakes, livePrices]);
 
-  // 🚀 REPORT DOWNLOAD LOGIC FOR STAKING (Now includes Global Date)
   const handleDownloadReport = (format) => {
     if (stakes.length === 0) return alert("No active stakes or streams found.");
 
@@ -344,7 +339,6 @@ const StakingAndYield = () => {
       }
 
       return {
-        // 🚀 GLOBAL DATE IN REPORTS
         startDate: formatGlobalDate && rec.startDate ? formatGlobalDate(rec.startDate, 'short') : (rec.startDate || 'N/A'),
         platform: rec.platform,
         type: isAffiliate ? 'Affiliate/Network' : (isPool ? 'Liquidity Pool' : 'Single Stake'),
@@ -402,12 +396,10 @@ const StakingAndYield = () => {
       startDate: formData.startDate,
       timestamp,
       
-      // Dynamic Data Based on Type
       coin: isAffiliate ? 'N/A' : formData.coin, 
       principalAmount: principal,
-      rewardCoin: isAffiliate ? formData.rewardCoin : (isPool ? 'Dual' : formData.rewardCoin),
+      rewardCoin: isAffiliate ? 'Variable' : (isPool ? 'Dual' : formData.rewardCoin), // Variable for Affiliate
       
-      // LP Specific
       ...(isPool && {
         poolCoin2: formData.poolCoin2,
         poolPrincipal2: poolPrincipal2
@@ -416,7 +408,6 @@ const StakingAndYield = () => {
 
     try {
       if (editingId) {
-        // 🚀 FIXED: Replaced updateDoc with setDoc for 100% safety
         await setDoc(doc(db, "users", user.uid, "stakingLogs", editingId), stakeData, { merge: true });
       } else {
         stakeData.claimedHistory = [];
@@ -427,56 +418,94 @@ const StakingAndYield = () => {
     } catch (error) { alert("Failed to save."); } finally { setIsSaving(false); }
   };
 
+  // 🚀 MASTER CLAIM FUNCTION (Handles Both Single and Multi-Coin Claims)
   const handleClaimReward = async (e) => {
     e.preventDefault();
     if (!user || !activeClaimStake) return;
     
-    const grossQty = parseFloat(claimData.amountClaimed);
+    const isAffiliate = activeClaimStake.earningType === 'affiliate';
     const feePercent = parseFloat(claimData.platformFeePercent) || 0;
     
-    if (isNaN(grossQty) || grossQty <= 0) return alert("Claim amount must be > 0");
+    let totalFiatValueAdded = 0;
+    const timestamp = new Date(claimData.date).getTime();
+    const sourceString = isAffiliate ? 'Affiliate Network' : (activeClaimStake.earningType === 'pool' ? 'Liquidity Pool' : `Staking (${activeClaimStake.apr}%)`);
 
     setIsSaving(true);
-    
-    // 🚀 AUTO FEE DEDUCTOR
-    const netQty = grossQty - (grossQty * (feePercent / 100));
-    
-    const timestamp = new Date(claimData.date).getTime();
-    const uniqueId = `YIELD_${timestamp}_${Math.floor(Math.random() * 1000)}`;
-
-    const currentPriceBase = getLivePrice(claimData.claimCoin);
-    const finalFiatValue = netQty * currentPriceBase;
-    
-    const sourceString = activeClaimStake.earningType === 'affiliate' ? 'Affiliate Network' : (activeClaimStake.earningType === 'pool' ? 'Liquidity Pool' : `Staking (${activeClaimStake.apr}%)`);
 
     try {
-      const claimRecord = { amount: netQty, coin: claimData.claimCoin, date: claimData.date, timestamp };
+      // 1. Array of Claims to Process
+      let claimsToProcess = [];
+      if (isAffiliate) {
+         // Filter out empty claims
+         claimsToProcess = claimData.multipleClaims.filter(c => c.amountClaimed > 0 && c.claimCoin !== '');
+         if(claimsToProcess.length === 0) {
+            setIsSaving(false); return alert("Please add at least one valid coin to claim.");
+         }
+      } else {
+         const grossQty = parseFloat(claimData.amountClaimed);
+         if (isNaN(grossQty) || grossQty <= 0) {
+            setIsSaving(false); return alert("Claim amount must be > 0");
+         }
+         claimsToProcess = [{ claimCoin: claimData.claimCoin, amountClaimed: grossQty }];
+      }
 
-      // 🚀 FIXED: Safe arrayUnion update via setDoc
-      await setDoc(doc(db, "users", user.uid, "stakingLogs", activeClaimStake.id), {
-        claimedHistory: arrayUnion(claimRecord)
-      }, { merge: true });
+      // 2. Process Each Claim in the Array
+      for (const claim of claimsToProcess) {
+         const rawQty = parseFloat(claim.amountClaimed);
+         const netQty = rawQty - (rawQty * (feePercent / 100)); // Auto Fee Deduct
+         
+         const currentPriceBase = getLivePrice(claim.claimCoin);
+         const finalFiatValue = netQty * currentPriceBase;
+         totalFiatValueAdded += finalFiatValue;
+         
+         const uniqueId = `YIELD_${timestamp}_${Math.floor(Math.random() * 100000)}`;
 
-      // Reward instantly added to CryptoWallet
-      await addDoc(collection(db, "users", user.uid, "cryptoWalletLogs"), {
-        type: 'in', coin: claimData.claimCoin, quantity: netQty, platform: activeClaimStake.platform,
-        reason: `${sourceString} Reward`, referenceNo: uniqueId, date: claimData.date, timestamp,
-        isMicroEarn: true, linkedRecordId: uniqueId
-      });
+         const claimRecord = { amount: netQty, coin: claim.claimCoin, date: claimData.date, timestamp };
 
-      // Reward automatically logged in Dashboard Income
-      await addDoc(collection(db, "users", user.uid, "incomeLogs"), {
-        title: `${sourceString}: ${claimData.claimCoin}`, category: "Crypto Staking Rewards", vault: 'crypto',
-        cryptoPlatform: activeClaimStake.platform, asset: claimData.claimCoin, amount: netQty,
-        exchangeRate: currentPriceBase > 0 ? currentPriceBase : 1, finalBaseAmount: finalFiatValue, date: claimData.date, timestamp,
-        linkedIncomeId: uniqueId, isMicroEarn: true
-      });
+         // Update Master Staking Log
+         await setDoc(doc(db, "users", user.uid, "stakingLogs", activeClaimStake.id), {
+           claimedHistory: arrayUnion(claimRecord)
+         }, { merge: true });
+
+         // Add to Crypto Wallet
+         await addDoc(collection(db, "users", user.uid, "cryptoWalletLogs"), {
+           type: 'in', coin: claim.claimCoin, quantity: netQty, platform: activeClaimStake.platform,
+           reason: `${sourceString} Reward`, referenceNo: uniqueId, date: claimData.date, timestamp,
+           isMicroEarn: true, linkedRecordId: uniqueId
+         });
+
+         // Add to Income Logs
+         await addDoc(collection(db, "users", user.uid, "incomeLogs"), {
+           title: `${sourceString}: ${claim.claimCoin}`, category: "Crypto Staking Rewards", vault: 'crypto',
+           cryptoPlatform: activeClaimStake.platform, asset: claim.claimCoin, amount: netQty,
+           exchangeRate: currentPriceBase > 0 ? currentPriceBase : 1, finalBaseAmount: finalFiatValue, date: claimData.date, timestamp,
+           linkedIncomeId: uniqueId, isMicroEarn: true
+         });
+      }
 
       closeClaimModal();
     } catch (error) { 
-        console.error(error); 
         alert("Failed to claim reward. Check console for details."); 
     } finally { setIsSaving(false); }
+  };
+
+  // Multiple Claim Row Handlers
+  const addClaimRow = () => {
+     setClaimData(prev => ({
+        ...prev,
+        multipleClaims: [...prev.multipleClaims, { claimCoin: activeCryptos[0], amountClaimed: '' }]
+     }));
+  };
+  
+  const updateClaimRow = (index, field, value) => {
+     const updated = [...claimData.multipleClaims];
+     updated[index][field] = value;
+     setClaimData(prev => ({ ...prev, multipleClaims: updated }));
+  };
+
+  const removeClaimRow = (index) => {
+     const updated = claimData.multipleClaims.filter((_, i) => i !== index);
+     setClaimData(prev => ({ ...prev, multipleClaims: updated }));
   };
 
   const executeSecureDelete = async (e) => {
@@ -504,14 +533,19 @@ const StakingAndYield = () => {
 
   const closeClaimModal = () => {
     setIsClaimModalOpen(false); setActiveClaimStake(null);
-    setClaimData({ claimCoin: '', amountClaimed: '', platformFeePercent: '10', date: todayDate });
+    setClaimData({ claimCoin: '', amountClaimed: '', platformFeePercent: '10', date: todayDate, multipleClaims: [] });
   };
 
   const openClaimModalFor = (rec) => {
       setActiveClaimStake(rec);
+      const isAffiliate = rec.earningType === 'affiliate';
+      
       setClaimData({
           claimCoin: rec.earningType === 'pool' ? rec.coin : (rec.rewardCoin || rec.coin),
-          amountClaimed: '', platformFeePercent: '10', date: todayDate
+          amountClaimed: '', 
+          platformFeePercent: '10', 
+          date: todayDate,
+          multipleClaims: isAffiliate ? [{ claimCoin: activeCryptos[0] || 'BTC', amountClaimed: '' }] : []
       });
       setIsClaimModalOpen(true);
   };
@@ -533,7 +567,6 @@ const StakingAndYield = () => {
         </div>
         
         <div className="flex items-center gap-2 md:gap-3">
-          {/* 🚀 DOWNLOAD REPORT DROPDOWN */}
           <div className="relative group">
             <button className="flex items-center gap-1 md:gap-2 p-3 md:p-3.5 bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400 rounded-2xl font-bold text-xs md:text-sm hover:bg-indigo-100 transition-colors border border-indigo-100 dark:border-indigo-500/20 shadow-sm">
               <HiOutlineDownload size={18}/> 
@@ -604,8 +637,7 @@ const StakingAndYield = () => {
                   const isAffiliate = rec.earningType === 'affiliate';
                   const isPool = rec.earningType === 'pool';
                   
-                  // 🚀 Safe Logo Retrieval from Objects Array
-                  const c1Obj = fullDatabase.find(c => c.symbol === (isAffiliate ? rec.rewardCoin : rec.coin).toUpperCase());
+                  const c1Obj = fullDatabase.find(c => c.symbol === (isAffiliate ? 'USDT' : rec.coin).toUpperCase());
                   const logo1 = c1Obj?.logo;
 
                   let logo2 = null;
@@ -639,8 +671,8 @@ const StakingAndYield = () => {
                     <td className="p-4 pl-6">
                       <div className="flex items-center gap-3">
                         <div className="flex items-center">
-                            <div className="w-10 h-10 rounded-full overflow-hidden shadow-inner bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 z-10">
-                               <LogoRenderer symbol={isAffiliate ? rec.rewardCoin : rec.coin} logoUrl={logo1} />
+                            <div className="w-10 h-10 rounded-full overflow-hidden shadow-inner bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 z-10 flex items-center justify-center">
+                               {isAffiliate ? <FaExchangeAlt className="text-slate-400" size={16}/> : <LogoRenderer symbol={rec.coin} logoUrl={logo1} />}
                             </div>
                             {isPool && (
                               <div className="w-10 h-10 rounded-full overflow-hidden shadow-inner bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 -ml-4 z-0">
@@ -672,6 +704,8 @@ const StakingAndYield = () => {
                            
                            {isPool ? (
                               <span className="text-[9px] font-black text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-500/10 px-2 py-0.5 rounded">LP Rewards</span>
+                           ) : isAffiliate ? (
+                              <span className="text-[9px] font-black text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-500/10 px-2 py-0.5 rounded">Multi-Coin Earning</span>
                            ) : (
                              <span className="text-[9px] font-black text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-500/10 px-2 py-0.5 rounded">
                                Earns {rec.rewardCoin || rec.coin}
@@ -734,7 +768,6 @@ const StakingAndYield = () => {
             
             <form onSubmit={handleSaveStake} className="p-6 sm:p-8 overflow-y-auto custom-scrollbar flex-1 space-y-6">
               
-              {/* 🚀 3-WAY TYPE TOGGLE */}
               <div className="flex bg-slate-100 dark:bg-slate-800 p-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
                 <button type="button" onClick={() => setFormData({...formData, earningType: 'stake'})} className={`flex-1 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all flex flex-col items-center gap-1 ${formData.earningType === 'stake' ? 'bg-white dark:bg-slate-700 shadow text-purple-600 dark:text-purple-400' : 'text-slate-500'}`}>
                   <span>🏦</span> Single Stake
@@ -749,13 +782,7 @@ const StakingAndYield = () => {
 
               {formData.earningType === 'affiliate' && (
                 <div className="p-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl text-[10px] font-bold text-slate-500">
-                  <span className="text-emerald-600 font-black">AFFILIATE MODE:</span> Use this to track NC Wallet networks or CryptoTab mining. No locked principal required. Just harvest rewards when received!
-                </div>
-              )}
-
-              {formData.earningType === 'pool' && (
-                <div className="p-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/50 rounded-2xl text-[10px] font-bold text-slate-500">
-                  <span className="text-blue-600 font-black">LIQUIDITY POOL (e.g. FaucetPay BNB/FEY):</span> Stake two assets simultaneously to earn split rewards.
+                  <span className="text-emerald-600 font-black">AFFILIATE MODE:</span> Use this to track NC Wallet networks or CryptoTab mining. No locked principal required. You can harvest multiple different coins simultaneously when claiming!
                 </div>
               )}
 
@@ -769,7 +796,6 @@ const StakingAndYield = () => {
                 </div>
               </div>
 
-              {/* DYNAMIC ASSET SELECTION */}
               {formData.earningType === 'pool' ? (
                  <div className="grid grid-cols-2 gap-5 p-4 bg-slate-50 dark:bg-slate-800/30 rounded-2xl border border-slate-200 dark:border-slate-700">
                     <div className="space-y-2">
@@ -791,7 +817,7 @@ const StakingAndYield = () => {
                 <div className="grid grid-cols-2 gap-5">
                   {formData.earningType === 'stake' && (
                     <div className="space-y-2">
-                      <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Asset Staked (Holding)</label>
+                      <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Asset Staked</label>
                       <div className="relative">
                         <select value={formData.coin} onChange={(e) => setFormData({...formData, coin: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-black dark:text-white outline-none cursor-pointer appearance-none">
                           {cryptoSymbols.map(c => <option key={c} value={c}>{c}</option>)}
@@ -802,18 +828,25 @@ const StakingAndYield = () => {
                   )}
 
                   <div className={`space-y-2 ${formData.earningType === 'affiliate' ? 'col-span-2' : ''}`}>
-                    <label className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest ml-1">Reward Asset (Earning)</label>
+                    <label className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest ml-1">Reward Asset</label>
                     <div className="relative">
-                      <select value={formData.rewardCoin} onChange={(e) => setFormData({...formData, rewardCoin: e.target.value})} className="w-full p-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl font-black text-emerald-600 dark:text-emerald-400 outline-none cursor-pointer appearance-none">
-                        {rewardOptions.map(c => <option key={`r-${c}`} value={c}>{c}</option>)}
-                      </select>
-                      <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" />
+                      {formData.earningType === 'affiliate' ? (
+                          <div className="w-full p-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl font-black text-emerald-600 dark:text-emerald-400 text-center">
+                             Multi-Coin Selection Active
+                          </div>
+                      ) : (
+                          <>
+                            <select value={formData.rewardCoin} onChange={(e) => setFormData({...formData, rewardCoin: e.target.value})} className="w-full p-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl font-black text-emerald-600 dark:text-emerald-400 outline-none cursor-pointer appearance-none">
+                              {rewardOptions.map(c => <option key={`r-${c}`} value={c}>{c}</option>)}
+                            </select>
+                            <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" />
+                          </>
+                      )}
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* AMOUNTS AND APR FOR NON-AFFILIATE */}
               {formData.earningType !== 'affiliate' && (
                 <>
                   <div className="grid grid-cols-2 gap-5">
@@ -832,7 +865,6 @@ const StakingAndYield = () => {
                     </div>
                   </div>
 
-                  {/* 🚀 AI PROJECTOR */}
                   <div className="p-4 bg-purple-50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-800/50 rounded-2xl">
                     <div className="flex justify-between items-center mb-3">
                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1">🤖 Est. Fiat Projection</p>
@@ -853,7 +885,6 @@ const StakingAndYield = () => {
                     </div>
                   </div>
 
-                  {/* CUSTOM LOCK PERIOD */}
                   <div className="grid grid-cols-2 gap-5">
                     <div className="space-y-2">
                       <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Lock Duration</label>
@@ -871,7 +902,6 @@ const StakingAndYield = () => {
                          <input type="number" required value={formData.customLockDays} onChange={(e)=>setFormData({...formData, customLockDays: e.target.value})} placeholder="e.g. 55" className="w-full p-3 mt-2 bg-purple-50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-800/50 rounded-xl font-bold dark:text-white outline-none" />
                       )}
                     </div>
-                    {/* 🚀 GLOBAL DATE APPLIED */}
                     <div className="space-y-2">
                       <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex justify-between ml-1">
                         <span>Start Date</span>
@@ -883,7 +913,6 @@ const StakingAndYield = () => {
                 </>
               )}
 
-              {/* Affiliate Form Date Field Only */}
               {formData.earningType === 'affiliate' && (
                 <div className="space-y-2">
                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex justify-between ml-1">
@@ -894,7 +923,7 @@ const StakingAndYield = () => {
                 </div>
               )}
 
-              <button type="submit" disabled={isSaving} className={`w-full p-4 rounded-2xl font-black text-white text-lg transition-all shadow-xl active:scale-95 disabled:opacity-70 ${formData.earningType === 'stake' ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-500/20' : formData.earningType === 'pool' ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20' : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/20'} flex items-center justify-center gap-2`}>
+              <button type="submit" disabled={isSaving} className={`w-full p-4 rounded-2xl font-black text-white text-lg transition-all active:scale-95 disabled:opacity-70 ${formData.earningType === 'stake' ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-500/20' : formData.earningType === 'pool' ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20' : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/20'} flex items-center justify-center gap-2`}>
                 {isSaving ? <HiOutlineRefresh className="animate-spin text-2xl" /> : (editingId ? 'Update Terms' : `Save Stream`)}
               </button>
             </form>
@@ -902,17 +931,17 @@ const StakingAndYield = () => {
         </div>
       )}
 
-      {/* 🎁 CLAIM REWARD MODAL WITH AUTO-FEE DEDUCTION */}
+      {/* 🎁 CLAIM REWARD MODAL (Multi-Coin Engine Added) */}
       {isClaimModalOpen && activeClaimStake && (
         <div className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 pt-[100px] md:pt-[120px]">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-emerald-100 dark:border-emerald-800/50">
             
-            <div className="px-6 py-5 flex justify-between items-center bg-emerald-500 text-white">
+            <div className="px-6 py-5 flex justify-between items-center bg-emerald-500 text-white shrink-0">
               <h3 className="text-xl font-black flex items-center gap-2"><HiOutlineGift size={24}/> Harvest Rewards</h3>
               <button type="button" onClick={closeClaimModal} className="p-2 bg-white/20 rounded-full hover:bg-white/30"><HiOutlineX size={20} /></button>
             </div>
             
-            <form onSubmit={handleClaimReward} className="p-6 space-y-6">
+            <form onSubmit={handleClaimReward} className="p-6 space-y-6 max-h-[80vh] overflow-y-auto custom-scrollbar">
               <div className="text-center">
                 <p className="text-sm font-bold text-slate-500 mb-1">Claiming yield from</p>
                 <p className="text-lg font-black text-slate-800 dark:text-white">
@@ -920,26 +949,47 @@ const StakingAndYield = () => {
                 </p>
               </div>
 
-              {/* Dual Asset Claim Selector for LP */}
-              {activeClaimStake.earningType === 'pool' && (
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Which coin are you claiming?</label>
-                    <select value={claimData.claimCoin} onChange={(e) => setClaimData({...claimData, claimCoin: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer">
-                       <option value={activeClaimStake.coin}>{activeClaimStake.coin}</option>
-                       <option value={activeClaimStake.poolCoin2}>{activeClaimStake.poolCoin2}</option>
-                    </select>
-                  </div>
+              {activeClaimStake.earningType === 'affiliate' ? (
+                 <div className="space-y-4">
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Coins Received</label>
+                    {claimData.multipleClaims.map((claimRow, idx) => (
+                       <div key={idx} className="flex gap-2 relative">
+                         <div className="w-1/3">
+                            <select value={claimRow.claimCoin} onChange={(e) => updateClaimRow(idx, 'claimCoin', e.target.value)} className="w-full p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl font-bold dark:text-white outline-none cursor-pointer">
+                              {activeCryptos.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                         </div>
+                         <div className="flex-1 relative">
+                            <input type="number" step="any" required value={claimRow.amountClaimed} onChange={(e) => updateClaimRow(idx, 'amountClaimed', e.target.value)} placeholder="0.00" className="w-full p-3 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 rounded-xl font-black text-emerald-600 dark:text-emerald-400 outline-none focus:ring-2 focus:ring-emerald-500/50" />
+                         </div>
+                         {claimData.multipleClaims.length > 1 && (
+                            <button type="button" onClick={() => removeClaimRow(idx)} className="absolute -right-2 -top-2 bg-rose-500 text-white rounded-full p-1 shadow hover:bg-rose-600"><HiOutlineX size={12}/></button>
+                         )}
+                       </div>
+                    ))}
+                    <button type="button" onClick={addClaimRow} className="w-full py-2 border-2 border-dashed border-emerald-300 text-emerald-600 dark:border-emerald-800 dark:text-emerald-500 font-black text-xs rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-900/20 flex justify-center items-center gap-1"><HiOutlinePlus/> Add Another Coin</button>
+                 </div>
+              ) : (
+                 <>
+                    {activeClaimStake.earningType === 'pool' && (
+                        <div className="space-y-2">
+                          <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Which coin are you claiming?</label>
+                          <select value={claimData.claimCoin} onChange={(e) => setClaimData({...claimData, claimCoin: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer">
+                             <option value={activeClaimStake.coin}>{activeClaimStake.coin}</option>
+                             <option value={activeClaimStake.poolCoin2}>{activeClaimStake.poolCoin2}</option>
+                          </select>
+                        </div>
+                    )}
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Gross Quantity Received</label>
+                      <div className="relative">
+                        <input type="number" step="any" required autoFocus value={claimData.amountClaimed} onChange={(e) => setClaimData({...claimData, amountClaimed: e.target.value})} placeholder="e.g. 0.5" className="w-full p-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl font-black text-2xl text-emerald-600 dark:text-emerald-400 outline-none focus:ring-2 focus:ring-emerald-500/50 text-center tracking-widest" />
+                        <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-emerald-500">{claimData.claimCoin}</span>
+                      </div>
+                    </div>
+                 </>
               )}
 
-              <div className="space-y-2">
-                <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Gross Quantity Received</label>
-                <div className="relative">
-                  <input type="number" step="any" required autoFocus value={claimData.amountClaimed} onChange={(e) => setClaimData({...claimData, amountClaimed: e.target.value})} placeholder="e.g. 0.5" className="w-full p-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl font-black text-2xl text-emerald-600 dark:text-emerald-400 outline-none focus:ring-2 focus:ring-emerald-500/50 text-center tracking-widest" />
-                  <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-emerald-500">{claimData.claimCoin}</span>
-                </div>
-              </div>
-
-              {/* PLATFORM COMMISSION / FEE */}
               <div className="space-y-2">
                 <label className="text-[11px] font-black text-rose-500 uppercase tracking-widest ml-1">Platform Fee Deduction (%)</label>
                 <div className="relative">
@@ -949,12 +999,14 @@ const StakingAndYield = () => {
                 <p className="text-[9px] font-bold text-slate-400 pl-2">App will automatically deduct this from Gross before logging.</p>
               </div>
 
-              <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl flex justify-between items-center border border-slate-200 dark:border-slate-700">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Net to Wallet:</span>
-                <span className="font-black text-emerald-600 dark:text-emerald-400">
-                  {claimData.amountClaimed ? (parseFloat(claimData.amountClaimed) - (parseFloat(claimData.amountClaimed) * ((parseFloat(claimData.platformFeePercent)||0) / 100))).toFixed(6) : '0.00'} {claimData.claimCoin}
-                </span>
-              </div>
+              {!isAffiliate && (
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl flex justify-between items-center border border-slate-200 dark:border-slate-700">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Net to Wallet:</span>
+                  <span className="font-black text-emerald-600 dark:text-emerald-400">
+                    {claimData.amountClaimed ? (parseFloat(claimData.amountClaimed) - (parseFloat(claimData.amountClaimed) * ((parseFloat(claimData.platformFeePercent)||0) / 100))).toFixed(6) : '0.00'} {claimData.claimCoin}
+                  </span>
+                </div>
+              )}
 
               <button type="submit" disabled={isSaving} className={`w-full p-4 rounded-2xl font-black text-white text-lg transition-all shadow-xl active:scale-95 disabled:opacity-70 bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/20 flex items-center justify-center gap-2`}>
                 {isSaving ? <HiOutlineRefresh className="animate-spin text-2xl" /> : 'Harvest & Auto-Sync Ledgers'}
