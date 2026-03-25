@@ -16,20 +16,14 @@ import {
 } from 'react-icons/hi';
 import { FaExchangeAlt, FaShoppingBag, FaBullseye, FaWallet, FaCoins } from 'react-icons/fa';
 
-const coingeckoIds = {
-  BTC: 'bitcoin', ETH: 'ethereum', USDT: 'tether', XRP: 'ripple', BNB: 'binancecoin',
-  USDC: 'usd-coin', SOL: 'solana', TRX: 'tron', DOGE: 'dogecoin', BCH: 'bitcoin-cash',
-  ADA: 'cardano', XMR: 'monero', XLM: 'stellar', DAI: 'dai', ZEC: 'zcash',
-  LTC: 'litecoin', SHIB: 'shiba-inu', SUI: 'sui', TON: 'the-open-network', DOT: 'polkadot',
-  PEPE: 'pepe', BGB: 'bitget-token', OKB: 'okb', PI: 'pinetwork', NEAR: 'near',
-  POL: 'polygon-ecosystem-token', GT: 'gatetoken', KCS: 'kucoin-shares', ATOM: 'cosmos',
-  TRUMP: 'maga', ARB: 'arbitrum', BONK: 'bonk', CAKE: 'pancakeswap-token', XTZ: 'tezos',
-  FLOKI: 'floki', OP: 'optimism', TWT: 'trust-wallet-token', JMPT: 'jumptoken',
-  BAT: 'basic-attention-token', MX: 'mx-token', DGB: 'digibyte', CET: 'coinex-token',
-  XYO: 'xyo-network', KAVA: 'kava', AVAX: 'avalanche-2', MEME: 'memecoin', 
-  FEY: 'feyorra', TARA: 'taraxa', DASH: 'dash', FLT: 'fluenc', 
-  WRX: 'wazirx', XSPACE: 'xspace', MARCO: 'marco', ICE: 'ice-decentralized-future'
-};
+// Default DB just in case Context is slow
+const defaultCryptoDatabase = [
+  { id: 'bitcoin', symbol: 'BTC', fallbackPrice: 65000 },
+  { id: 'ethereum', symbol: 'ETH', fallbackPrice: 3500 },
+  { id: 'tether', symbol: 'USDT', fallbackPrice: 1.00 },
+  { id: 'ripple', symbol: 'XRP', fallbackPrice: 0.60 },
+  { id: 'binancecoin', symbol: 'BNB', fallbackPrice: 500 }
+];
 
 const MarketIcon = ({ symbol, apiImage, customLogo }) => {
   const [imgIndex, setImgIndex] = useState(0);
@@ -64,6 +58,9 @@ const HoldAndSwap = () => {
   const [records, setRecords] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // USER CUSTOM COINS STATE (To sync full data including Contract Addresses)
+  const [customUserCoins, setCustomUserCoins] = useState([]);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   
@@ -74,7 +71,7 @@ const HoldAndSwap = () => {
 
   const todayDate = new Date().toISOString().split('T')[0];
 
-  // 🚀 CRASH FIX: Extracting string symbols from object array
+  // 🚀 Extracting string symbols from object array
   const cryptoSymbols = useMemo(() => {
     return selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
   }, [selectedCryptos]);
@@ -106,7 +103,37 @@ const HoldAndSwap = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // 🚀 THE MAGIC: MULTI-TIER PRICE FETCHER (Object Safe)
+  // Fetch Custom User Coins for Contract MetaData
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (!user) return;
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists() && userSnap.data().customCoins) {
+        setCustomUserCoins(userSnap.data().customCoins);
+      }
+    };
+    fetchUserData();
+  }, [user]);
+
+  // Merge Context Selected Cryptos + Custom Coins + Default Database
+  const fullDatabase = useMemo(() => {
+    const coinMap = new Map();
+    defaultCryptoDatabase.forEach(c => coinMap.set(c.symbol.toUpperCase(), c));
+    
+    // Add selected cryptos from context if they are objects
+    selectedCryptos.forEach(c => {
+       if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c);
+    });
+
+    customUserCoins.forEach(c => {
+      const existing = coinMap.get(c.symbol.toUpperCase());
+      coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c, logo: c.logo || existing?.logo });
+    });
+    return Array.from(coinMap.values());
+  }, [customUserCoins, selectedCryptos]);
+
+  // 🚀 REBUILT: HYBRID MULTI-TIER PRICE FETCHER FOR TABLE (CG + GeckoTerminal)
   const fetchTablePrices = async () => {
     const coinsToFetch = [...new Set([...cryptoSymbols, ...records.map(r => r.coin)])];
     if (coinsToFetch.length === 0) return;
@@ -116,45 +143,79 @@ const HoldAndSwap = () => {
       const forexJson = await forexRes.json();
       const userBaseRate = forexJson.rates[baseCurrency] || 1;
 
-      // Safely map IDs from context objects, fallback to coingeckoIds or lowercase string
-      const validIds = coinsToFetch.map(sym => {
-         const obj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === sym.toUpperCase());
-         return obj?.id || coingeckoIds[sym] || sym.toLowerCase();
-      });
-      const uniqueIds = [...new Set(validIds)].join(',');
-      
       let cgJson = {};
-      try {
-        const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${uniqueIds}&vs_currencies=usd`);
-        if (cgRes.ok) cgJson = await cgRes.json();
-      } catch(e) { console.warn("CoinGecko API Limit Reached, falling back..."); }
+      let geckoTerminalData = {};
+      const normalCoins = [];
+      const contractCoins = [];
 
+      // Sort coins based on fetchMode
+      coinsToFetch.forEach(sym => {
+         const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase());
+         if (dbCoin?.fetchMode === 'contract' && dbCoin.network && dbCoin.contractAddress) {
+            contractCoins.push(dbCoin);
+         } else {
+            normalCoins.push(dbCoin?.id || sym.toLowerCase());
+         }
+      });
+
+      // Fetch Normal Coins (CoinGecko)
+      if (normalCoins.length > 0) {
+         try {
+           const ids = [...new Set(normalCoins)].join(',');
+           const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
+           if (cgRes.ok) {
+               cgJson = await cgRes.json();
+           }
+         } catch(e) { console.warn("CoinGecko API blocked or limited"); }
+      }
+
+      // Fetch Custom Contract Coins (GeckoTerminal)
+      for (const customCoin of contractCoins) {
+         try {
+            const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${customCoin.network}/tokens/${customCoin.contractAddress}`);
+            if (gtRes.ok) {
+               const gtJson = await gtRes.json();
+               geckoTerminalData[customCoin.id] = {
+                  usd: parseFloat(gtJson.data.attributes.price_usd)
+               };
+            }
+         } catch (error) { console.warn(`GeckoTerminal failed for ${customCoin.symbol}`); }
+      }
+
+      // Combine Results
       const newPrices = {};
 
       await Promise.all(coinsToFetch.map(async (sym) => {
-        const coinObj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === sym.toUpperCase());
-        const id = coinObj?.id || coingeckoIds[sym] || sym.toLowerCase();
+        const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase()) || {};
+        const searchId = dbCoin.id || sym.toLowerCase();
         
-        // Tier 1: CoinGecko
-        if (cgJson[id] && cgJson[id].usd) {
-          newPrices[sym] = cgJson[id].usd * userBaseRate;
+        let priceInUsd = null;
+
+        if (dbCoin.fetchMode === 'contract') {
+           priceInUsd = geckoTerminalData[searchId]?.usd;
         } else {
-          // Tier 2: Binance Fallback
+           priceInUsd = cgJson[searchId]?.usd;
+        }
+
+        // Binance Fallback
+        if (!priceInUsd) {
           try {
-            const bSym = id === 'tether' ? 'BTCUSDT' : `${sym}USDT`;
+            const bSym = searchId === 'tether' ? 'BTCUSDT' : `${sym.toUpperCase()}USDT`;
             const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
             if (bRes.ok) {
               const bData = await bRes.json();
-              newPrices[sym] = (id === 'tether' ? 1.00 : parseFloat(bData.price)) * userBaseRate;
-            } else {
-              throw new Error("Binance failed");
+              priceInUsd = (searchId === 'tether' ? 1.00 : parseFloat(bData.price));
             }
-          } catch(err) {
-            // Tier 3: Hardcoded Fallback from Context Object
-            if (coinObj && coinObj.fallbackPrice) {
-              newPrices[sym] = coinObj.fallbackPrice * userBaseRate;
-            }
-          }
+          } catch(err) {}
+        }
+
+        // Final Hardcoded Fallback
+        if (!priceInUsd && dbCoin.fallbackPrice) {
+          priceInUsd = dbCoin.fallbackPrice;
+        }
+
+        if (priceInUsd) {
+           newPrices[sym.toUpperCase()] = priceInUsd * userBaseRate;
         }
       }));
 
@@ -168,8 +229,9 @@ const HoldAndSwap = () => {
     if (records.length > 0) fetchTablePrices();
     const interval = setInterval(fetchTablePrices, 60000); 
     return () => clearInterval(interval);
-  }, [cryptoSymbols, records.length, baseCurrency]);
+  }, [cryptoSymbols, records.length, baseCurrency, fullDatabase]);
 
+  // 🚀 REBUILT: HYBRID LIVE PRICE FETCHER FOR FORM
   const fetchLivePriceForForm = async () => {
     if (!formData.coin) return alert("Please select a coin first!");
     setIsFetchingLive(true);
@@ -179,36 +241,49 @@ const HoldAndSwap = () => {
       const userBaseRate = forexJson.rates[baseCurrency] || 1;
 
       const symbol = formData.coin;
-      const coinObj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === symbol.toUpperCase());
-      const id = coinObj?.id || coingeckoIds[symbol] || symbol.toLowerCase();
+      const dbCoin = fullDatabase.find(c => c.symbol === symbol.toUpperCase()) || {};
+      const searchId = dbCoin?.id || symbol.toLowerCase();
       
-      let priceInBase = null;
+      let priceInUsd = null;
 
-      try {
-        const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd`);
-        const cgJson = await cgRes.json();
-        if (cgJson[id] && cgJson[id].usd) priceInBase = cgJson[id].usd * userBaseRate;
-      } catch(e){}
-
-      // Binance Fallback
-      if (!priceInBase) {
+      // 1. Contract Mode (GeckoTerminal)
+      if (dbCoin.fetchMode === 'contract' && dbCoin.network && dbCoin.contractAddress) {
          try {
-           const bSym = id === 'tether' ? 'BTCUSDT' : `${symbol}USDT`;
+            const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${dbCoin.network}/tokens/${dbCoin.contractAddress}`);
+            if (gtRes.ok) {
+               const gtJson = await gtRes.json();
+               priceInUsd = parseFloat(gtJson.data.attributes.price_usd);
+            }
+         } catch(e) {}
+      } 
+      // 2. Normal Mode (CoinGecko)
+      else {
+         try {
+           const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
+           const cgJson = await cgRes.json();
+           if (cgJson[searchId] && cgJson[searchId].usd) priceInUsd = cgJson[searchId].usd;
+         } catch(e){}
+      }
+
+      // 3. Binance Fallback
+      if (!priceInUsd) {
+         try {
+           const bSym = searchId === 'tether' ? 'BTCUSDT' : `${symbol.toUpperCase()}USDT`;
            const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
            if (bRes.ok) {
              const bData = await bRes.json();
-             priceInBase = (id === 'tether' ? 1.00 : parseFloat(bData.price)) * userBaseRate;
+             priceInUsd = (searchId === 'tether' ? 1.00 : parseFloat(bData.price));
            }
          } catch(e){}
       }
 
-      // Hardcoded Fallback
-      if (!priceInBase && coinObj && coinObj.fallbackPrice) {
-         priceInBase = coinObj.fallbackPrice * userBaseRate;
+      // 4. Hardcoded Fallback
+      if (!priceInUsd && dbCoin && dbCoin.fallbackPrice) {
+         priceInUsd = dbCoin.fallbackPrice;
       }
 
-      if (priceInBase) {
-        setFormData(prev => ({ ...prev, entryPrice: priceInBase.toFixed(6) }));
+      if (priceInUsd) {
+        setFormData(prev => ({ ...prev, entryPrice: (priceInUsd * userBaseRate).toFixed(6) }));
       } else {
         alert("Price stuck or not found. Please enter manually.");
       }
@@ -482,7 +557,7 @@ const HoldAndSwap = () => {
                   const ai = getAiSignal(profitPct);
                   
                   // 🚀 Safe Logo Retrieval
-                  const coinObj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === rec.coin.toUpperCase());
+                  const coinObj = fullDatabase.find(c => c.symbol === rec.coin.toUpperCase());
                   const coinLogo = coinObj?.logo || null;
 
                   return (
@@ -565,7 +640,7 @@ const HoldAndSwap = () => {
                   <div className="relative">
                     <div className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 p-1 flex items-center justify-center overflow-hidden z-10 pointer-events-none">
                        {/* 🚀 Safe Modal Icon Mapping */}
-                      <MarketIcon symbol={formData.coin} apiImage={null} customLogo={selectedCryptos.find(c=>(typeof c==='string'?c:c.symbol)===formData.coin)?.logo} />
+                      <MarketIcon symbol={formData.coin} apiImage={null} customLogo={fullDatabase.find(c=>c.symbol===formData.coin)?.logo} />
                     </div>
                     <select required value={formData.coin} onChange={(e) => setFormData({...formData, coin: e.target.value})} className="w-full pl-14 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-black dark:text-white outline-none cursor-pointer appearance-none">
                       {cryptoSymbols.length > 0 ? cryptoSymbols.map(coin => <option key={coin} value={coin}>{coin}</option>) : <option value="BTC">BTC (Default)</option>}
@@ -599,7 +674,7 @@ const HoldAndSwap = () => {
                 
                 {/* 🚀 GLOBAL DATE APPLIED FOR MODAL */}
                 <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1 flex justify-between">
+                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex justify-between ml-1">
                     <span>Date</span>
                     <span className="text-blue-500">{formatGlobalDate ? formatGlobalDate(formData.date, 'short') : ''}</span>
                   </label>

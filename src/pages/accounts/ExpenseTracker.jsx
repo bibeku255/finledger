@@ -19,9 +19,12 @@ const fiatCurrencies = ["USD", "EUR", "GBP", "AUD", "CAD", "SGD", "AED", "SAR", 
 // 🚀 MUST MATCH CRYPTOWALLET PLATFORMS
 const cryptoPlatformsList = [
   "CoinDCX", "WazirX", "ZebPay", "Mudrex", "SunCrypto",
-  "Binance", "Coinbase", "Bybit", "KuCoin", "OKX", "Kraken", "Mexc",
+  "Binance", "Coinbase", "Bybit", "KuCoin", "OKX", "Kraken", "Mexc", "Gate.io",
   "FaucetPay", "Trust Wallet", "MetaMask", "Phantom", "NC Wallet", "Payeer",
-  "Hardware Wallet (Ledger/Trezor)", "Other Wallet"
+  "Hardware Wallet (Ledger/Trezor)", 
+  "CoinPayU", "Cointiply", "FreeBitcoin", "FireFaucet", "PipeFlare", 
+  "GlobalHive", "AdBTC", "Viefaucet", "DutchyCorp", "LarvelFaucet", 
+  "Coinpot", "RollerCoin", "Other Wallet/Site"
 ];
 
 const expenseCategories = [
@@ -59,6 +62,8 @@ const ExpenseTracker = () => {
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
+
+  const [customUserCoins, setCustomUserCoins] = useState([]); // Needed for Contract fetching
   
   const todayDate = new Date().toISOString().split('T')[0];
 
@@ -95,6 +100,32 @@ const ExpenseTracker = () => {
     });
     return () => unsubscribe();
   }, [user]);
+
+  // Fetch Custom User Coins for Contract MetaData
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (!user) return;
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists() && userSnap.data().customCoins) {
+        setCustomUserCoins(userSnap.data().customCoins);
+      }
+    };
+    fetchUserData();
+  }, [user]);
+
+  // Master Merge Engine for Coins
+  const fullDatabase = useMemo(() => {
+    const coinMap = new Map();
+    selectedCryptos.forEach(c => {
+       if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c);
+    });
+    customUserCoins.forEach(c => {
+      const existing = coinMap.get(c.symbol.toUpperCase());
+      coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c });
+    });
+    return Array.from(coinMap.values());
+  }, [customUserCoins, selectedCryptos]);
 
   const activeAssetList = useMemo(() => {
     if (formData.vault === 'crypto') {
@@ -182,6 +213,7 @@ const ExpenseTracker = () => {
     }
   };
 
+  // 🚀 UPDATED HYBRID LIVE RATE FETCHER (GeckoTerminal + CoinGecko + Binance)
   const fetchLiveRate = async (index = null) => {
     const isSingle = index === null;
     const assetToCheck = isSingle ? formData.asset : formData.splitSources[index].asset;
@@ -201,18 +233,34 @@ const ExpenseTracker = () => {
         const data = await res.json();
         finalRate = data.rates[baseCurrency] || 1;
       } else {
-        const coinObj = selectedCryptos.find(c => 
-          (typeof c === 'string' ? c : c.symbol).toUpperCase() === assetToCheck.toUpperCase()
-        );
-        const searchId = coinObj?.id || assetToCheck.toLowerCase();
-
+        // 1. Get full coin object from fullDatabase
+        const coinObj = fullDatabase.find(c => c.symbol === assetToCheck.toUpperCase()) || {};
+        
+        // 2. Identify the search ID
+        const searchId = coinObj.id || assetToCheck.toLowerCase();
         let priceUsd = null;
-        try {
-            const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
-            const cgData = await cgRes.json();
-            if (cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
-        } catch(e) {}
 
+        // 3. Try GeckoTerminal First if it's a Contract Token
+        if (coinObj.fetchMode === 'contract' && coinObj.network && coinObj.contractAddress) {
+           try {
+              const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${coinObj.network}/tokens/${coinObj.contractAddress}`);
+              if (gtRes.ok) {
+                 const gtJson = await gtRes.json();
+                 priceUsd = parseFloat(gtJson.data.attributes.price_usd);
+              }
+           } catch(e) {}
+        } 
+
+        // 4. Try CoinGecko First
+        if (!priceUsd) {
+           try {
+               const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
+               const cgData = await cgRes.json();
+               if (cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
+           } catch(e) { console.warn("CoinGecko API Error"); }
+        }
+
+        // 5. Try Binance Fallback
         if (!priceUsd) {
             try {
                 const binanceSymbol = searchId === 'tether' ? 'BTCUSDT' : `${assetToCheck.toUpperCase()}USDT`;
@@ -221,18 +269,19 @@ const ExpenseTracker = () => {
                     const bData = await bRes.json();
                     priceUsd = searchId === 'tether' ? 1.00 : parseFloat(bData.price);
                 }
-            } catch(e) {}
+            } catch(e) { console.warn("Binance API Error"); }
         }
-        
+
+        // 6. Final Calculation
         const finalPrice = priceUsd || (coinObj?.fallbackPrice || 0);
         finalRate = finalPrice * usdToBase;
       }
 
       if (isSingle) {
-        setFormData(prev => ({ ...prev, exchangeRate: finalRate.toFixed(4) }));
+        setFormData(prev => ({ ...prev, exchangeRate: finalRate.toFixed(6) }));
       } else {
         const updatedSplits = [...formData.splitSources];
-        updatedSplits[index].exchangeRate = finalRate.toFixed(4);
+        updatedSplits[index].exchangeRate = finalRate.toFixed(6);
         setFormData(prev => ({ ...prev, splitSources: updatedSplits }));
       }
     } catch (error) {
@@ -364,8 +413,9 @@ const ExpenseTracker = () => {
     setIsVerifying(true);
     try {
       const userDoc = await getDoc(doc(db, "users", user.uid));
+      const userData = userDoc.data();
       const hashedInput = await hashPIN(pinInput.trim());
-      const storedPin = userDoc.data()?.security?.pinHash || userDoc.data()?.securityPin || userDoc.data()?.pin; 
+      const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin; 
       
       if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) {
         setPinError("Incorrect PIN. Deletion blocked! 🛑");
@@ -850,7 +900,7 @@ const ExpenseTracker = () => {
             
             <form onSubmit={executeSecureDelete} className="space-y-4">
               <div>
-                <input type="password" maxLength={6} required autoFocus value={pinInput} onChange={(e) => setPinInput(e.target.value)} placeholder="Enter 4-Digit PIN" className="w-full text-center tracking-[0.5em] text-2xl p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50" />
+                <input type="password" maxLength={6} required autoFocus value={pinInput} onChange={(e) => setPinInput(e.target.value)} placeholder="Enter 4-Digit PIN" className="w-full text-center tracking-[0.5em] text-2xl p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-all" />
                 {pinError && <p className="text-xs font-bold text-rose-500 text-center animate-bounce mt-2">{pinError}</p>}
               </div>
               <div className="flex gap-3 pt-2">

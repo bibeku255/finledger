@@ -221,6 +221,7 @@ const CryptoWallet = () => {
     return vault;
   }, [transactions]);
 
+  // 🚀 REBUILT: HYBRID SMART FETCHING ENGINE (CG + GeckoTerminal)
   useEffect(() => {
     const fetchLivePrices = async () => {
       setIsMarketSyncing(true);
@@ -232,30 +233,74 @@ const CryptoWallet = () => {
         const coinsToFetch = Array.from(new Set([...Object.keys(holdings), ...cryptoSymbols, 'USDT']));
         
         if (coinsToFetch.length > 0) {
-          const ids = coinsToFetch.map(sym => {
-            const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase());
-            return dbCoin?.id || sym.toLowerCase();
-          }).join(',');
+          
+          let cgJson = {};
+          let geckoTerminalData = {};
+          const normalCoins = [];
+          const contractCoins = [];
 
-          const cgRes = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&sparkline=false`);
-          const cgJson = await cgRes.json();
+          // Sort coins based on fetchMode
+          coinsToFetch.forEach(sym => {
+             const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase());
+             if (dbCoin?.fetchMode === 'contract' && dbCoin.network && dbCoin.contractAddress) {
+                contractCoins.push(dbCoin);
+             } else {
+                normalCoins.push(dbCoin?.id || sym.toLowerCase());
+             }
+          });
 
+          // Fetch Normal Coins (CoinGecko)
+          if (normalCoins.length > 0) {
+             const ids = normalCoins.join(',');
+             const cgRes = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&sparkline=false`);
+             if (cgRes.ok) {
+                 cgJson = await cgRes.json();
+             }
+          }
+
+          // Fetch Custom Contract Coins (GeckoTerminal)
+          for (const customCoin of contractCoins) {
+             try {
+                const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${customCoin.network}/tokens/${customCoin.contractAddress}`);
+                if (gtRes.ok) {
+                   const gtJson = await gtRes.json();
+                   geckoTerminalData[customCoin.id] = {
+                      current_price: parseFloat(gtJson.data.attributes.price_usd),
+                      price_change_percentage_24h: 0 // GT doesn't always provide simple 24h change here
+                   };
+                }
+             } catch (error) { console.warn(`GeckoTerminal failed for ${customCoin.symbol}`); }
+          }
+
+          // Combine results into priceMap
           const priceMap = {};
           coinsToFetch.forEach(sym => {
             const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase()) || {};
-            const liveData = cgJson.find(c => c.id === (dbCoin.id || sym.toLowerCase()));
+            const searchId = dbCoin.id || sym.toLowerCase();
+            
+            let liveData = null;
+            if (dbCoin.fetchMode === 'contract') {
+                liveData = geckoTerminalData[searchId];
+            } else {
+                liveData = cgJson.find(c => c.id === searchId);
+            }
             
             priceMap[sym.toUpperCase()] = {
               priceUSD: liveData?.current_price || dbCoin.fallbackPrice || 0,
               change: liveData?.price_change_percentage_24h || 0
             };
           });
+          
           setLivePrices(priceMap);
         }
       } catch (error) { console.error("Crypto Sync Error"); } finally { setIsMarketSyncing(false); }
     };
 
-    if (!isLoading && fullDatabase.length > 0) fetchLivePrices();
+    if (!isLoading && fullDatabase.length > 0) {
+        fetchLivePrices();
+        const interval = setInterval(fetchLivePrices, 60000); // Also auto-refresh every minute
+        return () => clearInterval(interval);
+    }
   }, [isLoading, holdings, cryptoSymbols, baseCurrency, fullDatabase]);
 
   const totalVaultValue = useMemo(() => {

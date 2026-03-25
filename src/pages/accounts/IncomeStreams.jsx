@@ -59,6 +59,8 @@ const IncomeStreams = () => {
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
 
+  const [customUserCoins, setCustomUserCoins] = useState([]); // For GeckoTerminal data
+
   const todayDate = new Date().toISOString().split('T')[0];
 
   const [formData, setFormData] = useState({
@@ -77,6 +79,32 @@ const IncomeStreams = () => {
     return () => unsubscribe();
   }, [user]);
 
+  // Fetch Custom User Coins for Contract MetaData
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (!user) return;
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists() && userSnap.data().customCoins) {
+        setCustomUserCoins(userSnap.data().customCoins);
+      }
+    };
+    fetchUserData();
+  }, [user]);
+
+  // Master Merge Engine for Coins
+  const fullDatabase = useMemo(() => {
+    const coinMap = new Map();
+    selectedCryptos.forEach(c => {
+       if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c);
+    });
+    customUserCoins.forEach(c => {
+      const existing = coinMap.get(c.symbol.toUpperCase());
+      coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c });
+    });
+    return Array.from(coinMap.values());
+  }, [customUserCoins, selectedCryptos]);
+
   // 🧠 SMART ASSET LIST: Direct object extraction
   const activeAssetList = useMemo(() => {
     if (formData.vault === 'crypto') {
@@ -86,7 +114,7 @@ const IncomeStreams = () => {
     return fiatCurrencies;
   }, [formData.vault, selectedCryptos]);
 
-  // 🚀 UPDATED LIVE RATE FETCHER (100% Crash-Proof & Pegged Safe)
+  // 🚀 UPDATED HYBRID LIVE RATE FETCHER (GeckoTerminal + CoinGecko + Binance)
   const fetchLiveRate = async () => {
     if (formData.asset === baseCurrency) return;
     setIsFetchingRate(true);
@@ -100,36 +128,46 @@ const IncomeStreams = () => {
         const data = await res.json();
         if (data.rates[baseCurrency]) setFormData(prev => ({ ...prev, exchangeRate: data.rates[baseCurrency].toFixed(4) }));
       } else {
-        // 1. Get full coin object from selectedCryptos
-        const coinObj = selectedCryptos.find(c => 
-          (typeof c === 'string' ? c : c.symbol).toUpperCase() === formData.asset.toUpperCase()
-        );
+        // 1. Get full coin object from fullDatabase
+        const coinObj = fullDatabase.find(c => c.symbol === formData.asset.toUpperCase()) || {};
         
-        // 2. Identify the search ID (Crucial for pegged tokens like ROX/CTC -> tether)
-        const searchId = coinObj?.id || formData.asset.toLowerCase();
+        // 2. Identify the search ID
+        const searchId = coinObj.id || formData.asset.toLowerCase();
         let priceUsd = null;
 
-        // 3. Try CoinGecko First
-        try {
-            const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
-            const cgData = await cgRes.json();
-            if (cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
-        } catch(e) { console.warn("CoinGecko API Error", e); }
+        // 3. Try GeckoTerminal First if it's a Contract Token
+        if (coinObj.fetchMode === 'contract' && coinObj.network && coinObj.contractAddress) {
+           try {
+              const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${coinObj.network}/tokens/${coinObj.contractAddress}`);
+              if (gtRes.ok) {
+                 const gtJson = await gtRes.json();
+                 priceUsd = parseFloat(gtJson.data.attributes.price_usd);
+              }
+           } catch(e) {}
+        } 
 
-        // 4. Try Binance Fallback
+        // 4. Try CoinGecko First
+        if (!priceUsd) {
+           try {
+               const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
+               const cgData = await cgRes.json();
+               if (cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
+           } catch(e) { console.warn("CoinGecko API Error"); }
+        }
+
+        // 5. Try Binance Fallback
         if (!priceUsd) {
             try {
-                // If it's a tether pegged coin, just get BTC price to verify Binance is alive, but hardcode $1
                 const binanceSymbol = searchId === 'tether' ? 'BTCUSDT' : `${formData.asset.toUpperCase()}USDT`;
                 const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`);
                 if (bRes.ok) {
                     const bData = await bRes.json();
                     priceUsd = searchId === 'tether' ? 1.00 : parseFloat(bData.price);
                 }
-            } catch(e) { console.warn("Binance API Error", e); }
+            } catch(e) { console.warn("Binance API Error"); }
         }
 
-        // 5. Final Calculation
+        // 6. Final Calculation
         const finalPrice = priceUsd || (coinObj?.fallbackPrice || 0);
         const finalRate = finalPrice * usdToBase;
         

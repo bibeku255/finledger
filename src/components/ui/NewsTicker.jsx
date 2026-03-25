@@ -97,7 +97,6 @@ const NewsTicker = () => {
   const triggerMarketAlert = async (symbol, changePercent) => {
     if (!user) return;
     
-    // We only alert if change is >= 5% or <= -5%
     if (Math.abs(changePercent) < 5) return;
 
     const todayDate = new Date().toISOString().split('T')[0];
@@ -107,7 +106,6 @@ const NewsTicker = () => {
       const notifQ = query(collection(db, "users", user.uid, "notifications"), where("uniqueId", "==", uniqueNotifId));
       const notifSnap = await getDocs(notifQ);
 
-      // If we haven't alerted for this coin today, push a silent notification
       if (notifSnap.empty) {
         const isPump = changePercent >= 5;
         const formattedChange = Math.abs(changePercent).toFixed(1);
@@ -127,6 +125,7 @@ const NewsTicker = () => {
     }
   };
 
+  // 🚀 THE HYBRID FETCHING ENGINE (CoinGecko + GeckoTerminal)
   const fetchMarketData = useCallback(async () => {
     if (selectedCryptos.length === 0 && selectedFiats.length === 0) return;
 
@@ -134,6 +133,7 @@ const NewsTicker = () => {
     let usdToBase = 1;
     let fiatRates = {};
 
+    // 1. Fetch Forex Rates
     try {
       const forexRes = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
       if (forexRes.ok) {
@@ -143,27 +143,69 @@ const NewsTicker = () => {
       }
     } catch (error) { console.warn("Forex API Error."); }
 
+    // 2. Fetch Crypto Data
     if (selectedCryptos.length > 0) {
       let cgJson = {};
+      let geckoTerminalData = {}; // Store custom token data here
+      
+      // Separate normal coins (CoinGecko) and Custom Contracts (GeckoTerminal)
+      const normalCoins = [];
+      const contractCoins = [];
+
+      selectedCryptos.forEach(c => {
+        if (typeof c === 'string') {
+           normalCoins.push(c.toLowerCase());
+        } else if (c.fetchMode === 'contract' && c.network && c.contractAddress) {
+           contractCoins.push(c);
+        } else {
+           normalCoins.push(c.id || c.symbol.toLowerCase());
+        }
+      });
+
+      // --- A: FETCH NORMAL COINS FROM COINGECKO ---
       try {
-        const ids = selectedCryptos.map(c => {
-            if (typeof c === 'string') return c.toLowerCase();
-            return c.id || c.symbol.toLowerCase();
-        }).filter(Boolean);
-
-        const uniqueIds = [...new Set(ids)].join(',');
-
-        const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${uniqueIds}&vs_currencies=usd&include_24hr_change=true`);
-        if (cgRes.ok) cgJson = await cgRes.json();
+        if (normalCoins.length > 0) {
+          const uniqueIds = [...new Set(normalCoins)].join(',');
+          const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${uniqueIds}&vs_currencies=usd&include_24hr_change=true`);
+          if (cgRes.ok) cgJson = await cgRes.json();
+        }
       } catch (error) { console.warn("CoinGecko API blocked or failed."); }
 
+      // --- B: FETCH CUSTOM CONTRACTS FROM GECKOTERMINAL ---
+      // Note: We loop through them. (GeckoTerminal has limits, so we handle failures gracefully)
+      for (const customCoin of contractCoins) {
+        try {
+          const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${customCoin.network}/tokens/${customCoin.contractAddress}`);
+          if (gtRes.ok) {
+            const gtJson = await gtRes.json();
+            geckoTerminalData[customCoin.id] = {
+              usd: parseFloat(gtJson.data.attributes.price_usd),
+              usd_24h_change: 0 // GeckoTerminal token API doesn't always give simple 24h change, so we default to 0 to avoid crashes
+            };
+          }
+        } catch (error) { console.warn(`GeckoTerminal failed for ${customCoin.symbol}`); }
+      }
+
+      // --- C: COMPILE FINAL DATA ---
       const newCryptoData = await Promise.all(selectedCryptos.map(async (coinInfo) => {
         const upperSym = typeof coinInfo === 'string' ? coinInfo.toUpperCase() : coinInfo.symbol.toUpperCase();
         const searchId = typeof coinInfo === 'string' ? coinInfo.toLowerCase() : (coinInfo.id || upperSym.toLowerCase());
+        const isContractMode = coinInfo.fetchMode === 'contract';
         
-        let priceUsd = cgJson[searchId]?.usd;
-        let changePercent = cgJson[searchId]?.usd_24h_change || 0;
+        let priceUsd = 0;
+        let changePercent = 0;
 
+        if (isContractMode && geckoTerminalData[searchId]) {
+            // Live Price from GeckoTerminal
+            priceUsd = geckoTerminalData[searchId].usd;
+            changePercent = geckoTerminalData[searchId].usd_24h_change;
+        } else if (!isContractMode) {
+            // Live Price from CoinGecko
+            priceUsd = cgJson[searchId]?.usd;
+            changePercent = cgJson[searchId]?.usd_24h_change || 0;
+        }
+
+        // --- D: FALLBACK TO BINANCE OR DEFAULT PRICE ---
         if (!priceUsd) {
           try {
             const fetchSym = searchId === 'tether' ? 'BTC' : upperSym; 
@@ -176,10 +218,10 @@ const NewsTicker = () => {
           } catch(e) {}
         }
 
+        // Final safe price (Uses live if available, otherwise uses the fallback price you manually typed)
         const finalPriceUsd = priceUsd || (typeof coinInfo === 'object' ? coinInfo.fallbackPrice : 0) || 0;
         const priceInBase = finalPriceUsd * usdToBase;
 
-        // 🚀 TRIGGER SILENT MARKET ALERT
         if (changePercent !== 0) {
           triggerMarketAlert(upperSym, changePercent);
         }
@@ -221,6 +263,7 @@ const NewsTicker = () => {
 
   useEffect(() => {
     fetchMarketData(); 
+    // Auto Refresh Every 60 Seconds
     const interval = setInterval(fetchMarketData, 60000); 
     return () => clearInterval(interval); 
   }, [fetchMarketData]);

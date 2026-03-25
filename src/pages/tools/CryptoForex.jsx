@@ -2,9 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { 
   HiOutlineRefresh, HiOutlineSwitchVertical, HiOutlineCalculator, 
-  HiOutlineCurrencyDollar, HiOutlineTrendingUp 
+  HiOutlineTrendingUp 
 } from 'react-icons/hi';
-import { FaExchangeAlt, FaBitcoin, FaWallet } from 'react-icons/fa';
+import { FaExchangeAlt, FaBitcoin } from 'react-icons/fa';
 
 // 🚀 Mapping for Forex Flags & Names
 const fiatCurrencies = [
@@ -71,24 +71,48 @@ const CryptoForex = () => {
 
       // 1. Fetch Fiat Rates (Base USD)
       const fiatRes = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
-      const fiatData = await fiatRes.json();
-      fiatCurrencies.forEach(fiat => {
-        if (fiatData.rates[fiat.symbol]) {
-          newRates[fiat.symbol] = 1 / fiatData.rates[fiat.symbol]; 
+      if (fiatRes.ok) {
+         const fiatData = await fiatRes.json();
+         fiatCurrencies.forEach(fiat => {
+           if (fiatData.rates[fiat.symbol]) {
+             newRates[fiat.symbol] = 1 / fiatData.rates[fiat.symbol]; 
+           }
+         });
+      }
+
+      // 2. Fetch Crypto Rates (Hybrid CG + GeckoTerminal)
+      const normalCoins = [];
+      const contractCoins = [];
+
+      activeCryptos.forEach(sym => {
+        const obj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === sym.toUpperCase()) || {};
+        if (obj.fetchMode === 'contract' && obj.network && obj.contractAddress) {
+           contractCoins.push({ ...obj, symbol: sym.toUpperCase() });
+        } else {
+           normalCoins.push({ symbol: sym.toUpperCase(), id: obj.id || defaultCryptoDatabase[sym.toUpperCase()]?.id || sym.toLowerCase(), fallbackPrice: obj.fallbackPrice || defaultCryptoDatabase[sym.toUpperCase()]?.fallbackPrice || 0 });
         }
       });
 
-      // 2. Fetch Crypto Rates
-      const cgIds = activeCryptos.map(sym => {
-        const obj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === sym.toUpperCase());
-        return obj?.id || defaultCryptoDatabase[sym]?.id || sym.toLowerCase();
-      }).join(',');
-
       let cgJson = {};
-      try {
-        const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${cgIds}&vs_currencies=usd`);
-        if (cgRes.ok) cgJson = await cgRes.json();
-      } catch (e) { console.warn("CoinGecko API limit, utilizing fallbacks."); }
+      let geckoTerminalData = {};
+
+      if (normalCoins.length > 0) {
+        const cgIds = [...new Set(normalCoins.map(c => c.id))].join(',');
+        try {
+          const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${cgIds}&vs_currencies=usd`);
+          if (cgRes.ok) cgJson = await cgRes.json();
+        } catch (e) { console.warn("CoinGecko API limit, utilizing fallbacks."); }
+      }
+
+      for (const c of contractCoins) {
+        try {
+           const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${c.network}/tokens/${c.contractAddress}`);
+           if (gtRes.ok) {
+              const gtJson = await gtRes.json();
+              geckoTerminalData[c.id || c.symbol.toLowerCase()] = parseFloat(gtJson.data.attributes.price_usd);
+           }
+        } catch (error) {}
+      }
 
       await Promise.all(activeCryptos.map(async (sym) => {
         const upperSym = sym.toUpperCase();
@@ -98,8 +122,10 @@ const CryptoForex = () => {
 
         let priceUsd = null;
 
-        if (cgJson[searchId]?.usd) {
-          priceUsd = parseFloat(cgJson[searchId].usd);
+        if (obj.fetchMode === 'contract') {
+           priceUsd = geckoTerminalData[searchId];
+        } else {
+           if (cgJson[searchId]?.usd) priceUsd = parseFloat(cgJson[searchId].usd);
         }
 
         // Binance Fallback
@@ -132,7 +158,7 @@ const CryptoForex = () => {
 
   useEffect(() => {
     fetchAllRates();
-    const interval = setInterval(fetchAllRates, 120000);
+    const interval = setInterval(fetchAllRates, 60000); // Fast 60s refresh
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCryptos, baseCurrency]);

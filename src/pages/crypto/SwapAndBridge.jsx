@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
-// 🚀 FIXED: Changed updateDoc to setDoc for safety
+// 🚀 FIXED: Added setDoc for safe updates
 import { collection, addDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDocs, where, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 
@@ -84,6 +84,8 @@ const SwapAndBridge = () => {
   const [livePrices, setLivePrices] = useState({});
   const [fiatRate, setFiatRate] = useState(1);
 
+  const [customUserCoins, setCustomUserCoins] = useState([]);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   
@@ -127,7 +129,36 @@ const SwapAndBridge = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // 🚀 SMART PRICE FETCHER (Object Safe)
+  // Fetch Custom User Coins for Contract MetaData
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (!user) return;
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists() && userSnap.data().customCoins) {
+        setCustomUserCoins(userSnap.data().customCoins);
+      }
+    };
+    fetchUserData();
+  }, [user]);
+
+  // Master Merge Engine
+  const fullDatabase = useMemo(() => {
+    const coinMap = new Map();
+    defaultCryptoDatabase.forEach(c => coinMap.set(c.symbol.toUpperCase(), c));
+    
+    selectedCryptos.forEach(c => {
+       if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c);
+    });
+
+    customUserCoins.forEach(c => {
+      const existing = coinMap.get(c.symbol.toUpperCase());
+      coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c, logo: c.logo || existing?.logo });
+    });
+    return Array.from(coinMap.values());
+  }, [customUserCoins, selectedCryptos]);
+
+  // 🚀 REBUILT: HYBRID SMART PRICE FETCHER (Object Safe)
   useEffect(() => {
     const fetchLivePrices = async () => {
       try {
@@ -136,37 +167,63 @@ const SwapAndBridge = () => {
         const userBaseRate = fiatData.rates[baseCurrency] || 1;
         setFiatRate(userBaseRate);
 
-        const coinsToFetch = Array.from(new Set([...activeCryptos, 'USDT', formData.fromCoin, formData.toCoin, formData.bridgeCoin]));
+        const coinsToFetch = Array.from(new Set([...activeCryptos, 'USDT', formData.fromCoin, formData.toCoin, formData.bridgeCoin])).filter(Boolean);
         
-        // Map to correct CoinGecko IDs using context objects first, then fallback to default DB
-        const ids = coinsToFetch.map(sym => {
-           const obj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === sym.toUpperCase());
-           const fallback = defaultCryptoDatabase.find(c => c.symbol === sym.toUpperCase());
-           return obj?.id || fallback?.id || sym.toLowerCase();
-        }).join(',');
-        
+        if (coinsToFetch.length === 0) return;
+
         let cgJson = {};
-        try {
-          const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
-          if (cgRes.ok) cgJson = await cgRes.json();
-        } catch(e) { console.warn("API Rate Limit, using fallbacks"); }
+        let geckoTerminalData = {};
+        const normalCoins = [];
+        const contractCoins = [];
+
+        coinsToFetch.forEach(sym => {
+           const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase());
+           if (dbCoin?.fetchMode === 'contract' && dbCoin.network && dbCoin.contractAddress) {
+              contractCoins.push(dbCoin);
+           } else {
+              normalCoins.push(dbCoin?.id || sym.toLowerCase());
+           }
+        });
+
+        // 1. Fetch Normal Coins (CoinGecko)
+        if (normalCoins.length > 0) {
+           try {
+             const ids = [...new Set(normalCoins)].join(',');
+             const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
+             if (cgRes.ok) cgJson = await cgRes.json();
+           } catch(e) { console.warn("API Rate Limit"); }
+        }
+
+        // 2. Fetch Custom Contract Coins (GeckoTerminal)
+        for (const customCoin of contractCoins) {
+           try {
+              const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${customCoin.network}/tokens/${customCoin.contractAddress}`);
+              if (gtRes.ok) {
+                 const gtJson = await gtRes.json();
+                 geckoTerminalData[customCoin.id] = {
+                    usd: parseFloat(gtJson.data.attributes.price_usd)
+                 };
+              }
+           } catch (error) {}
+        }
         
         const priceMap = {};
         
         await Promise.all(coinsToFetch.map(async (sym) => {
           const upperSym = sym.toUpperCase();
-          const obj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === upperSym) || {};
-          const fallback = defaultCryptoDatabase.find(c => c.symbol === upperSym) || {};
-          const searchId = obj.id || fallback.id || sym.toLowerCase();
+          const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || {};
+          const searchId = dbCoin.id || sym.toLowerCase();
 
           let priceUsd = null;
 
-          if (cgJson[searchId]?.usd) {
-             priceUsd = parseFloat(cgJson[searchId].usd);
+          if (dbCoin.fetchMode === 'contract') {
+              priceUsd = geckoTerminalData[searchId]?.usd;
+          } else {
+              priceUsd = cgJson[searchId]?.usd;
           }
 
           // Binance Fallback
-          if (priceUsd === null || isNaN(priceUsd) || priceUsd === 0) {
+          if (!priceUsd) {
             try {
               const bSym = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
               const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
@@ -177,27 +234,26 @@ const SwapAndBridge = () => {
             } catch(e) {}
           }
 
-          if (priceUsd === null || isNaN(priceUsd) || priceUsd === 0) {
-              priceUsd = parseFloat(obj.fallbackPrice || fallback.fallbackPrice || 0);
+          if (!priceUsd && dbCoin.fallbackPrice) {
+              priceUsd = dbCoin.fallbackPrice;
           }
           
-          priceMap[upperSym] = priceUsd;
+          if(priceUsd) priceMap[upperSym] = priceUsd;
         }));
 
         setLivePrices(priceMap);
       } catch (error) { console.error("Crypto Sync Error"); }
     };
     fetchLivePrices();
-  }, [activeCryptos, baseCurrency, formData.fromCoin, formData.toCoin, formData.bridgeCoin, selectedCryptos]);
+  }, [activeCryptos, baseCurrency, formData.fromCoin, formData.toCoin, formData.bridgeCoin, fullDatabase]);
 
   // 🚀 INSTANT PRICE RESOLVER
   const getLivePrice = (symbol) => {
     if (livePrices[symbol]) return livePrices[symbol] * fiatRate; 
     
     // Final hard fallback
-    const obj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === symbol);
-    const dbCoin = defaultCryptoDatabase.find(c => c.symbol === symbol);
-    const fallbackP = obj?.fallbackPrice || dbCoin?.fallbackPrice || 0;
+    const dbCoin = fullDatabase.find(c => c.symbol === symbol.toUpperCase());
+    const fallbackP = dbCoin?.fallbackPrice || 0;
     
     return fallbackP * fiatRate;
   };
@@ -522,8 +578,8 @@ const SwapAndBridge = () => {
               {filteredLogs.map((rec) => {
                 
                 // 🚀 Safe Logo Retrieval for Table
-                const fromCoinObj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === (rec.actionType === 'swap' ? rec.fromCoin : rec.bridgeCoin).toUpperCase());
-                const toCoinObj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === (rec.actionType === 'swap' ? rec.toCoin : rec.bridgeCoin).toUpperCase());
+                const fromCoinObj = fullDatabase.find(c => c.symbol === (rec.actionType === 'swap' ? rec.fromCoin : rec.bridgeCoin).toUpperCase());
+                const toCoinObj = fullDatabase.find(c => c.symbol === (rec.actionType === 'swap' ? rec.toCoin : rec.bridgeCoin).toUpperCase());
 
                 return (
                 <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
-import { collection, onSnapshot, query } from 'firebase/firestore';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -10,13 +10,13 @@ import {
   HiOutlineChartPie, HiOutlineTrendingUp, HiOutlineTrendingDown, 
   HiOutlineCash, HiOutlineRefresh 
 } from 'react-icons/hi';
-import { FaWallet, FaBitcoin, FaPiggyBank, FaUniversity, FaMoneyBillWave } from 'react-icons/fa';
+import { FaWallet, FaPiggyBank } from 'react-icons/fa';
 
 const COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#f43f5e'];
 
 const Analytics = () => {
   // 🚀 ENGINE CONNECTED: Global Date Formatter
-  const { user, baseCurrency = 'USD', formatGlobalDate } = useAuth();
+  const { user, baseCurrency = 'USD', selectedCryptos = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
 
   const [isLoading, setIsLoading] = useState(true);
@@ -24,7 +24,13 @@ const Analytics = () => {
   // 🚀 Real-time State Arrays
   const [incomes, setIncomes] = useState([]);
   const [expenses, setExpenses] = useState([]);
-  const [balances, setBalances] = useState({ bank: 0, cash: 0, online: 0, crypto: 0 });
+  const [balances, setBalances] = useState({ bank: 0, cash: 0, online: 0 });
+
+  // Crypto specific tracking states
+  const [cryptoTransactions, setCryptoTransactions] = useState([]);
+  const [livePrices, setLivePrices] = useState({});
+  const [fiatRate, setFiatRate] = useState(1);
+  const [customUserCoins, setCustomUserCoins] = useState([]);
 
   // 🚀 1. SECURE REAL-TIME DATA FETCHER
   useEffect(() => {
@@ -45,7 +51,6 @@ const Analytics = () => {
       loadedStatus.exp = true; checkLoading();
     });
 
-    // Vault Balance Calculators
     const calcBal = (snap) => snap.docs.reduce((acc, doc) => {
       const d = doc.data();
       const amt = Number(d.finalBaseAmount || d.amount || 0);
@@ -68,20 +73,153 @@ const Analytics = () => {
     });
 
     const unsubCrypto = onSnapshot(collection(db, "users", user.uid, "cryptoWalletLogs"), snap => {
-      // For Crypto, we calculate total historical base investment 
-      let totalCryptoInvested = 0;
-      snap.docs.forEach(doc => {
-         const d = doc.data();
-         if (d.finalBaseAmount) {
-             totalCryptoInvested += (d.type === 'in' ? Number(d.finalBaseAmount) : -Number(d.finalBaseAmount));
-         }
-      });
-      setBalances(p => ({ ...p, crypto: totalCryptoInvested }));
+      setCryptoTransactions(snap.docs.map(d => d.data()));
       loadedStatus.cry = true; checkLoading();
     });
 
-    return () => { unsubInc(); unsubExp(); unsubBank(); unsubCash(); unsubOnline(); unsubCrypto(); };
+    const unsubUser = onSnapshot(doc(db, "users", user.uid), snap => {
+       if (snap.exists() && snap.data().customCoins) {
+         setCustomUserCoins(snap.data().customCoins);
+       }
+    });
+
+    return () => { unsubInc(); unsubExp(); unsubBank(); unsubCash(); unsubOnline(); unsubCrypto(); unsubUser(); };
   }, [user]);
+
+  // 🚀 LIVE CRYPTO VALUATION ENGINE
+  const cryptoHoldings = useMemo(() => {
+    const vault = {};
+    cryptoTransactions.forEach(t => {
+      if (!vault[t.coin]) vault[t.coin] = 0;
+      const qty = parseFloat(t.quantity) || 0;
+      const fee = parseFloat(t.networkFee) || 0;
+      
+      if (t.type === 'in') vault[t.coin] += qty;
+      else if (t.type === 'out') vault[t.coin] -= qty;
+      else if (t.type === 'transfer') vault[t.coin] -= fee;
+    });
+    
+    // Clean dust
+    Object.keys(vault).forEach(coin => {
+      if (vault[coin] <= 0.000001) delete vault[coin];
+    });
+    return vault;
+  }, [cryptoTransactions]);
+
+  const cryptoSymbols = useMemo(() => selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean), [selectedCryptos]);
+
+  // Merge Context Selected Cryptos + Custom Coins
+  const fullDatabase = useMemo(() => {
+    const coinMap = new Map();
+    selectedCryptos.forEach(c => {
+       if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c);
+    });
+    customUserCoins.forEach(c => {
+      const existing = coinMap.get(c.symbol.toUpperCase());
+      coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c });
+    });
+    return Array.from(coinMap.values());
+  }, [customUserCoins, selectedCryptos]);
+
+  useEffect(() => {
+    const fetchLivePrices = async () => {
+      try {
+        const fiatRes = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+        const fiatData = await fiatRes.json();
+        const userBaseRate = fiatData.rates[baseCurrency] || 1;
+        setFiatRate(userBaseRate);
+
+        const coinsToFetch = Array.from(new Set([...Object.keys(cryptoHoldings), ...cryptoSymbols])).filter(Boolean);
+        if (coinsToFetch.length === 0) return;
+
+        let cgJson = {};
+        let geckoTerminalData = {};
+        const normalCoins = [];
+        const contractCoins = [];
+
+        coinsToFetch.forEach(sym => {
+           const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase());
+           if (dbCoin?.fetchMode === 'contract' && dbCoin.network && dbCoin.contractAddress) {
+              contractCoins.push(dbCoin);
+           } else {
+              normalCoins.push(dbCoin?.id || sym.toLowerCase());
+           }
+        });
+
+        // 1. Fetch Normal Coins (CoinGecko)
+        if (normalCoins.length > 0) {
+           try {
+             const ids = [...new Set(normalCoins)].join(',');
+             const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
+             if (cgRes.ok) {
+                 cgJson = await cgRes.json();
+             }
+           } catch(e) { console.warn("CoinGecko API Limit Reached"); }
+        }
+
+        // 2. Fetch Custom Contract Coins (GeckoTerminal)
+        for (const customCoin of contractCoins) {
+           try {
+              const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${customCoin.network}/tokens/${customCoin.contractAddress}`);
+              if (gtRes.ok) {
+                 const gtJson = await gtRes.json();
+                 geckoTerminalData[customCoin.id] = { usd: parseFloat(gtJson.data.attributes.price_usd) };
+              }
+           } catch (error) {}
+        }
+
+        const priceMap = {};
+        
+        await Promise.all(coinsToFetch.map(async (sym) => {
+          const upperSym = sym.toUpperCase();
+          const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || {};
+          const searchId = dbCoin.id || sym.toLowerCase();
+          
+          let priceUsd = null;
+
+          if (dbCoin.fetchMode === 'contract') {
+              priceUsd = geckoTerminalData[searchId]?.usd;
+          } else {
+              priceUsd = cgJson[searchId]?.usd;
+          }
+
+          // Binance Fallback
+          if (!priceUsd) {
+            try {
+              const bSym = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
+              const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
+              if (bRes.ok) {
+                 const bData = await bRes.json();
+                 priceUsd = searchId === 'tether' ? 1.00 : parseFloat(bData.price);
+              }
+            } catch(e) {}
+          }
+
+          if (!priceUsd && dbCoin.fallbackPrice) {
+              priceUsd = dbCoin.fallbackPrice;
+          }
+          
+          if(priceUsd) {
+             priceMap[upperSym] = priceUsd * userBaseRate;
+          }
+        }));
+
+        setLivePrices(priceMap);
+      } catch (error) {}
+    };
+    if (!isLoading) {
+       fetchLivePrices();
+       const interval = setInterval(fetchLivePrices, 120000); // 2 Min Refresh for Analytics
+       return () => clearInterval(interval);
+    }
+  }, [isLoading, cryptoHoldings, cryptoSymbols, baseCurrency, fullDatabase]);
+
+  const totalCryptoLiveValue = useMemo(() => {
+    return Object.entries(cryptoHoldings).reduce((total, [coin, qty]) => {
+      const priceBase = livePrices[coin.toUpperCase()] || 0;
+      return total + (qty * priceBase);
+    }, 0);
+  }, [cryptoHoldings, livePrices]);
 
   // 🚀 2. DYNAMIC METRICS CALCULATOR
   const { metrics, cashFlowData, assetAllocation } = useMemo(() => {
@@ -120,7 +258,7 @@ const Analytics = () => {
       .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
       .slice(-6) // Last 6 active months
       .map(item => ({
-        name: item.monthName, // This will now inject 'Falgun 2082' natively into Recharts
+        name: item.monthName,
         Income: item.Income,
         Expense: item.Expense
       }));
@@ -130,7 +268,7 @@ const Analytics = () => {
       { name: 'Bank Ledger', value: Math.max(0, balances.bank) },
       { name: 'Physical Cash', value: Math.max(0, balances.cash) },
       { name: 'E-Wallets', value: Math.max(0, balances.online) },
-      { name: 'Crypto Holdings', value: Math.max(0, balances.crypto) }
+      { name: 'Crypto Holdings', value: Math.max(0, totalCryptoLiveValue) }
     ].filter(asset => asset.value > 0);
 
     return {
@@ -138,7 +276,7 @@ const Analytics = () => {
       cashFlowData: sortedCashFlow,
       assetAllocation: realAssetAllocation
     };
-  }, [incomes, expenses, balances, formatGlobalDate]);
+  }, [incomes, expenses, balances, totalCryptoLiveValue, formatGlobalDate]);
 
   const savingsRate = metrics.totalIncome > 0 ? ((metrics.netSavings / metrics.totalIncome) * 100).toFixed(1) : 0;
 

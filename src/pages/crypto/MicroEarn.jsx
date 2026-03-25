@@ -36,7 +36,7 @@ const popularCryptoWallets = [
 ];
 
 // Crypto Database (Fallback if objects are missing info)
-const cryptoDatabase = [
+const defaultCryptoDatabase = [
   { id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', color: 'text-orange-500', bg: 'bg-orange-500/10' },
   { id: 'ethereum', symbol: 'ETH', name: 'Ethereum', color: 'text-blue-500', bg: 'bg-blue-500/10' },
   { id: 'tether', symbol: 'USDT', name: 'Tether', color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
@@ -95,6 +95,8 @@ const MicroEarn = () => {
   const [livePrices, setLivePrices] = useState({});
   const [fiatRate, setFiatRate] = useState(1);
 
+  const [customUserCoins, setCustomUserCoins] = useState([]); // Needed for Contract fetching
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [isCustomPlatform, setIsCustomPlatform] = useState(false);
@@ -134,7 +136,36 @@ const MicroEarn = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // Live Price Fetcher (Safe Version)
+  // Fetch Custom User Coins for Contract MetaData
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (!user) return;
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists() && userSnap.data().customCoins) {
+        setCustomUserCoins(userSnap.data().customCoins);
+      }
+    };
+    fetchUserData();
+  }, [user]);
+
+  // Master Merge Engine
+  const fullDatabase = useMemo(() => {
+    const coinMap = new Map();
+    defaultCryptoDatabase.forEach(c => coinMap.set(c.symbol.toUpperCase(), c));
+    
+    selectedCryptos.forEach(c => {
+       if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c);
+    });
+
+    customUserCoins.forEach(c => {
+      const existing = coinMap.get(c.symbol.toUpperCase());
+      coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c, logo: c.logo || existing?.logo });
+    });
+    return Array.from(coinMap.values());
+  }, [customUserCoins, selectedCryptos]);
+
+  // 🚀 REBUILT: HYBRID MULTI-TIER PRICE FETCHER (CG + GeckoTerminal)
   useEffect(() => {
     const fetchLivePrices = async () => {
       try {
@@ -143,55 +174,84 @@ const MicroEarn = () => {
         setFiatRate(fiatData.rates[baseCurrency] || 1);
 
         const coinsToFetch = Array.from(new Set([...transactions.map(t => t.coin), ...cryptoSymbols, 'USDT']));
+        
         if (coinsToFetch.length > 0) {
           
-          // Safe ID extraction
-          const validIds = coinsToFetch.map(sym => {
-            const obj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === sym.toUpperCase());
-            const dbCoin = cryptoDatabase.find(c => c.symbol === sym);
-            return obj?.id || dbCoin?.id || sym.toLowerCase();
-          });
-          const uniqueIds = [...new Set(validIds)].join(',');
-
           let cgJson = {};
-          try {
-            const cgRes = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${uniqueIds}&sparkline=false`);
-            if (cgRes.ok) {
-              const cgArr = await cgRes.json();
-              cgArr.forEach(c => { cgJson[c.id] = c; });
-            }
-          } catch(e) { console.warn("CoinGecko API blocked, using binance/fallbacks"); }
+          let geckoTerminalData = {};
+          const normalCoins = [];
+          const contractCoins = [];
+
+          coinsToFetch.forEach(sym => {
+             const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase());
+             if (dbCoin?.fetchMode === 'contract' && dbCoin.network && dbCoin.contractAddress) {
+                contractCoins.push(dbCoin);
+             } else {
+                normalCoins.push(dbCoin?.id || sym.toLowerCase());
+             }
+          });
+
+          // 1. Fetch Normal Coins (CoinGecko)
+          if (normalCoins.length > 0) {
+             try {
+               const ids = [...new Set(normalCoins)].join(',');
+               const cgRes = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&sparkline=false`);
+               if (cgRes.ok) {
+                   const cgArr = await cgRes.json();
+                   cgArr.forEach(c => { cgJson[c.id] = c; });
+               }
+             } catch(e) { console.warn("CoinGecko API Limit Reached"); }
+          }
+
+          // 2. Fetch Custom Contract Coins (GeckoTerminal)
+          for (const customCoin of contractCoins) {
+             try {
+                const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${customCoin.network}/tokens/${customCoin.contractAddress}`);
+                if (gtRes.ok) {
+                   const gtJson = await gtRes.json();
+                   geckoTerminalData[customCoin.id] = {
+                      current_price: parseFloat(gtJson.data.attributes.price_usd),
+                      image: gtJson.data.attributes.image_url
+                   };
+                }
+             } catch (error) { console.warn(`GeckoTerminal failed for ${customCoin.symbol}`); }
+          }
           
           const priceMap = {};
 
           await Promise.all(coinsToFetch.map(async (sym) => {
-            const coinObj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === sym.toUpperCase()) || {};
-            const dbCoin = cryptoDatabase.find(c => c.symbol === sym) || {};
-            const id = coinObj.id || dbCoin.id || sym.toLowerCase();
+            const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase()) || {};
+            const id = dbCoin.id || sym.toLowerCase();
 
             let finalUsdPrice = 0;
             let finalImage = null;
 
-            if (cgJson[id]) {
-                finalUsdPrice = cgJson[id].current_price;
-                finalImage = cgJson[id].image;
+            if (dbCoin.fetchMode === 'contract') {
+                finalUsdPrice = geckoTerminalData[id]?.current_price || dbCoin.fallbackPrice || 0;
+                finalImage = geckoTerminalData[id]?.image || dbCoin.logo;
             } else {
-                try {
-                  const bSym = id === 'tether' ? 'BTCUSDT' : `${sym.toUpperCase()}USDT`;
-                  const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
-                  if (bRes.ok) {
-                    const bData = await bRes.json();
-                    finalUsdPrice = id === 'tether' ? 1.00 : parseFloat(bData.price);
-                  }
-                } catch(err) {
-                    finalUsdPrice = coinObj.fallbackPrice || dbCoin.fallbackPrice || 0;
+                if (cgJson[id]) {
+                    finalUsdPrice = cgJson[id].current_price;
+                    finalImage = cgJson[id].image;
+                } else {
+                    // Binance Fallback
+                    try {
+                      const bSym = id === 'tether' ? 'BTCUSDT' : `${sym.toUpperCase()}USDT`;
+                      const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
+                      if (bRes.ok) {
+                        const bData = await bRes.json();
+                        finalUsdPrice = id === 'tether' ? 1.00 : parseFloat(bData.price);
+                      }
+                    } catch(err) {
+                        finalUsdPrice = dbCoin.fallbackPrice || 0;
+                    }
                 }
             }
 
-            priceMap[sym] = {
+            priceMap[sym.toUpperCase()] = {
               priceUSD: finalUsdPrice,
               image: finalImage,
-              customLogo: coinObj.logo || dbCoin.logo,
+              customLogo: dbCoin.logo,
             };
           }));
 
@@ -199,8 +259,13 @@ const MicroEarn = () => {
         }
       } catch (error) { console.error("Crypto Sync Error"); }
     };
-    if (!isLoading) fetchLivePrices();
-  }, [isLoading, transactions, cryptoSymbols, baseCurrency, selectedCryptos]);
+    
+    if (!isLoading && fullDatabase.length > 0) {
+        fetchLivePrices();
+        const interval = setInterval(fetchLivePrices, 60000); // 60s Refresh
+        return () => clearInterval(interval);
+    }
+  }, [isLoading, transactions, cryptoSymbols, baseCurrency, fullDatabase]);
 
   // 🚀 THE MAGIC: FULLY DYNAMIC LIVE RANKING ENGINE
   const platformRankings = useMemo(() => {
@@ -215,10 +280,10 @@ const MicroEarn = () => {
       
       const rQty = parseFloat(t.receivedAmount) || 0;
       stats[plat].withdrawCount += 1;
-      stats[plat].coins.add(t.coin);
+      stats[plat].coins.add(t.coin.toUpperCase());
       
       // Store raw quantity for LIVE calculation
-      stats[plat].coinQuantities[t.coin] = (stats[plat].coinQuantities[t.coin] || 0) + rQty;
+      stats[plat].coinQuantities[t.coin.toUpperCase()] = (stats[plat].coinQuantities[t.coin.toUpperCase()] || 0) + rQty;
     });
 
     // 🚀 CALCULATE LIVE VALUE FOR EACH PLATFORM
@@ -286,7 +351,7 @@ const MicroEarn = () => {
       platformGroups[plat].lastDate = t.date;
       
       // Calculate individual transaction live value vs recorded value
-      const coinPriceUSD = livePrices[t.coin]?.priceUSD || 0;
+      const coinPriceUSD = livePrices[t.coin.toUpperCase()]?.priceUSD || 0;
       const currentLiveBaseAmount = (parseFloat(t.receivedAmount) || 0) * coinPriceUSD * fiatRate;
       
       processedLogs.push({ ...t, daysSinceLast, currentLiveBaseAmount });
@@ -366,7 +431,7 @@ const MicroEarn = () => {
     const timestamp = editingId ? transactions.find(t => t.id === editingId)?.timestamp : new Date(formData.date).getTime();
     const uniqueId = formData.linkedRecordId || `MICRO_WD_${timestamp}_${Math.floor(Math.random() * 1000)}`;
 
-    const currentPriceUSD = livePrices[formData.coin]?.priceUSD || 0;
+    const currentPriceUSD = livePrices[formData.coin.toUpperCase()]?.priceUSD || 0;
     const effectiveExchangeRate = currentPriceUSD * fiatRate;
     const finalBaseValue = rQty * effectiveExchangeRate;
 
@@ -662,7 +727,7 @@ const MicroEarn = () => {
                   <td className="p-4 pl-6">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 p-1 flex items-center justify-center shrink-0 border border-slate-200 dark:border-slate-700">
-                         <MarketIcon symbol={rec.coin} apiImage={livePrices[rec.coin]?.image} customLogo={coinLogo} />
+                         <MarketIcon symbol={rec.coin} apiImage={livePrices[rec.coin.toUpperCase()]?.image} customLogo={coinLogo} />
                       </div>
                       <div>
                         <p className="font-black text-slate-800 dark:text-white text-sm">{rec.platform}</p>
@@ -773,7 +838,7 @@ const MicroEarn = () => {
                   <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Select Coin</label>
                   <div className="relative">
                     <div className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 p-1 flex items-center justify-center overflow-hidden z-10 pointer-events-none">
-                      <MarketIcon symbol={formData.coin} apiImage={livePrices[formData.coin]?.image} customLogo={selectedCryptos.find(c=>(typeof c === 'string' ? c : c.symbol)===formData.coin)?.logo} />
+                      <MarketIcon symbol={formData.coin} apiImage={livePrices[formData.coin.toUpperCase()]?.image} customLogo={selectedCryptos.find(c=>(typeof c === 'string' ? c : c.symbol)===formData.coin)?.logo} />
                     </div>
                     <select value={formData.coin} onChange={(e) => setFormData({...formData, coin: e.target.value})} className="w-full pl-14 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-black dark:text-white outline-none cursor-pointer appearance-none">
                       {cryptoSymbols.length > 0 ? cryptoSymbols.map(c => <option key={c} value={c}>{c}</option>) : <option value="USDT">USDT (Default)</option>}

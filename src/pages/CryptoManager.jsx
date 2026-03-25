@@ -6,7 +6,7 @@ import { db } from '../firebase/firebaseConfig';
 import { 
   HiOutlineSearch, HiOutlineCheckCircle, HiOutlinePlus, 
   HiOutlineX, HiOutlineTrash, HiOutlinePencil,
-  HiOutlineCloudDownload, HiOutlineRefresh, HiOutlinePhotograph
+  HiOutlineCloudDownload, HiOutlineRefresh, HiOutlinePhotograph, HiOutlineLink
 } from 'react-icons/hi';
 import { FaBitcoin, FaCoins } from 'react-icons/fa';
 
@@ -34,7 +34,7 @@ const LogoRenderer = ({ symbol, customLogo, bg, color }) => {
   );
 };
 
-// 🚀 2. VERIFIED MASTER DATABASE (Only needed here to build the initial list)
+// 🚀 2. VERIFIED MASTER DATABASE
 const defaultCryptoDatabase = [
   { id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png', color: 'text-orange-500', bg: 'bg-orange-500/10' },
   { id: 'ethereum', symbol: 'ETH', name: 'Ethereum', logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png', color: 'text-blue-500', bg: 'bg-blue-500/10' },
@@ -48,6 +48,17 @@ const defaultCryptoDatabase = [
   { id: 'dogecoin', symbol: 'DOGE', name: 'Dogecoin', logo: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png', color: 'text-yellow-600', bg: 'bg-yellow-600/10' },
   { id: 'feyorra', symbol: 'FEY', name: 'Feyorra', logo: 'https://assets.coingecko.com/coins/images/13600/large/feyorra.png', fallbackPrice: 0.0091, color: 'text-blue-500', bg: 'bg-blue-500/10' },
   { id: 'taraxa', symbol: 'TARA', name: 'Taraxa', logo: 'https://assets.coingecko.com/coins/images/14409/large/taraxa.png', fallbackPrice: 0.0045, color: 'text-indigo-500', bg: 'bg-indigo-500/10' }
+];
+
+// Networks for GeckoTerminal
+const SUPPORTED_NETWORKS = [
+  { id: 'eth', name: 'Ethereum' },
+  { id: 'bsc', name: 'Binance Smart Chain (BSC)' },
+  { id: 'solana', name: 'Solana' },
+  { id: 'polygon_pos', name: 'Polygon' },
+  { id: 'arbitrum', name: 'Arbitrum' },
+  { id: 'base', name: 'Base' },
+  { id: 'optimism', name: 'Optimism' }
 ];
 
 const CryptoManager = () => {
@@ -65,13 +76,24 @@ const CryptoManager = () => {
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState('Add Custom Token');
-  const [newCoin, setNewCoin] = useState({ apiId: '', symbol: '', name: '', fallbackPrice: '', logoUrl: '' });
   const [isFetchingData, setIsFetchingData] = useState(false);
+  
+  // 🚀 NAYA: Fetch Mode Toggle (CoinGecko vs Contract Address)
+  const [fetchMode, setFetchMode] = useState('id'); // 'id' or 'contract'
 
-  // 🚀 SMART LOAD: Context se jo objects aa rahe hain, unme se sirf Symbols nikal kar UI render karo
+  // 🚀 NAYA: State Object updated with network and contract details
+  const [newCoin, setNewCoin] = useState({ 
+    apiId: '', 
+    network: 'bsc', // Default to BSC
+    contractAddress: '',
+    symbol: '', 
+    name: '', 
+    fallbackPrice: '', 
+    logoUrl: '' 
+  });
+
   useEffect(() => { 
     if (selectedCryptos && selectedCryptos.length > 0) {
-       // Support for both new Objects and old Strings
        const symbols = selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol);
        setActiveCoins(symbols);
     } else {
@@ -139,7 +161,6 @@ const CryptoManager = () => {
     setActiveCoins((prev) => prev.includes(upperSymbol) ? prev.filter(c => c !== upperSymbol) : [...prev, upperSymbol]);
   };
 
-  // 🚀 THE MAGIC HAPPENS HERE: Save Full Objects to AuthContext!
   const handleSave = async () => {
     setIsSaving(true);
     
@@ -147,12 +168,15 @@ const CryptoManager = () => {
        const coinData = fullDatabase.find(c => c.symbol.toUpperCase() === sym) || {};
        return {
          symbol: sym,
-         id: coinData.id || sym.toLowerCase(), // CTC gets 'tether' automatically here!
+         id: coinData.id || sym.toLowerCase(),
          name: coinData.name || sym,
          logo: coinData.logo || null,
          fallbackPrice: coinData.fallbackPrice || 0,
          bg: coinData.bg || 'bg-slate-800',
-         color: coinData.color || 'text-white'
+         color: coinData.color || 'text-white',
+         // NAYA: Save network and contract address if they exist
+         network: coinData.network || null,
+         contractAddress: coinData.contractAddress || null
        };
     });
 
@@ -163,27 +187,67 @@ const CryptoManager = () => {
   const handleEditClick = (e, coin) => {
     e.stopPropagation();
     setModalTitle(`Edit Token: ${coin.symbol}`);
+    setFetchMode(coin.contractAddress ? 'contract' : 'id');
     setNewCoin({
-      apiId: coin.id || '', symbol: coin.symbol, name: coin.name,
-      fallbackPrice: coin.fallbackPrice || '', logoUrl: coin.logo || '' 
+      apiId: coin.id || '', 
+      network: coin.network || 'bsc',
+      contractAddress: coin.contractAddress || '',
+      symbol: coin.symbol, 
+      name: coin.name,
+      fallbackPrice: coin.fallbackPrice || '', 
+      logoUrl: coin.logo || '' 
     });
     setIsAddModalOpen(true);
   };
 
+  // 🚀 THE MAGIC: SMART FETCHING ENGINE
   const handleAutoFetchDetails = async () => {
-    if (!newCoin.apiId) return alert("Enter Coin ID");
     setIsFetchingData(true);
+    
     try {
-      const res = await fetch(`https://api.coingecko.com/api/v3/coins/${newCoin.apiId.toLowerCase().trim()}`);
-      if (res.ok) {
-        const data = await res.json();
-        setNewCoin(prev => ({
-          ...prev, symbol: data.symbol.toUpperCase(), name: data.name,
-          fallbackPrice: data.market_data?.current_price?.usd || prev.fallbackPrice,
-          logoUrl: data.image?.large || prev.logoUrl
-        }));
+      if (fetchMode === 'id') {
+        if (!newCoin.apiId) { alert("Enter CoinGecko ID"); setIsFetchingData(false); return; }
+        const res = await fetch(`https://api.coingecko.com/api/v3/coins/${newCoin.apiId.toLowerCase().trim()}`);
+        if (res.ok) {
+          const data = await res.json();
+          setNewCoin(prev => ({
+            ...prev, 
+            symbol: data.symbol.toUpperCase(), 
+            name: data.name,
+            fallbackPrice: data.market_data?.current_price?.usd || prev.fallbackPrice,
+            logoUrl: data.image?.large || prev.logoUrl
+          }));
+        } else {
+          alert("CoinGecko ID not found.");
+        }
+      } 
+      else if (fetchMode === 'contract') {
+        if (!newCoin.contractAddress || !newCoin.network) { alert("Enter Network and Contract Address"); setIsFetchingData(false); return; }
+        const address = newCoin.contractAddress.trim();
+        const network = newCoin.network;
+        
+        // Use GeckoTerminal API for Contract Addresses
+        const res = await fetch(`https://api.geckoterminal.com/api/v2/networks/${network}/tokens/${address}`);
+        if (res.ok) {
+          const json = await res.json();
+          const data = json.data.attributes;
+          setNewCoin(prev => ({
+            ...prev,
+            symbol: data.symbol.toUpperCase(),
+            name: data.name,
+            fallbackPrice: data.price_usd || prev.fallbackPrice,
+            logoUrl: data.image_url || prev.logoUrl,
+            // Automatically generate a unique ID for our database
+            apiId: `custom-${network}-${address.substring(0,6)}`
+          }));
+        } else {
+          alert("Contract not found on GeckoTerminal. You can still enter details manually.");
+        }
       }
-    } catch (err) { alert("Fetch failed. Manual entry allowed."); }
+    } catch (err) { 
+      console.error(err);
+      alert("Network error. Manual entry allowed."); 
+    }
     finally { setIsFetchingData(false); }
   };
 
@@ -197,13 +261,19 @@ const CryptoManager = () => {
     const safeApiId = (newCoin.apiId || '').trim().toLowerCase();
     const safeName = (newCoin.name || '').trim();
     const safeLogoUrl = (newCoin.logoUrl || '').trim();
+    const safeContract = (newCoin.contractAddress || '').trim();
 
     const newCoinObj = {
       id: ['ROX', 'CTC'].includes(safeSymbol) ? 'tether' : (safeApiId || safeName.toLowerCase().replace(/\s+/g, '-')),
-      symbol: safeSymbol, name: safeName,
+      symbol: safeSymbol, 
+      name: safeName,
       fallbackPrice: parseFloat(newCoin.fallbackPrice) || 0,
       logo: safeLogoUrl !== '' ? safeLogoUrl : null,
-      color: 'text-purple-500', bg: 'bg-purple-500/10'
+      color: 'text-purple-500', bg: 'bg-purple-500/10',
+      // NAYA: Save the fetching metadata
+      network: fetchMode === 'contract' ? newCoin.network : null,
+      contractAddress: fetchMode === 'contract' ? safeContract : null,
+      fetchMode: fetchMode
     };
 
     try {
@@ -255,7 +325,12 @@ const CryptoManager = () => {
             Select the digital assets you want to track across your Vaults, Income Streams, and AI Strategy.
           </p>
         </div>
-        <button onClick={() => { setModalTitle('Add Custom Token'); setNewCoin({ apiId: '', symbol: '', name: '', fallbackPrice: '', logoUrl: '' }); setIsAddModalOpen(true); }} className="relative z-10 flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-7 py-4 rounded-2xl font-black text-sm border border-white/10 transition-all active:scale-95 backdrop-blur-sm">
+        <button onClick={() => { 
+          setModalTitle('Add Custom Token'); 
+          setFetchMode('contract'); // Default to contract mode for new tokens (more modern)
+          setNewCoin({ apiId: '', network: 'bsc', contractAddress: '', symbol: '', name: '', fallbackPrice: '', logoUrl: '' }); 
+          setIsAddModalOpen(true); 
+        }} className="relative z-10 flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-7 py-4 rounded-2xl font-black text-sm border border-white/10 transition-all active:scale-95 backdrop-blur-sm">
           <HiOutlinePlus size={20} /> Custom Token
         </button>
       </div>
@@ -303,11 +378,37 @@ const CryptoManager = () => {
             </div>
             
             <form onSubmit={handleAddCustomCoin} className="p-8 space-y-6 max-h-[85vh] overflow-y-auto custom-scrollbar">
-              <div className="flex gap-3 bg-blue-50 dark:bg-blue-900/10 p-2 rounded-2xl border border-blue-200 dark:border-blue-500/20">
-                <input type="text" placeholder="CoinGecko ID (e.g. bitcoin)" value={newCoin.apiId} onChange={(e)=>setNewCoin({...newCoin, apiId:e.target.value})} className="flex-1 bg-transparent px-4 font-bold text-slate-700 dark:text-white outline-none"/>
-                <button type="button" onClick={handleAutoFetchDetails} disabled={isFetchingData} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all disabled:opacity-50 flex items-center gap-2">
-                  {isFetchingData ? <HiOutlineRefresh className="animate-spin"/> : <HiOutlineCloudDownload/>} Fetch
-                </button>
+              
+              {/* 🚀 NAYA: FETCH MODE TOGGLE */}
+              <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                <button type="button" onClick={() => setFetchMode('contract')} className={`flex-1 py-2 text-xs font-black uppercase tracking-widest rounded-lg transition-colors ${fetchMode === 'contract' ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-sm' : 'text-slate-500'}`}>By Contract</button>
+                <button type="button" onClick={() => setFetchMode('id')} className={`flex-1 py-2 text-xs font-black uppercase tracking-widest rounded-lg transition-colors ${fetchMode === 'id' ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-sm' : 'text-slate-500'}`}>By CG ID</button>
+              </div>
+
+              {/* 🚀 NAYA: DYNAMIC FETCHING INPUTS */}
+              <div className="bg-blue-50 dark:bg-blue-900/10 p-4 rounded-2xl border border-blue-200 dark:border-blue-500/20 space-y-4">
+                
+                {fetchMode === 'contract' ? (
+                  <>
+                    <select value={newCoin.network} onChange={(e) => setNewCoin({...newCoin, network: e.target.value})} className="w-full bg-white dark:bg-slate-800 px-4 py-3 rounded-xl font-bold text-slate-700 dark:text-white outline-none border border-slate-200 dark:border-slate-700 text-sm">
+                      {SUPPORTED_NETWORKS.map(net => <option key={net.id} value={net.id}>{net.name}</option>)}
+                    </select>
+                    <div className="flex gap-2">
+                      <input type="text" placeholder="Paste Smart Contract Address..." value={newCoin.contractAddress} onChange={(e)=>setNewCoin({...newCoin, contractAddress:e.target.value})} className="flex-1 bg-white dark:bg-slate-800 px-4 py-3 rounded-xl font-mono text-xs text-slate-700 dark:text-white outline-none border border-slate-200 dark:border-slate-700"/>
+                      <button type="button" onClick={handleAutoFetchDetails} disabled={isFetchingData} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all disabled:opacity-50">
+                        {isFetchingData ? <HiOutlineRefresh className="animate-spin" size={18}/> : <HiOutlineCloudDownload size={18}/>}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex gap-2">
+                    <input type="text" placeholder="CoinGecko ID (e.g. bitcoin)" value={newCoin.apiId} onChange={(e)=>setNewCoin({...newCoin, apiId:e.target.value})} className="flex-1 bg-white dark:bg-slate-800 px-4 py-3 rounded-xl font-bold text-sm text-slate-700 dark:text-white outline-none border border-slate-200 dark:border-slate-700"/>
+                    <button type="button" onClick={handleAutoFetchDetails} disabled={isFetchingData} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all disabled:opacity-50">
+                      {isFetchingData ? <HiOutlineRefresh className="animate-spin" size={18}/> : <HiOutlineCloudDownload size={18}/>}
+                    </button>
+                  </div>
+                )}
+                
               </div>
 
               <div className="grid grid-cols-2 gap-5">

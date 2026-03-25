@@ -22,7 +22,7 @@ const fiatFlagMap = {
   PKR: 'pk', BDT: 'bd', LKR: 'lk', MXN: 'mx'
 };
 
-// 🚀 Verified IDs and Custom Logos
+// 🚀 Verified IDs and Custom Logos (Fallback DB)
 const cryptoConfig = {
   BTC: { id: 'bitcoin' }, ETH: { id: 'ethereum' }, USDT: { id: 'tether' }, XRP: { id: 'ripple' },
   BNB: { id: 'binancecoin' }, USDC: { id: 'usd-coin' }, SOL: { id: 'solana' }, TRX: { id: 'tron' },
@@ -174,7 +174,7 @@ const Dashboard = () => {
     return () => { unsubBank(); unsubCash(); unsubOnline(); unsubIncome(); unsubExpense(); };
   }, [user]);
 
-  // 2️⃣ 🚀 UPGRADED LIVE MARKET DATA ENGINE
+  // 2️⃣ 🚀 UPGRADED HYBRID LIVE MARKET DATA ENGINE
   useEffect(() => {
     const fetchMarketData = async () => {
       setIsMarketLoading(true);
@@ -185,33 +185,89 @@ const Dashboard = () => {
 
         let newMarketData = [];
 
-        // 🟢 Crypto Logic via CoinGecko
+        // 🟢 Crypto Logic (CoinGecko + GeckoTerminal + Binance)
         if (selectedCryptos && selectedCryptos.length > 0) {
           
-          const mappedAssets = selectedCryptos.map(c => {
+          let cgJson = [];
+          let geckoTerminalData = {};
+          const normalAssets = [];
+          const contractAssets = [];
+
+          // Separate regular coins vs Custom Smart Contracts
+          selectedCryptos.forEach(c => {
              const symbol = typeof c === 'string' ? c : c.symbol;
              const upperSym = symbol.toUpperCase();
              const objId = typeof c === 'object' ? c.id : null;
              const fallbackId = cryptoConfig[upperSym]?.id || symbol.toLowerCase();
-             return { symbol: upperSym, id: objId || fallbackId, customLogo: (typeof c === 'object' ? c.logo : null) || cryptoConfig[upperSym]?.logo, fallbackPrice: (typeof c === 'object' ? c.fallbackPrice : 0) };
+             
+             const assetData = { 
+               symbol: upperSym, 
+               id: objId || fallbackId, 
+               customLogo: (typeof c === 'object' ? c.logo : null) || cryptoConfig[upperSym]?.logo, 
+               fallbackPrice: (typeof c === 'object' ? c.fallbackPrice : 0),
+               network: typeof c === 'object' ? c.network : null,
+               contractAddress: typeof c === 'object' ? c.contractAddress : null,
+               fetchMode: typeof c === 'object' ? c.fetchMode : 'id'
+             };
+
+             if (assetData.fetchMode === 'contract' && assetData.network && assetData.contractAddress) {
+                contractAssets.push(assetData);
+             } else {
+                normalAssets.push(assetData);
+             }
           });
 
-          const uniqueIds = [...new Set(mappedAssets.map(a => a.id))].join(',');
-          
-          let cgJson = [];
-          try {
-            const cgRes = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${uniqueIds}&sparkline=false`);
-            if (cgRes.ok) cgJson = await cgRes.json();
-          } catch(e) { console.warn("Market Dashboard: CoinGecko Limit Reached. Using Fallbacks."); }
+          // Fetch Normal Assets from CoinGecko
+          if (normalAssets.length > 0) {
+             const uniqueIds = [...new Set(normalAssets.map(a => a.id))].join(',');
+             try {
+               const cgRes = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${uniqueIds}&sparkline=false`);
+               if (cgRes.ok) cgJson = await cgRes.json();
+             } catch(e) { console.warn("Market Dashboard: CoinGecko Limit Reached."); }
+          }
+
+          // Fetch Contract Assets from GeckoTerminal
+          for (const asset of contractAssets) {
+             try {
+                const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${asset.network}/tokens/${asset.contractAddress}`);
+                if (gtRes.ok) {
+                   const gtJson = await gtRes.json();
+                   geckoTerminalData[asset.id] = {
+                      current_price: parseFloat(gtJson.data.attributes.price_usd),
+                      image: gtJson.data.attributes.image_url,
+                      price_change_percentage_24h: 0 // Default to 0 as GT token endpoint doesn't always have simple 24h change
+                   };
+                }
+             } catch (error) { console.warn(`GeckoTerminal failed for ${asset.symbol}`); }
+          }
 
           const binanceSafeCoins = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC', 'BCH', 'ADA', 'XMR', 'XLM', 'DAI', 'ZEC', 'SHIB', 'SUI', 'TON', 'DOT', 'PEPE', 'NEAR', 'POL', 'ATOM', 'ARB', 'BONK', 'CAKE', 'XTZ', 'FLOKI', 'OP', 'TWT', 'BAT', 'DGB', 'KAVA', 'AVAX', 'MEME', 'DASH'];
 
-          for (let asset of mappedAssets) {
-            const live = cgJson.find(c => c.id === asset.id);
-            
-            let priceInUsd = live ? live.current_price : null;
-            let change24h = live ? live.price_change_percentage_24h : 0;
+          const allAssets = [...normalAssets, ...contractAssets];
 
+          for (let asset of allAssets) {
+            let live = null;
+            let priceInUsd = null;
+            let change24h = 0;
+            let finalImage = null;
+
+            if (asset.fetchMode === 'contract') {
+               live = geckoTerminalData[asset.id];
+               if (live) {
+                  priceInUsd = live.current_price;
+                  change24h = live.price_change_percentage_24h;
+                  finalImage = live.image;
+               }
+            } else {
+               live = cgJson.find(c => c.id === asset.id);
+               if (live) {
+                  priceInUsd = live.current_price;
+                  change24h = live.price_change_percentage_24h;
+                  finalImage = live.image;
+               }
+            }
+
+            // Binance Fallback
             if (!priceInUsd && binanceSafeCoins.includes(asset.symbol.toUpperCase())) {
                try {
                  const bSym = asset.id === 'tether' ? 'BTCUSDT' : `${asset.symbol.toUpperCase()}USDT`;
@@ -224,6 +280,7 @@ const Dashboard = () => {
                } catch(e) {}
             }
 
+            // Hardcoded Fallback
             if (!priceInUsd) {
                priceInUsd = parseFloat(asset.fallbackPrice || 0);
             }
@@ -236,7 +293,7 @@ const Dashboard = () => {
               priceUSD: priceInUsd, 
               priceBase: priceInBase, 
               change: change24h,
-              image: live?.image,
+              image: finalImage,
               customLogo: asset.customLogo
             });
           }

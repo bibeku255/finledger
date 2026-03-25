@@ -51,11 +51,40 @@ const CapitalShifting = () => {
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
 
+  const [customUserCoins, setCustomUserCoins] = useState([]); // Needed for Contract fetching
+
+  // Fetch Custom User Coins for Contract MetaData
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (!user) return;
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists() && userSnap.data().customCoins) {
+        setCustomUserCoins(userSnap.data().customCoins);
+      }
+    };
+    fetchUserData();
+  }, [user]);
+
   // 🚀 CRASH FIX: Properly mapping objects to strings to avoid React render crash
   const cryptoCurrencies = useMemo(() => {
     const customSymbols = selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
     return Array.from(new Set(["USDT", "USDC", "BTC", "ETH", "BNB", "SOL", "TRX", "MATIC", ...customSymbols]));
   }, [selectedCryptos]);
+
+  // Merge Context Selected Cryptos + Custom Coins (Safe Object Map)
+  const fullDatabase = useMemo(() => {
+    const coinMap = new Map();
+    selectedCryptos.forEach(c => {
+       if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c);
+    });
+
+    customUserCoins.forEach(c => {
+      const existing = coinMap.get(c.symbol.toUpperCase());
+      coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c });
+    });
+    return Array.from(coinMap.values());
+  }, [customUserCoins, selectedCryptos]);
 
   const [transferData, setTransferData] = useState({
     fromVault: 'online', 
@@ -97,7 +126,7 @@ const CapitalShifting = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // 🌍 SMART TRIPLE-RATE FETCHER (Now properly syncs with Pegged logic)
+  // 🌍 SMART TRIPLE-RATE FETCHER (UPGRADED with GeckoTerminal + Binance Fallback)
   const fetchLiveRates = async () => {
     setIsFetchingRate(true);
     try {
@@ -121,26 +150,43 @@ const CapitalShifting = () => {
         
         if (assetSym === 'USDT' || assetSym === 'USDC') return usdToBase;
         
-        // 🚀 SMART CRYPTO CHECK (Extract ID from Context)
-        const coinObj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === assetSym.toUpperCase());
+        // 🚀 SMART CRYPTO CHECK (Hybrid Fetcher)
+        const upperSym = assetSym.toUpperCase();
+        const coinObj = fullDatabase.find(c => c.symbol === upperSym) || {};
         const searchId = coinObj?.id || assetSym.toLowerCase();
 
         let priceUsd = null;
-        try {
-          const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
-          const cgData = await cgRes.json();
-          if (cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
-        } catch(e) {}
 
+        // Try GeckoTerminal First if it's a Contract Token
+        if (coinObj.fetchMode === 'contract' && coinObj.network && coinObj.contractAddress) {
+           try {
+              const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${coinObj.network}/tokens/${coinObj.contractAddress}`);
+              if (gtRes.ok) {
+                 const gtJson = await gtRes.json();
+                 priceUsd = parseFloat(gtJson.data.attributes.price_usd);
+              }
+           } catch(e) {}
+        } 
+        
+        // Try CoinGecko if not Contract or if GT failed
+        if (!priceUsd) {
+           try {
+             const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
+             const cgData = await cgRes.json();
+             if (cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
+           } catch(e) {}
+        }
+
+        // Binance Fallback
         if (!priceUsd) {
           try {
-             const binanceSymbol = searchId === 'tether' ? 'BTCUSDT' : `${assetSym.toUpperCase()}USDT`;
+             const binanceSymbol = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
              const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`);
              if (bRes.ok) {
                const bData = await bRes.json();
                priceUsd = searchId === 'tether' ? 1.00 : parseFloat(bData.price);
              }
-          } catch (e) { console.warn("Binance fetch failed for", assetSym); }
+          } catch (e) { }
         }
 
         const finalPrice = priceUsd || (coinObj?.fallbackPrice || 0);

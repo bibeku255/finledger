@@ -77,6 +77,8 @@ const StakingAndYield = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
+  const [customUserCoins, setCustomUserCoins] = useState([]); // Needed for Contract fetching
+
   const [livePrices, setLivePrices] = useState({});
   const [fiatRate, setFiatRate] = useState(1);
   
@@ -132,7 +134,36 @@ const StakingAndYield = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // 🚀 SMART PRICE FETCHER (Object Safe)
+  // Fetch Custom User Coins for Contract MetaData
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (!user) return;
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists() && userSnap.data().customCoins) {
+        setCustomUserCoins(userSnap.data().customCoins);
+      }
+    };
+    fetchUserData();
+  }, [user]);
+
+  // Master Merge Engine
+  const fullDatabase = useMemo(() => {
+    const coinMap = new Map();
+    defaultCryptoDatabase.forEach(c => coinMap.set(c.symbol.toUpperCase(), c));
+    
+    selectedCryptos.forEach(c => {
+       if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c);
+    });
+
+    customUserCoins.forEach(c => {
+      const existing = coinMap.get(c.symbol.toUpperCase());
+      coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c, logo: c.logo || existing?.logo });
+    });
+    return Array.from(coinMap.values());
+  }, [customUserCoins, selectedCryptos]);
+
+  // 🚀 REBUILT: HYBRID SMART PRICE FETCHER (Object Safe)
   useEffect(() => {
     const fetchLivePrices = async () => {
       try {
@@ -148,34 +179,61 @@ const StakingAndYield = () => {
         
         if(coinsToFetch.length === 0) return;
 
-        // Fetch Context Objects for proper IDs
-        const ids = coinsToFetch.map(sym => {
-           const obj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === sym.toUpperCase());
-           const fallback = defaultCryptoDatabase.find(c => c.symbol === sym.toUpperCase());
-           return obj?.id || fallback?.id || sym.toLowerCase();
-        }).join(',');
-        
         let cgJson = {};
-        try {
-          const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
-          if (cgRes.ok) cgJson = await cgRes.json();
-        } catch(e) {}
+        let geckoTerminalData = {};
+        const normalCoins = [];
+        const contractCoins = [];
+
+        coinsToFetch.forEach(sym => {
+           const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase());
+           if (dbCoin?.fetchMode === 'contract' && dbCoin.network && dbCoin.contractAddress) {
+              contractCoins.push(dbCoin);
+           } else {
+              normalCoins.push(dbCoin?.id || sym.toLowerCase());
+           }
+        });
+
+        // 1. Fetch Normal Coins (CoinGecko)
+        if (normalCoins.length > 0) {
+           try {
+             const ids = [...new Set(normalCoins)].join(',');
+             const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
+             if (cgRes.ok) {
+                 cgJson = await cgRes.json();
+             }
+           } catch(e) { console.warn("CoinGecko API Limit Reached"); }
+        }
+
+        // 2. Fetch Custom Contract Coins (GeckoTerminal)
+        for (const customCoin of contractCoins) {
+           try {
+              const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${customCoin.network}/tokens/${customCoin.contractAddress}`);
+              if (gtRes.ok) {
+                 const gtJson = await gtRes.json();
+                 geckoTerminalData[customCoin.id] = {
+                    usd: parseFloat(gtJson.data.attributes.price_usd)
+                 };
+              }
+           } catch (error) { console.warn(`GeckoTerminal failed for ${customCoin.symbol}`); }
+        }
 
         const priceMap = {};
+        
         await Promise.all(coinsToFetch.map(async (sym) => {
           const upperSym = sym.toUpperCase();
-          const obj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === upperSym) || {};
-          const fallback = defaultCryptoDatabase.find(c => c.symbol === upperSym) || {};
+          const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || {};
+          const searchId = dbCoin.id || sym.toLowerCase();
           
-          const searchId = obj.id || fallback.id || sym.toLowerCase();
           let priceUsd = null;
 
-          if (cgJson[searchId]?.usd) {
-             priceUsd = parseFloat(cgJson[searchId].usd);
+          if (dbCoin.fetchMode === 'contract') {
+              priceUsd = geckoTerminalData[searchId]?.usd;
+          } else {
+              priceUsd = cgJson[searchId]?.usd;
           }
 
           // Binance Fallback
-          if (priceUsd === null || isNaN(priceUsd) || priceUsd === 0) {
+          if (!priceUsd) {
             try {
               const bSym = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
               const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
@@ -186,18 +244,24 @@ const StakingAndYield = () => {
             } catch(e) {}
           }
 
-          if (priceUsd === null || isNaN(priceUsd) || priceUsd === 0) {
-              priceUsd = parseFloat(obj.fallbackPrice || fallback.fallbackPrice || 0);
+          if (!priceUsd && dbCoin.fallbackPrice) {
+              priceUsd = dbCoin.fallbackPrice;
           }
           
-          priceMap[upperSym] = priceUsd * userBaseRate;
+          if(priceUsd) {
+             priceMap[upperSym] = priceUsd * userBaseRate;
+          }
         }));
 
         setLivePrices(priceMap);
       } catch (error) {}
     };
-    if (!isLoading) fetchLivePrices();
-  }, [isLoading, activeCryptos, baseCurrency, formData.coin, formData.rewardCoin, formData.poolCoin2, stakes, selectedCryptos]);
+    if (!isLoading) {
+        fetchLivePrices();
+        const interval = setInterval(fetchLivePrices, 60000); // 60s Refresh
+        return () => clearInterval(interval);
+    }
+  }, [isLoading, activeCryptos, baseCurrency, formData.coin, formData.rewardCoin, formData.poolCoin2, stakes, fullDatabase]);
 
   const getLivePrice = (symbol) => {
       if(!symbol || symbol === 'N/A') return 0;
@@ -541,15 +605,13 @@ const StakingAndYield = () => {
                   const isPool = rec.earningType === 'pool';
                   
                   // 🚀 Safe Logo Retrieval from Objects Array
-                  const c1Obj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === (isAffiliate ? rec.rewardCoin : rec.coin).toUpperCase());
-                  const c1Fallback = defaultCryptoDatabase.find(c => c.symbol === (isAffiliate ? rec.rewardCoin : rec.coin).toUpperCase());
-                  const logo1 = c1Obj?.logo || c1Fallback?.logo;
+                  const c1Obj = fullDatabase.find(c => c.symbol === (isAffiliate ? rec.rewardCoin : rec.coin).toUpperCase());
+                  const logo1 = c1Obj?.logo;
 
                   let logo2 = null;
                   if (isPool) {
-                     const c2Obj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === rec.poolCoin2.toUpperCase());
-                     const c2Fallback = defaultCryptoDatabase.find(c => c.symbol === rec.poolCoin2.toUpperCase());
-                     logo2 = c2Obj?.logo || c2Fallback?.logo;
+                     const c2Obj = fullDatabase.find(c => c.symbol === rec.poolCoin2.toUpperCase());
+                     logo2 = c2Obj?.logo;
                   }
                   
                   let tvlFiat = 0;
