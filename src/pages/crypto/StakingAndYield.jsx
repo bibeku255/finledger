@@ -164,7 +164,7 @@ const StakingAndYield = () => {
     return Array.from(coinMap.values());
   }, [customUserCoins, selectedCryptos]);
 
-  // 🚀 HYBRID SMART PRICE FETCHER
+  // 🚀 HYBRID SMART PRICE FETCHER (Object Safe)
   useEffect(() => {
     const fetchLivePrices = async () => {
       try {
@@ -195,6 +195,7 @@ const StakingAndYield = () => {
            }
         });
 
+        // 1. Fetch Normal Coins (CoinGecko)
         if (normalCoins.length > 0) {
            try {
              const ids = [...new Set(normalCoins)].join(',');
@@ -205,6 +206,7 @@ const StakingAndYield = () => {
            } catch(e) { console.warn("CoinGecko API Limit Reached"); }
         }
 
+        // 2. Fetch Custom Contract Coins (GeckoTerminal)
         for (const customCoin of contractCoins) {
            try {
               const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${customCoin.network}/tokens/${customCoin.contractAddress}`);
@@ -232,13 +234,17 @@ const StakingAndYield = () => {
               priceUsd = cgJson[searchId]?.usd;
           }
 
+          // Binance Fallback
           if (!priceUsd) {
             try {
-              const bSym = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
-              const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
-              if (bRes.ok) {
-                 const bData = await bRes.json();
-                 priceUsd = searchId === 'tether' ? 1.00 : parseFloat(bData.price);
+              const binanceSafeCoins = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC'];
+              if (binanceSafeCoins.includes(upperSym)) {
+                 const bSym = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
+                 const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
+                 if (bRes.ok) {
+                    const bData = await bRes.json();
+                    priceUsd = searchId === 'tether' ? 1.00 : parseFloat(bData.price);
+                 }
               }
             } catch(e) {}
           }
@@ -257,7 +263,7 @@ const StakingAndYield = () => {
     };
     if (!isLoading) {
         fetchLivePrices();
-        const interval = setInterval(fetchLivePrices, 60000); 
+        const interval = setInterval(fetchLivePrices, 60000); // 60s Refresh
         return () => clearInterval(interval);
     }
   }, [isLoading, activeCryptos, baseCurrency, formData.coin, formData.rewardCoin, formData.poolCoin2, stakes, fullDatabase]);
@@ -268,6 +274,7 @@ const StakingAndYield = () => {
       return (price !== undefined && !isNaN(price)) ? price : (0.01 * fiatRate); 
   };
 
+  // 🚀 SMART PROJECTION CALCULATION
   const projection = useMemo(() => {
     if (formData.earningType === 'affiliate') return { dailyFiat: 0, monthlyFiat: 0, yearlyFiat: 0 };
 
@@ -275,6 +282,7 @@ const StakingAndYield = () => {
     const price1 = getLivePrice(formData.coin);
     let tvlFiat = principal1 * price1;
 
+    // Add 2nd coin for LP
     if (formData.earningType === 'pool') {
       const principal2 = parseFloat(formData.poolPrincipal2) || 0;
       const price2 = getLivePrice(formData.poolCoin2);
@@ -310,6 +318,7 @@ const StakingAndYield = () => {
              totalRewardsClaimedFiat += (parseFloat(h.amount) || 0) * getLivePrice(h.coin);
          });
       } else {
+         // Legacy fallback
          totalRewardsClaimedFiat += (parseFloat(s.totalClaimed) || 0) * getLivePrice(s.rewardCoin || s.coin);
       }
     });
@@ -317,6 +326,7 @@ const StakingAndYield = () => {
     return { totalValueLocked, totalRewardsClaimedFiat, totalDailyPassiveIncome };
   }, [stakes, livePrices]);
 
+  // 🚀 REPORT DOWNLOAD LOGIC FOR STAKING (Now includes Global Date)
   const handleDownloadReport = (format) => {
     if (stakes.length === 0) return alert("No active stakes or streams found.");
 
@@ -339,6 +349,7 @@ const StakingAndYield = () => {
       }
 
       return {
+        // 🚀 GLOBAL DATE IN REPORTS
         startDate: formatGlobalDate && rec.startDate ? formatGlobalDate(rec.startDate, 'short') : (rec.startDate || 'N/A'),
         platform: rec.platform,
         type: isAffiliate ? 'Affiliate/Network' : (isPool ? 'Liquidity Pool' : 'Single Stake'),
@@ -396,10 +407,12 @@ const StakingAndYield = () => {
       startDate: formData.startDate,
       timestamp,
       
+      // Dynamic Data Based on Type
       coin: isAffiliate ? 'N/A' : formData.coin, 
       principalAmount: principal,
-      rewardCoin: isAffiliate ? 'Variable' : (isPool ? 'Dual' : formData.rewardCoin), // Variable for Affiliate
+      rewardCoin: isAffiliate ? 'Variable' : (isPool ? 'Dual' : formData.rewardCoin),
       
+      // LP Specific
       ...(isPool && {
         poolCoin2: formData.poolCoin2,
         poolPrincipal2: poolPrincipal2
@@ -408,6 +421,7 @@ const StakingAndYield = () => {
 
     try {
       if (editingId) {
+        // 🚀 FIXED: Replaced updateDoc with setDoc for 100% safety
         await setDoc(doc(db, "users", user.uid, "stakingLogs", editingId), stakeData, { merge: true });
       } else {
         stakeData.claimedHistory = [];
@@ -550,6 +564,9 @@ const StakingAndYield = () => {
       setIsClaimModalOpen(true);
   };
 
+  // 🚀 THIS WAS THE MISSING VARIABLE
+  const isAffiliateModeModal = activeClaimStake && activeClaimStake.earningType === 'affiliate';
+
   return (
     <div className="pt-24 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 max-w-7xl mx-auto px-4 md:px-0">
       
@@ -567,6 +584,7 @@ const StakingAndYield = () => {
         </div>
         
         <div className="flex items-center gap-2 md:gap-3">
+          {/* 🚀 DOWNLOAD REPORT DROPDOWN */}
           <div className="relative group">
             <button className="flex items-center gap-1 md:gap-2 p-3 md:p-3.5 bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400 rounded-2xl font-bold text-xs md:text-sm hover:bg-indigo-100 transition-colors border border-indigo-100 dark:border-indigo-500/20 shadow-sm">
               <HiOutlineDownload size={18}/> 
@@ -634,14 +652,15 @@ const StakingAndYield = () => {
               </thead>
               <tbody className="divide-y divide-slate-50 dark:divide-slate-800/50">
                 {stakes.map((rec) => {
-                  const isAffiliate = rec.earningType === 'affiliate';
-                  const isPool = rec.earningType === 'pool';
+                  const isAffiliateRow = rec.earningType === 'affiliate';
+                  const isPoolRow = rec.earningType === 'pool';
                   
-                  const c1Obj = fullDatabase.find(c => c.symbol === (isAffiliate ? 'USDT' : rec.coin).toUpperCase());
+                  // 🚀 Safe Logo Retrieval from Objects Array
+                  const c1Obj = fullDatabase.find(c => c.symbol === (isAffiliateRow ? 'USDT' : rec.coin).toUpperCase());
                   const logo1 = c1Obj?.logo;
 
                   let logo2 = null;
-                  if (isPool) {
+                  if (isPoolRow) {
                      const c2Obj = fullDatabase.find(c => c.symbol === rec.poolCoin2.toUpperCase());
                      logo2 = c2Obj?.logo;
                   }
@@ -649,9 +668,9 @@ const StakingAndYield = () => {
                   let tvlFiat = 0;
                   let dailyEarnFiat = 0;
 
-                  if (!isAffiliate) {
+                  if (!isAffiliateRow) {
                     tvlFiat = (parseFloat(rec.principalAmount) || 0) * getLivePrice(rec.coin);
-                    if (isPool) tvlFiat += (parseFloat(rec.poolPrincipal2) || 0) * getLivePrice(rec.poolCoin2);
+                    if (isPoolRow) tvlFiat += (parseFloat(rec.poolPrincipal2) || 0) * getLivePrice(rec.poolCoin2);
                     dailyEarnFiat = ((tvlFiat * (parseFloat(rec.apr)||0)) / 100) / 365;
                   }
 
@@ -672,18 +691,18 @@ const StakingAndYield = () => {
                       <div className="flex items-center gap-3">
                         <div className="flex items-center">
                             <div className="w-10 h-10 rounded-full overflow-hidden shadow-inner bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 z-10 flex items-center justify-center">
-                               {isAffiliate ? <FaExchangeAlt className="text-slate-400" size={16}/> : <LogoRenderer symbol={rec.coin} logoUrl={logo1} />}
+                               {isAffiliateRow ? <FaExchangeAlt className="text-slate-400" size={16}/> : <LogoRenderer symbol={rec.coin} logoUrl={logo1} />}
                             </div>
-                            {isPool && (
+                            {isPoolRow && (
                               <div className="w-10 h-10 rounded-full overflow-hidden shadow-inner bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 -ml-4 z-0">
                                  <LogoRenderer symbol={rec.poolCoin2} logoUrl={logo2} />
                               </div>
                             )}
                         </div>
                         <div>
-                          {isAffiliate ? (
+                          {isAffiliateRow ? (
                              <p className="font-black text-slate-800 dark:text-white text-sm">Affiliate / Network</p>
-                          ) : isPool ? (
+                          ) : isPoolRow ? (
                              <p className="font-black text-slate-800 dark:text-white text-sm">{rec.principalAmount} <span className="text-[10px] text-slate-500">{rec.coin}</span> + {rec.poolPrincipal2} <span className="text-[10px] text-slate-500">{rec.poolCoin2}</span></p>
                           ) : (
                              <p className="font-black text-slate-800 dark:text-white text-sm">{rec.principalAmount} <span className="text-[10px] text-slate-500">{rec.coin}</span></p>
@@ -696,15 +715,15 @@ const StakingAndYield = () => {
                     <td className="p-4">
                       <div className="flex flex-col gap-1">
                          <div className="flex flex-wrap items-center gap-2">
-                           {isAffiliate ? (
+                           {isAffiliateRow ? (
                              <span className="text-[10px] font-black text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-500/10 px-2 py-0.5 rounded">Variable</span>
                            ) : (
                              <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 px-2 py-0.5 rounded">Est. {rec.apr}% APR</span>
                            )}
                            
-                           {isPool ? (
+                           {isPoolRow ? (
                               <span className="text-[9px] font-black text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-500/10 px-2 py-0.5 rounded">LP Rewards</span>
-                           ) : isAffiliate ? (
+                           ) : isAffiliateRow ? (
                               <span className="text-[9px] font-black text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-500/10 px-2 py-0.5 rounded">Multi-Coin Earning</span>
                            ) : (
                              <span className="text-[9px] font-black text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-500/10 px-2 py-0.5 rounded">
@@ -712,7 +731,7 @@ const StakingAndYield = () => {
                              </span>
                            )}
                          </div>
-                         {!isAffiliate && (
+                         {!isAffiliateRow && (
                              <div className="flex items-center gap-2 mt-1">
                                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{daysLeftText}</span>
                                {rec.lockPeriod !== 'Flexible' && (
@@ -726,7 +745,7 @@ const StakingAndYield = () => {
                     </td>
 
                     <td className="p-4">
-                      {isAffiliate ? (
+                      {isAffiliateRow ? (
                          <p className="font-bold text-slate-400 text-sm">--</p>
                       ) : (
                          <>
@@ -768,6 +787,7 @@ const StakingAndYield = () => {
             
             <form onSubmit={handleSaveStake} className="p-6 sm:p-8 overflow-y-auto custom-scrollbar flex-1 space-y-6">
               
+              {/* 🚀 3-WAY TYPE TOGGLE */}
               <div className="flex bg-slate-100 dark:bg-slate-800 p-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
                 <button type="button" onClick={() => setFormData({...formData, earningType: 'stake'})} className={`flex-1 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all flex flex-col items-center gap-1 ${formData.earningType === 'stake' ? 'bg-white dark:bg-slate-700 shadow text-purple-600 dark:text-purple-400' : 'text-slate-500'}`}>
                   <span>🏦</span> Single Stake
@@ -786,6 +806,12 @@ const StakingAndYield = () => {
                 </div>
               )}
 
+              {formData.earningType === 'pool' && (
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/50 rounded-2xl text-[10px] font-bold text-slate-500">
+                  <span className="text-blue-600 font-black">LIQUIDITY POOL (e.g. FaucetPay BNB/FEY):</span> Stake two assets simultaneously to earn split rewards.
+                </div>
+              )}
+
               <div className="space-y-2">
                 <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Platform / Exchange</label>
                 <div className="relative">
@@ -796,6 +822,7 @@ const StakingAndYield = () => {
                 </div>
               </div>
 
+              {/* DYNAMIC ASSET SELECTION */}
               {formData.earningType === 'pool' ? (
                  <div className="grid grid-cols-2 gap-5 p-4 bg-slate-50 dark:bg-slate-800/30 rounded-2xl border border-slate-200 dark:border-slate-700">
                     <div className="space-y-2">
@@ -817,7 +844,7 @@ const StakingAndYield = () => {
                 <div className="grid grid-cols-2 gap-5">
                   {formData.earningType === 'stake' && (
                     <div className="space-y-2">
-                      <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Asset Staked</label>
+                      <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Asset Staked (Holding)</label>
                       <div className="relative">
                         <select value={formData.coin} onChange={(e) => setFormData({...formData, coin: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-black dark:text-white outline-none cursor-pointer appearance-none">
                           {cryptoSymbols.map(c => <option key={c} value={c}>{c}</option>)}
@@ -828,7 +855,7 @@ const StakingAndYield = () => {
                   )}
 
                   <div className={`space-y-2 ${formData.earningType === 'affiliate' ? 'col-span-2' : ''}`}>
-                    <label className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest ml-1">Reward Asset</label>
+                    <label className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest ml-1">Reward Asset (Earning)</label>
                     <div className="relative">
                       {formData.earningType === 'affiliate' ? (
                           <div className="w-full p-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl font-black text-emerald-600 dark:text-emerald-400 text-center">
@@ -847,6 +874,7 @@ const StakingAndYield = () => {
                 </div>
               )}
 
+              {/* AMOUNTS AND APR FOR NON-AFFILIATE */}
               {formData.earningType !== 'affiliate' && (
                 <>
                   <div className="grid grid-cols-2 gap-5">
@@ -865,6 +893,7 @@ const StakingAndYield = () => {
                     </div>
                   </div>
 
+                  {/* 🚀 AI PROJECTOR */}
                   <div className="p-4 bg-purple-50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-800/50 rounded-2xl">
                     <div className="flex justify-between items-center mb-3">
                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1">🤖 Est. Fiat Projection</p>
@@ -885,6 +914,7 @@ const StakingAndYield = () => {
                     </div>
                   </div>
 
+                  {/* CUSTOM LOCK PERIOD */}
                   <div className="grid grid-cols-2 gap-5">
                     <div className="space-y-2">
                       <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Lock Duration</label>
@@ -902,6 +932,7 @@ const StakingAndYield = () => {
                          <input type="number" required value={formData.customLockDays} onChange={(e)=>setFormData({...formData, customLockDays: e.target.value})} placeholder="e.g. 55" className="w-full p-3 mt-2 bg-purple-50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-800/50 rounded-xl font-bold dark:text-white outline-none" />
                       )}
                     </div>
+                    {/* 🚀 GLOBAL DATE APPLIED */}
                     <div className="space-y-2">
                       <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex justify-between ml-1">
                         <span>Start Date</span>
@@ -913,6 +944,7 @@ const StakingAndYield = () => {
                 </>
               )}
 
+              {/* Affiliate Form Date Field Only */}
               {formData.earningType === 'affiliate' && (
                 <div className="space-y-2">
                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex justify-between ml-1">
@@ -949,7 +981,8 @@ const StakingAndYield = () => {
                 </p>
               </div>
 
-              {activeClaimStake.earningType === 'affiliate' ? (
+              {/* 🚀 FIXED: isAffiliateModeModal uses correct value */}
+              {activeClaimStake && activeClaimStake.earningType === 'affiliate' ? (
                  <div className="space-y-4">
                     <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Coins Received</label>
                     {claimData.multipleClaims.map((claimRow, idx) => (
@@ -990,6 +1023,7 @@ const StakingAndYield = () => {
                  </>
               )}
 
+              {/* PLATFORM COMMISSION / FEE */}
               <div className="space-y-2">
                 <label className="text-[11px] font-black text-rose-500 uppercase tracking-widest ml-1">Platform Fee Deduction (%)</label>
                 <div className="relative">
@@ -999,7 +1033,7 @@ const StakingAndYield = () => {
                 <p className="text-[9px] font-bold text-slate-400 pl-2">App will automatically deduct this from Gross before logging.</p>
               </div>
 
-              {!isAffiliate && (
+              {activeClaimStake && activeClaimStake.earningType !== 'affiliate' && (
                 <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl flex justify-between items-center border border-slate-200 dark:border-slate-700">
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Net to Wallet:</span>
                   <span className="font-black text-emerald-600 dark:text-emerald-400">

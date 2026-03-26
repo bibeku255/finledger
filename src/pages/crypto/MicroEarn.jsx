@@ -1,10 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
-// 🚀 FIXED: Added setDoc for safe editing
-import { collection, addDoc, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDoc, getDocs, where } from 'firebase/firestore';
+import { collection, addDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc, getDocs, where } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
-
-// 🚀 IMPORTED REPORT UTILS
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
 
 import { 
@@ -15,27 +12,23 @@ import {
 } from 'react-icons/hi';
 import { FaBitcoin, FaGift, FaWallet, FaMedal, FaTrophy } from 'react-icons/fa';
 
-// 🚀 Expanded Micro-Earn Platforms
 const microEarnPlatforms = [
   "CoinPayU", "FaucetPay", "Cointiply", "FreeBitcoin", "FireFaucet",
   "PipeFlare", "GlobalHive", "AdBTC", "Viefaucet", "DutchyCorp", 
   "LarvelFaucet", "Coinpot", "Other Faucet"
 ];
 
-// 🚀 Multiple Earning Methods (Tags)
 const earningMethodsList = [
   "Direct Faucet", "PTC Ads", "Surveys", "Offerwalls", 
   "Shortlinks", "Lottery / Spin", "Games", "Freelance Micro-Tasks",
   "Staking (Micro)", "Referrals"
 ];
 
-// 🚀 Expanded Destination Wallets
 const popularCryptoWallets = [
   "Binance", "CoinDCX", "WazirX", "Coinbase", "Trust Wallet", 
   "MetaMask", "Phantom", "FaucetPay", "KuCoin", "OKX", "Kraken", "Mexc"
 ];
 
-// Crypto Database (Fallback if objects are missing info)
 const defaultCryptoDatabase = [
   { id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', color: 'text-orange-500', bg: 'bg-orange-500/10' },
   { id: 'ethereum', symbol: 'ETH', name: 'Ethereum', color: 'text-blue-500', bg: 'bg-blue-500/10' },
@@ -83,7 +76,6 @@ const hashPIN = async (pinCode) => {
 };
 
 const MicroEarn = () => {
-  // 🚀 ENGINE CONNECTED: Global Date Formatter Included
   const { user, baseCurrency = 'INR', selectedCryptos = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
 
@@ -95,7 +87,7 @@ const MicroEarn = () => {
   const [livePrices, setLivePrices] = useState({});
   const [fiatRate, setFiatRate] = useState(1);
 
-  const [customUserCoins, setCustomUserCoins] = useState([]); // Needed for Contract fetching
+  const [customUserCoins, setCustomUserCoins] = useState([]); 
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -109,7 +101,6 @@ const MicroEarn = () => {
 
   const todayDate = new Date().toISOString().split('T')[0];
 
-  // 🚀 CRASH FIX: Extracting string symbols from object array safely
   const cryptoSymbols = useMemo(() => {
     return selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
   }, [selectedCryptos]);
@@ -118,7 +109,7 @@ const MicroEarn = () => {
     platform: microEarnPlatforms[0],
     methods: [], 
     destinationWallet: popularCryptoWallets[0],
-    coin: cryptoSymbols.length > 0 ? cryptoSymbols[0] : 'USDT', // FIXED Default state
+    coin: cryptoSymbols.length > 0 ? cryptoSymbols[0] : 'USDT',
     withdrawnAmount: '',
     receivedAmount: '',
     date: todayDate,
@@ -136,7 +127,6 @@ const MicroEarn = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // Fetch Custom User Coins for Contract MetaData
   useEffect(() => {
     const fetchUserData = async () => {
       if (!user) return;
@@ -149,7 +139,6 @@ const MicroEarn = () => {
     fetchUserData();
   }, [user]);
 
-  // Master Merge Engine
   const fullDatabase = useMemo(() => {
     const coinMap = new Map();
     defaultCryptoDatabase.forEach(c => coinMap.set(c.symbol.toUpperCase(), c));
@@ -165,7 +154,6 @@ const MicroEarn = () => {
     return Array.from(coinMap.values());
   }, [customUserCoins, selectedCryptos]);
 
-  // 🚀 REBUILT: HYBRID MULTI-TIER PRICE FETCHER (CG + GeckoTerminal)
   useEffect(() => {
     const fetchLivePrices = async () => {
       try {
@@ -176,7 +164,6 @@ const MicroEarn = () => {
         const coinsToFetch = Array.from(new Set([...transactions.map(t => t.coin), ...cryptoSymbols, 'USDT']));
         
         if (coinsToFetch.length > 0) {
-          
           let cgJson = {};
           let geckoTerminalData = {};
           const normalCoins = [];
@@ -191,7 +178,6 @@ const MicroEarn = () => {
              }
           });
 
-          // 1. Fetch Normal Coins (CoinGecko)
           if (normalCoins.length > 0) {
              try {
                const ids = [...new Set(normalCoins)].join(',');
@@ -200,10 +186,9 @@ const MicroEarn = () => {
                    const cgArr = await cgRes.json();
                    cgArr.forEach(c => { cgJson[c.id] = c; });
                }
-             } catch(e) { console.warn("CoinGecko API Limit Reached"); }
+             } catch(e) {}
           }
 
-          // 2. Fetch Custom Contract Coins (GeckoTerminal)
           for (const customCoin of contractCoins) {
              try {
                 const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${customCoin.network}/tokens/${customCoin.contractAddress}`);
@@ -214,7 +199,7 @@ const MicroEarn = () => {
                       image: gtJson.data.attributes.image_url
                    };
                 }
-             } catch (error) { console.warn(`GeckoTerminal failed for ${customCoin.symbol}`); }
+             } catch (error) {}
           }
           
           const priceMap = {};
@@ -234,13 +219,16 @@ const MicroEarn = () => {
                     finalUsdPrice = cgJson[id].current_price;
                     finalImage = cgJson[id].image;
                 } else {
-                    // Binance Fallback
                     try {
-                      const bSym = id === 'tether' ? 'BTCUSDT' : `${sym.toUpperCase()}USDT`;
-                      const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
-                      if (bRes.ok) {
-                        const bData = await bRes.json();
-                        finalUsdPrice = id === 'tether' ? 1.00 : parseFloat(bData.price);
+                      // Only call binance for safe coins
+                      const binanceSafeCoins = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC'];
+                      if(binanceSafeCoins.includes(sym.toUpperCase())){
+                          const bSym = id === 'tether' ? 'BTCUSDT' : `${sym.toUpperCase()}USDT`;
+                          const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
+                          if (bRes.ok) {
+                            const bData = await bRes.json();
+                            finalUsdPrice = id === 'tether' ? 1.00 : parseFloat(bData.price);
+                          }
                       }
                     } catch(err) {
                         finalUsdPrice = dbCoin.fallbackPrice || 0;
@@ -249,7 +237,7 @@ const MicroEarn = () => {
             }
 
             priceMap[sym.toUpperCase()] = {
-              priceUSD: finalUsdPrice,
+              priceUSD: finalUsdPrice || dbCoin.fallbackPrice || 0,
               image: finalImage,
               customLogo: dbCoin.logo,
             };
@@ -257,21 +245,19 @@ const MicroEarn = () => {
 
           setLivePrices(priceMap);
         }
-      } catch (error) { console.error("Crypto Sync Error"); }
+      } catch (error) {}
     };
     
     if (!isLoading && fullDatabase.length > 0) {
         fetchLivePrices();
-        const interval = setInterval(fetchLivePrices, 60000); // 60s Refresh
+        const interval = setInterval(fetchLivePrices, 60000); 
         return () => clearInterval(interval);
     }
   }, [isLoading, transactions, cryptoSymbols, baseCurrency, fullDatabase]);
 
-  // 🚀 THE MAGIC: FULLY DYNAMIC LIVE RANKING ENGINE
   const platformRankings = useMemo(() => {
     const stats = {};
     
-    // Aggregate Data (Quantities instead of static FIAT)
     transactions.forEach(t => {
       const plat = t.platform;
       if (!stats[plat]) {
@@ -281,12 +267,9 @@ const MicroEarn = () => {
       const rQty = parseFloat(t.receivedAmount) || 0;
       stats[plat].withdrawCount += 1;
       stats[plat].coins.add(t.coin.toUpperCase());
-      
-      // Store raw quantity for LIVE calculation
       stats[plat].coinQuantities[t.coin.toUpperCase()] = (stats[plat].coinQuantities[t.coin.toUpperCase()] || 0) + rQty;
     });
 
-    // 🚀 CALCULATE LIVE VALUE FOR EACH PLATFORM
     Object.values(stats).forEach(stat => {
       let currentLiveVal = 0;
       Object.entries(stat.coinQuantities).forEach(([coinSymbol, qty]) => {
@@ -296,10 +279,8 @@ const MicroEarn = () => {
       stat.totalLiveValue = currentLiveVal;
     });
 
-    // Convert to array and Sort by Highest LIVE Value
     const sorted = Object.values(stats).sort((a, b) => b.totalLiveValue - a.totalLiveValue);
 
-    // Assign Ranks and Ratings based on Performance
     return sorted.map((stat, index) => {
       let rating = "⚠️ Poor Yield (Consider Quitting)";
       let color = "text-rose-500";
@@ -350,7 +331,6 @@ const MicroEarn = () => {
 
       platformGroups[plat].lastDate = t.date;
       
-      // Calculate individual transaction live value vs recorded value
       const coinPriceUSD = livePrices[t.coin.toUpperCase()]?.priceUSD || 0;
       const currentLiveBaseAmount = (parseFloat(t.receivedAmount) || 0) * coinPriceUSD * fiatRate;
       
@@ -361,7 +341,6 @@ const MicroEarn = () => {
     return processedLogs;
   }, [transactions, livePrices, fiatRate]);
 
-  // 🚀 REPORT DOWNLOAD LOGIC (Now includes Global Date)
   const handleDownloadReport = (format) => {
     const filteredForReport = analyticsData.filter(t => 
       t.coin.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -375,7 +354,6 @@ const MicroEarn = () => {
       const methodsText = Array.isArray(rec.methods) ? rec.methods.join(", ") : 'N/A';
       
       return {
-        // 🚀 GLOBAL DATE IN REPORTS
         date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rec.date,
         platform: rec.platform || 'Unknown',
         methods: methodsText,
@@ -435,7 +413,6 @@ const MicroEarn = () => {
     const effectiveExchangeRate = currentPriceUSD * fiatRate;
     const finalBaseValue = rQty * effectiveExchangeRate;
 
-    // 1. Data for Micro-Earn Log
     const microRecordData = {
       platform: formData.platform,
       methods: formData.methods,
@@ -444,13 +421,12 @@ const MicroEarn = () => {
       withdrawnAmount: wQty,
       receivedAmount: rQty, 
       fee: wQty - rQty, 
-      earnedBaseValue: finalBaseValue, // Recorded Historical Value
+      earnedBaseValue: finalBaseValue,
       date: formData.date,
       timestamp: timestamp,
       linkedRecordId: uniqueId
     };
 
-    // 2. Data for Crypto Wallet
     const cryptoVaultData = {
       type: 'in', 
       coin: formData.coin,
@@ -464,7 +440,6 @@ const MicroEarn = () => {
       linkedRecordId: uniqueId
     };
 
-    // 3. Data for Income Streams (HISTORICAL - as per accounting rules)
     const incomeRecordData = {
       title: `Platform Yield: ${formData.platform}`,
       category: "Crypto APR / Yield",
@@ -482,7 +457,6 @@ const MicroEarn = () => {
 
     try {
       if (editingId) {
-        // 🚀 FIXED: Safe setDoc implementation for all 3 collections
         await setDoc(doc(db, "users", user.uid, "microEarnLogs", editingId), microRecordData, { merge: true });
         
         const collectionsToUpdate = [
@@ -556,7 +530,6 @@ const MicroEarn = () => {
       
       await deleteDoc(doc(db, "users", user.uid, "microEarnLogs", deleteContext.id));
       
-      // Cascade delete synced data
       if (deleteContext.linkedRecordId) {
           const collectionsToClean = ["cryptoWalletLogs", "incomeLogs"];
           for (const colName of collectionsToClean) {
@@ -592,7 +565,6 @@ const MicroEarn = () => {
   return (
     <div className="pt-24 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 max-w-7xl mx-auto px-4 md:px-0">
       
-      {/* HEADER SECTION */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
           <div className="flex items-center gap-3 mb-2">
@@ -607,7 +579,6 @@ const MicroEarn = () => {
         </div>
         
         <div className="flex items-center gap-2 md:gap-3">
-          {/* 🚀 DOWNLOAD REPORT DROPDOWN */}
           <div className="relative group">
             <button className="flex items-center gap-1 md:gap-2 p-3 md:p-3.5 bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400 rounded-2xl font-bold text-xs md:text-sm hover:bg-indigo-100 transition-colors border border-indigo-100 dark:border-indigo-500/20 shadow-sm">
               <HiOutlineDownload size={18}/> 
@@ -632,7 +603,6 @@ const MicroEarn = () => {
         </div>
       </div>
 
-      {/* 🚀 THE LEADERBOARD GRID (NOW LIVE SYNCED) */}
       <div>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
@@ -650,7 +620,6 @@ const MicroEarn = () => {
             {platformRankings.map((stat) => (
               <div key={stat.platform} className={`p-5 bg-white dark:bg-slate-900 border rounded-2xl shadow-sm flex flex-col gap-3 relative overflow-hidden transition-all hover:scale-[1.02] ${stat.bg}`}>
                 
-                {/* Visual Rank Background Indicator */}
                 <div className="absolute -right-4 -bottom-4 opacity-[0.03] dark:opacity-10 text-9xl font-black italic pointer-events-none select-none">
                   #{stat.rank}
                 </div>
@@ -689,7 +658,6 @@ const MicroEarn = () => {
         )}
       </div>
 
-      {/* LEDGER SEARCH & TABLE */}
       <div className="flex gap-4 bg-white dark:bg-slate-900 p-2 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800 mt-8">
         <div className="relative flex-1">
           <HiOutlineSearch className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 text-xl" />
@@ -717,10 +685,8 @@ const MicroEarn = () => {
               {filteredLogs.map((rec) => {
                 const isProfit = (rec.currentLiveBaseAmount || 0) >= (rec.earnedBaseValue || 0);
                 
-                // Safe Custom Logo Fetch
-                const coinObj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === rec.coin.toUpperCase());
-                const dbCoin = cryptoDatabase.find(c => c.symbol.toUpperCase() === rec.coin.toUpperCase());
-                const coinLogo = coinObj?.logo || dbCoin?.logo;
+                const coinObj = fullDatabase.find(c => c.symbol.toUpperCase() === rec.coin.toUpperCase());
+                const coinLogo = coinObj?.logo;
 
                 return (
                 <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
@@ -731,7 +697,6 @@ const MicroEarn = () => {
                       </div>
                       <div>
                         <p className="font-black text-slate-800 dark:text-white text-sm">{rec.platform}</p>
-                        {/* 🚀 GLOBAL DATE IN TABLE */}
                         <p className="text-[10px] font-bold text-slate-500 mt-0.5">
                           {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date}
                         </p>
@@ -763,7 +728,6 @@ const MicroEarn = () => {
                     )}
                   </td>
 
-                  {/* 🚀 SMART COLUMN: Shows Historical vs Live Value */}
                   <td className="p-4 text-right">
                     <p className="text-sm font-black text-slate-400 line-through decoration-rose-500/50">
                       {currencySymbol}{(rec.earnedBaseValue || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
@@ -785,7 +749,7 @@ const MicroEarn = () => {
                     </div>
                   </td>
 
-                  <td className="p-4 pr-6">
+                  <td className="p-4 pr-6 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => handleEdit(rec)} className="p-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 hover:bg-blue-100 rounded-xl transition-all shadow-sm"><HiOutlinePencil size={18} /></button>
                       <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 hover:bg-rose-100 rounded-xl transition-all shadow-sm"><HiOutlineTrash size={18} /></button>
@@ -803,7 +767,6 @@ const MicroEarn = () => {
         </div>
       </div>
 
-      {/* 🚀 SMART WITHDRAWAL MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 pt-[100px] md:pt-[120px]">
           <div className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90dvh] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-100 dark:border-slate-800">
@@ -838,7 +801,7 @@ const MicroEarn = () => {
                   <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Select Coin</label>
                   <div className="relative">
                     <div className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 p-1 flex items-center justify-center overflow-hidden z-10 pointer-events-none">
-                      <MarketIcon symbol={formData.coin} apiImage={livePrices[formData.coin.toUpperCase()]?.image} customLogo={selectedCryptos.find(c=>(typeof c === 'string' ? c : c.symbol)===formData.coin)?.logo} />
+                      <MarketIcon symbol={formData.coin} apiImage={livePrices[formData.coin.toUpperCase()]?.image} customLogo={fullDatabase.find(c=>c.symbol===formData.coin)?.logo} />
                     </div>
                     <select value={formData.coin} onChange={(e) => setFormData({...formData, coin: e.target.value})} className="w-full pl-14 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-black dark:text-white outline-none cursor-pointer appearance-none">
                       {cryptoSymbols.length > 0 ? cryptoSymbols.map(c => <option key={c} value={c}>{c}</option>) : <option value="USDT">USDT (Default)</option>}
@@ -848,7 +811,6 @@ const MicroEarn = () => {
                 </div>
               </div>
 
-              {/* 🚀 SMART MULTI-SELECT TAGS FOR EFFORT TRACKING */}
               <div className="space-y-2">
                 <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">How did you earn this? (Select multiple)</label>
                 <div className="flex flex-wrap gap-2 p-3 bg-slate-50 dark:bg-slate-800/30 rounded-2xl border border-slate-200 dark:border-slate-700">
@@ -883,7 +845,6 @@ const MicroEarn = () => {
                 </div>
               </div>
 
-              {/* 🚀 EXPANDED WALLET DESTINATIONS */}
               <div className="grid grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-1"><FaWallet/> Sent To Wallet</label>
@@ -902,7 +863,6 @@ const MicroEarn = () => {
                     </div>
                   )}
                 </div>
-                {/* 🚀 GLOBAL DATE APPLIED FOR MODAL */}
                 <div className="space-y-2">
                   <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1 flex justify-between">
                     <span>Date</span>
@@ -912,7 +872,7 @@ const MicroEarn = () => {
                 </div>
               </div>
 
-              <button type="submit" disabled={isSaving} className={`w-full p-4 rounded-2xl font-black text-white text-lg transition-all shadow-xl active:scale-95 disabled:opacity-70 bg-yellow-500 hover:bg-yellow-600 shadow-yellow-500/20`}>
+              <button type="submit" disabled={isSaving} className={`w-full p-4 rounded-2xl font-black text-white text-lg transition-all active:scale-95 disabled:opacity-70 bg-yellow-500 hover:bg-yellow-600 shadow-yellow-500/20`}>
                 {isSaving ? <HiOutlineRefresh className="animate-spin text-2xl mx-auto" /> : (editingId ? 'Update Withdrawal' : 'Log Withdrawal & Auto-Sync')}
               </button>
             </form>
@@ -920,7 +880,6 @@ const MicroEarn = () => {
         </div>
       )}
 
-      {/* 🔐 DELETE SECURITY MODAL */}
       {deleteContext && (
         <div className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 pt-[100px] md:pt-[120px] animate-in fade-in">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl p-8 border border-rose-100 dark:border-rose-900/50 relative overflow-hidden">
@@ -928,7 +887,7 @@ const MicroEarn = () => {
             <div className="flex flex-col items-center text-center mb-6">
               <div className="w-16 h-16 bg-rose-100 text-rose-600 dark:bg-rose-500/20 rounded-full flex items-center justify-center text-3xl mb-4"><HiOutlineLockClosed /></div>
               <h3 className="text-2xl font-black text-slate-900 dark:text-white">Security Check</h3>
-              <p className="text-sm font-bold text-slate-500 mt-2">Deleting this record will also remove it from your Crypto Engine and Income Log.</p>
+              <p className="text-sm font-bold text-slate-500 mt-2">Delete this earning position?</p>
             </div>
             <form onSubmit={executeSecureDelete} className="space-y-4">
               <input type="password" maxLength={6} required autoFocus value={pinInput} onChange={(e) => setPinInput(e.target.value)} placeholder="ENTER PIN" className="w-full text-center tracking-[0.5em] text-2xl p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-black dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50" />
