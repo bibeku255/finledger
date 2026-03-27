@@ -1,23 +1,150 @@
-import React from 'react';
-import { useTheme } from '../../hooks/useTheme'; // 🚀 Global Brain import kiya
+import React, { useState, useEffect, useRef } from 'react';
+import { useTheme } from '../../hooks/useTheme'; 
 import '../../styles/DarkModeToggle.css'; 
 
 const DarkModeToggle = () => {
-  // 🚀 Ab Toggle khud ka state nahi banayega, Global Context se value lega!
   const { theme, toggleTheme } = useTheme();
-  
-  // UI logic ke liye boolean check
   const isDarkMode = theme === 'dark';
 
+  // --- DRAG AND DROP LOGIC ---
+  const toggleRef = useRef(null);
+  
+  // Load saved position from Local Storage or set default bottom-right
+  const [position, setPosition] = useState(() => {
+    const savedPos = localStorage.getItem('darkModeTogglePosition');
+    if (savedPos) {
+      return JSON.parse(savedPos);
+    }
+    // Default position: roughly bottom right corner
+    return { x: window.innerWidth - 140, y: window.innerHeight - 80 }; 
+  });
+
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [hasMoved, setHasMoved] = useState(false); // To distinguish click vs drag
+
+  // Keep it within screen bounds on resize
+  useEffect(() => {
+    const handleResize = () => {
+      setPosition(prev => {
+        let newX = prev.x;
+        let newY = prev.y;
+        
+        if (newX > window.innerWidth - 130) newX = window.innerWidth - 130;
+        if (newY > window.innerHeight - 70) newY = window.innerHeight - 70;
+        if (newX < 10) newX = 10;
+        if (newY < 10) newY = 10;
+
+        return { x: newX, y: newY };
+      });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const handleStart = (e) => {
+    // Determine client coordinates (mouse or touch)
+    const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+    const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+
+    const rect = toggleRef.current.getBoundingClientRect();
+    setIsDragging(true);
+    setHasMoved(false);
+    
+    // Calculate where exactly inside the button the user clicked
+    setDragOffset({
+      x: clientX - rect.left,
+      y: clientY - rect.top
+    });
+
+    // Prevent default touch behavior (scrolling) while dragging
+    if (e.type.includes('touch')) {
+       document.body.style.overflow = 'hidden';
+    }
+  };
+
+  const handleMove = (e) => {
+    if (!isDragging) return;
+
+    setHasMoved(true); // User is moving, so it's a drag, not a click
+
+    const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+    const clientY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+
+    let newX = clientX - dragOffset.x;
+    let newY = clientY - dragOffset.y;
+
+    // Boundaries
+    const maxX = window.innerWidth - toggleRef.current.offsetWidth - 10;
+    const maxY = window.innerHeight - toggleRef.current.offsetHeight - 10;
+
+    if (newX < 10) newX = 10;
+    if (newX > maxX) newX = maxX;
+    if (newY < 10) newY = 10;
+    if (newY > maxY) newY = maxY;
+
+    setPosition({ x: newX, y: newY });
+  };
+
+  const handleEnd = (e) => {
+    if (isDragging) {
+      setIsDragging(false);
+      localStorage.setItem('darkModeTogglePosition', JSON.stringify(position));
+      document.body.style.overflow = ''; // Restore scrolling
+    }
+  };
+
+  // Add global event listeners for smooth drag even if mouse leaves the button area
+  useEffect(() => {
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMove, { passive: false });
+      window.addEventListener('mouseup', handleEnd);
+      window.addEventListener('touchmove', handleMove, { passive: false });
+      window.addEventListener('touchend', handleEnd);
+    } else {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleEnd);
+      window.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleEnd);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleEnd);
+      window.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleEnd);
+    };
+  }, [isDragging, dragOffset]);
+
+  const handleClick = (e) => {
+    // If the user was dragging, don't trigger the theme switch
+    if (hasMoved) {
+      e.preventDefault();
+      return;
+    }
+    toggleTheme();
+  };
+
   return (
-    <div className="horizontal-dark-mode-container bg-transparent transform scale-[0.8] md:scale-100 origin-right transition-transform">
+    <div 
+      ref={toggleRef}
+      onMouseDown={handleStart}
+      onTouchStart={handleStart}
+      className={`fixed z-[9999] horizontal-dark-mode-container bg-transparent transform scale-[0.8] md:scale-100 origin-center transition-transform ${isDragging ? 'cursor-grabbing scale-105 opacity-90' : 'cursor-grab'}`}
+      style={{
+        left: `${position.x}px`,
+        top: `${position.y}px`,
+        touchAction: 'none' // Crucial for mobile dragging
+      }}
+    >
       <button
-        className={`horizontal-dark-mode-toggle relative w-[120px] h-[60px] border-none rounded-full cursor-pointer transition-all duration-500 ease-in-out overflow-hidden
+        className={`horizontal-dark-mode-toggle relative w-[120px] h-[60px] border-none rounded-full transition-colors duration-500 ease-in-out overflow-hidden pointer-events-none
           ${isDarkMode 
-            ? 'bg-gradient-to-br from-gray-800 to-blue-800 shadow-lg' 
-            : 'bg-gradient-to-br from-blue-500 to-purple-500 shadow-lg'
-          } hover:shadow-xl active:scale-95`}
-        onClick={toggleTheme} // 🚀 Seedha global function call hoga
+            ? 'bg-gradient-to-br from-gray-800 to-blue-800 shadow-lg shadow-blue-900/30' 
+            : 'bg-gradient-to-br from-blue-500 to-purple-500 shadow-lg shadow-purple-500/30'
+          }`}
+        onClick={handleClick} 
+        style={{ pointerEvents: 'auto' }} // Allow clicks inside the wrapper
         aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
       >
         {/* Toggle Track */}
