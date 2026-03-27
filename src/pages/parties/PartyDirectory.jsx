@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc, setDoc, getDoc } from 'firebase/firestore';
+// 🚀 FIXED: Added getDocs, where, getDoc for Secure Delete Sync
+import { collection, addDoc, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDoc, getDocs, where } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
+
+// 🚀 IMPORTED REPORT UTILS
+import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
 
 import { 
   HiOutlineUserAdd, HiOutlineSearch, HiOutlineUsers, 
@@ -359,7 +363,7 @@ const PartyDirectory = () => {
               onClick={() => navigate(`/dashboard/parties/${party.id}`)}
               role="button"
               tabIndex={0}
-              className={`bg-white dark:bg-slate-900 p-5 rounded-3xl border shadow-sm hover:shadow-md transition-all cursor-pointer group relative flex flex-col justify-between h-full ${party.status === 'bad_debt' ? 'border-rose-300 dark:border-rose-500/50 bg-rose-50/30 dark:bg-rose-900/10' : 'border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-500/50'}`}
+              className={`bg-white dark:bg-slate-900 p-5 rounded-3xl border shadow-sm hover:shadow-md transition-all cursor-pointer relative flex flex-col justify-between h-full ${party.status === 'bad_debt' ? 'border-rose-300 dark:border-rose-500/50 bg-rose-50/30 dark:bg-rose-900/10' : 'border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-500/50'}`}
             >
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-start gap-3">
@@ -379,12 +383,13 @@ const PartyDirectory = () => {
                   </div>
                 </div>
                 
+                {/* 🚀 FIXED: Buttons are always visible now. Handled hover logic correctly */}
                 <div className="flex items-center gap-1">
-                  <button onClick={(e) => handleEditClick(party, e)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-colors z-10" title="Edit Details">
-                    <HiOutlinePencil size={16} />
+                  <button onClick={(e) => handleEditClick(party, e)} className="p-2 text-slate-400 hover:text-blue-600 active:bg-blue-50 dark:active:bg-blue-500/10 rounded-lg transition-colors z-10" title="Edit Details">
+                    <HiOutlinePencil size={18} />
                   </button>
-                  <button onClick={(e) => initiateDelete(party, e)} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-colors z-10" title="Delete">
-                    <HiOutlineTrash size={16} />
+                  <button onClick={(e) => initiateDelete(party, e)} className="p-2 text-slate-400 hover:text-rose-500 active:bg-rose-50 dark:active:bg-rose-500/10 rounded-lg transition-colors z-10" title="Delete">
+                    <HiOutlineTrash size={18} />
                   </button>
                 </div>
               </div>
@@ -402,12 +407,6 @@ const PartyDirectory = () => {
                 <p className={`text-2xl font-black ${party.status === 'bad_debt' ? 'text-rose-600 dark:text-rose-400' : party.netBalance > 0 ? 'text-emerald-500' : party.netBalance < 0 ? 'text-rose-500' : 'text-slate-500'}`}>
                   {currencySymbol}{Math.abs(party.netBalance).toLocaleString(undefined, {minimumFractionDigits: 2})}
                 </p>
-              </div>
-
-              <div className="absolute right-4 bottom-4 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${party.status === 'bad_debt' ? 'bg-rose-100 text-rose-600 dark:bg-rose-500/20' : 'bg-blue-50 text-blue-500 dark:bg-blue-500/10 dark:text-blue-400'}`}>
-                  <HiOutlineChevronRight />
-                </div>
               </div>
             </div>
           ))}

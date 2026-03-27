@@ -42,6 +42,9 @@ const PartyLedger = () => {
   const [activeModal, setActiveModal] = useState(null); 
   const [isProcessing, setIsProcessing] = useState(false);
   const [isFetchingRate, setIsFetchingRate] = useState(false);
+  
+  // 🚀 NEW STATE: To handle mobile-friendly 3-dot menu
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   // 🔐 Security Delete States
   const [deleteContext, setDeleteContext] = useState(null); 
@@ -466,6 +469,7 @@ const PartyLedger = () => {
 
   const openModal = (type) => {
     setActiveModal(type);
+    setIsMenuOpen(false); // 🚀 Ensure menu closes when opening modal
     
     if (type === 'emi_payment' && party) {
       setFormData({
@@ -661,7 +665,8 @@ const PartyLedger = () => {
       </div>
 
       {/* 🚀 ACTION FOOTER */}
-      <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 p-4 shrink-0 pb-6 md:pb-4 z-10 shadow-[0_-10px_20px_rgba(0,0,0,0.02)] dark:shadow-[0_-10px_20px_rgba(0,0,0,0.2)]">
+      {/* 🛠️ FIXED: Added safe-area padding for mobile overlap issues */}
+      <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 p-4 shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))] z-20 shadow-[0_-10px_20px_rgba(0,0,0,0.02)] dark:shadow-[0_-10px_20px_rgba(0,0,0,0.2)]">
         {party.status === 'bad_debt' || party.status === 'settled' ? (
           <div className="text-center p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700">
              <p className="text-sm font-black text-slate-500 uppercase tracking-widest">Account Closed</p>
@@ -687,11 +692,25 @@ const PartyLedger = () => {
               </>
             )}
             
-            <div className="relative group">
-              <button className="h-full px-3 md:px-4 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 dark:text-white rounded-2xl font-black flex items-center justify-center shadow-sm">
+            {/* 🛠️ FIXED: Replaced CSS Hover with React State Click for 100% Mobile Reliability */}
+            <div className="relative">
+              <button 
+                onClick={() => setIsMenuOpen(!isMenuOpen)} 
+                className={`h-full px-3 md:px-4 rounded-2xl font-black flex items-center justify-center shadow-sm transition-colors border border-slate-200 dark:border-slate-700
+                  ${isMenuOpen ? 'bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-white hover:bg-slate-200'}
+                `}
+              >
                 •••
               </button>
-              <div className="absolute bottom-full right-0 mb-3 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all p-2 flex flex-col gap-1 z-50">
+              
+              {/* Invisible Overlay to close menu when clicking outside */}
+              {isMenuOpen && (
+                <div className="fixed inset-0 z-40" onClick={() => setIsMenuOpen(false)}></div>
+              )}
+
+              <div className={`absolute bottom-full right-0 mb-3 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl transition-all duration-200 p-2 flex flex-col gap-1 z-50 origin-bottom-right
+                ${isMenuOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'}`}>
+                
                 {party.accountType !== 'loan' && (
                   <button onClick={() => openModal('interest')} className="w-full text-left px-4 py-3 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold text-xs flex items-center gap-2">
                     <FaPercent/> Charge Interest
@@ -706,6 +725,7 @@ const PartyLedger = () => {
                 </button>
               </div>
             </div>
+
           </div>
         )}
       </div>
@@ -725,7 +745,7 @@ const PartyLedger = () => {
               </button>
             </div>
             
-            <form onSubmit={handleTransaction} className="p-6 md:p-8 space-y-6 overflow-y-auto custom-scrollbar flex-1">
+            <form onSubmit={handleTransaction} className="p-6 md:p-8 space-y-6 overflow-y-auto custom-scrollbar flex-1 pb-[max(2rem,env(safe-area-inset-bottom))]">
               {activeModal === 'interest' ? (
                 <div className="space-y-4 bg-blue-50 dark:bg-blue-900/10 p-5 rounded-2xl border border-blue-100 dark:border-blue-900/30">
                   <div className="flex gap-2 bg-white dark:bg-slate-900 p-1 rounded-xl border border-blue-200 dark:border-blue-800">
