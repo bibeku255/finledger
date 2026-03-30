@@ -66,7 +66,24 @@ const CapitalShifting = () => {
     fetchUserData();
   }, [user]);
 
-  // 🚀 CRASH FIX: Properly mapping objects to strings to avoid React render crash
+  // 🚀 FETCH EXISTING BANKS/WALLETS FOR AUTO-SUGGEST
+  const [existingVaultNames, setExistingVaultNames] = useState([]);
+  useEffect(() => {
+     if(!user) return;
+     const fetchVaults = async () => {
+        const qBank = query(collection(db, "users", user.uid, "bankWallet"));
+        const snapBank = await getDocs(qBank);
+        const qOnline = query(collection(db, "users", user.uid, "onlineWallet"));
+        const snapOnline = await getDocs(qOnline);
+        
+        const names = new Set();
+        snapBank.docs.forEach(d => { if(d.data().bankName) names.add(d.data().bankName) });
+        snapOnline.docs.forEach(d => { if(d.data().walletName) names.add(d.data().walletName) });
+        setExistingVaultNames(Array.from(names));
+     };
+     fetchVaults();
+  }, [user]);
+
   const cryptoCurrencies = useMemo(() => {
     const customSymbols = selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
     return Array.from(new Set(["USDT", "USDC", "BTC", "ETH", "BNB", "SOL", "TRX", "MATIC", ...customSymbols]));
@@ -88,6 +105,7 @@ const CapitalShifting = () => {
 
   const [transferData, setTransferData] = useState({
     fromVault: 'online', 
+    fromSubWallet: '', // 🚀 NEW
     fromCryptoPlatform: cryptoPlatformsList[0],
     fromAsset: 'USDT', 
     grossAmount: '', 
@@ -102,6 +120,7 @@ const CapitalShifting = () => {
     routingAgent: '', 
     
     toVault: 'bank', 
+    toSubWallet: '', // 🚀 NEW
     toCryptoPlatform: cryptoPlatformsList[0],
     toAsset: baseCurrency, 
     netReceived: '', 
@@ -112,6 +131,7 @@ const CapitalShifting = () => {
     referenceId: '' 
   });
 
+  // Keep fee asset synced with from asset initially
   useEffect(() => {
     setTransferData(prev => ({ ...prev, networkFeeAsset: prev.fromAsset }));
   }, [transferData.fromAsset]);
@@ -126,7 +146,7 @@ const CapitalShifting = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // 🌍 SMART TRIPLE-RATE FETCHER (UPGRADED with GeckoTerminal + Binance Fallback)
+  // 🌍 SMART TRIPLE-RATE FETCHER
   const fetchLiveRates = async () => {
     setIsFetchingRate(true);
     try {
@@ -141,7 +161,6 @@ const CapitalShifting = () => {
       const getAssetRate = async (assetSym) => {
         if (assetSym === baseCurrency) return 1;
         
-        // Fiat check
         if (fiatCurrencies.includes(assetSym)) {
           const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${assetSym}`);
           const data = await res.json();
@@ -150,14 +169,12 @@ const CapitalShifting = () => {
         
         if (assetSym === 'USDT' || assetSym === 'USDC') return usdToBase;
         
-        // 🚀 SMART CRYPTO CHECK (Hybrid Fetcher)
         const upperSym = assetSym.toUpperCase();
         const coinObj = fullDatabase.find(c => c.symbol === upperSym) || {};
         const searchId = coinObj?.id || assetSym.toLowerCase();
 
         let priceUsd = null;
 
-        // Try GeckoTerminal First if it's a Contract Token
         if (coinObj.fetchMode === 'contract' && coinObj.network && coinObj.contractAddress) {
            try {
               const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${coinObj.network}/tokens/${coinObj.contractAddress}`);
@@ -168,7 +185,6 @@ const CapitalShifting = () => {
            } catch(e) {}
         } 
         
-        // Try CoinGecko if not Contract or if GT failed
         if (!priceUsd) {
            try {
              const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
@@ -177,7 +193,6 @@ const CapitalShifting = () => {
            } catch(e) {}
         }
 
-        // Binance Fallback
         if (!priceUsd) {
           try {
              const binanceSymbol = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
@@ -228,17 +243,17 @@ const CapitalShifting = () => {
   const feeFinalBase = (parseFloat(transferData.networkFee) || 0) * (parseFloat(transferData.networkFeeExchangeRate) || 1);
   const destinationTaxBase = (parseFloat(transferData.taxAndFees) || 0) * (parseFloat(transferData.toExchangeRate) || 1);
 
-  // 🚀 REPORT DOWNLOAD LOGIC (Now includes Global Date)
+  // 🚀 REPORT DOWNLOAD LOGIC
   const handleDownloadReport = (format) => {
     if (shiftHistory.length === 0) return alert("No transfer records found to download.");
 
     const reportData = shiftHistory.map(shift => {
-      let fromDetails = `${Number(shift.grossAmount).toLocaleString()} ${shift.fromAsset} (From ${shift.fromVault})`;
+      let fromDetails = `${Number(shift.grossAmount).toLocaleString()} ${shift.fromAsset} (From ${shift.fromVault}${shift.fromSubWallet ? ` - ${shift.fromSubWallet}` : ''})`;
       if (shift.fromVault === 'crypto' && shift.fromCryptoPlatform) {
          fromDetails += ` - ${shift.fromCryptoPlatform}`;
       }
 
-      let toDetails = `${Number(shift.netReceived).toLocaleString()} ${shift.toAsset} (To ${shift.toVault})`;
+      let toDetails = `${Number(shift.netReceived).toLocaleString()} ${shift.toAsset} (To ${shift.toVault}${shift.toSubWallet ? ` - ${shift.toSubWallet}` : ''})`;
       if (shift.toVault === 'crypto' && shift.toCryptoPlatform) {
          toDetails += ` - ${shift.toCryptoPlatform}`;
       }
@@ -281,13 +296,20 @@ const CapitalShifting = () => {
   const handleTransfer = async (e) => {
     e.preventDefault();
     if (!user) return alert("Please login first!");
+
+    // 🚀 Validation for Sub-Wallets
+    if ((transferData.fromVault === 'bank' || transferData.fromVault === 'online') && !transferData.fromSubWallet.trim()) {
+        return alert("Please specify the exact Source Bank or Wallet Name.");
+    }
+    if ((transferData.toVault === 'bank' || transferData.toVault === 'online') && !transferData.toSubWallet.trim()) {
+        return alert("Please specify the exact Destination Bank or Wallet Name.");
+    }
     
     if(window.confirm(`Confirm shifting ${transferData.grossAmount} ${transferData.fromAsset} to ${transferData.toVault.toUpperCase()}?`)) {
       setIsProcessing(true);
 
       const timestamp = new Date(transferData.date).getTime();
       const shiftId = `SHIFT_${timestamp}_${Math.floor(Math.random() * 1000)}`;
-
       const totalOutBase = fromFinalBase + feeFinalBase;
 
       // 1️⃣ GENERATE SOURCE RECORD (DEDUCTION)
@@ -298,37 +320,20 @@ const CapitalShifting = () => {
 
       if (transferData.fromVault === 'crypto') {
         outRecord = {
-          type: 'out',
-          coin: transferData.fromAsset,
-          quantity: parseFloat(transferData.grossAmount),
-          platform: transferData.fromCryptoPlatform,
-          reason: `Shifted to ${transferData.toVault}`,
-          referenceNo: transferData.referenceId,
-          date: transferData.date,
-          timestamp,
-          shiftId,
-          isTransfer: true
+          type: 'out', coin: transferData.fromAsset, quantity: parseFloat(transferData.grossAmount), platform: transferData.fromCryptoPlatform,
+          reason: `Shifted to ${transferData.toVault}`, referenceNo: transferData.referenceId, date: transferData.date, timestamp, shiftId, isTransfer: true
         };
       } else {
         outRecord = {
           title: `Transferred to ${transferData.toVault.toUpperCase()}`,
-          type: 'out', 
-          date: transferData.date,
-          timestamp,
-          currency: transferData.fromAsset,
-          foreignAmount: parseFloat(transferData.grossAmount), 
-          exchangeRate: parseFloat(transferData.fromExchangeRate) || 1,
-          fee: parseFloat(transferData.networkFee) || 0, 
-          feeAsset: transferData.networkFeeAsset, 
-          feeExchangeRate: parseFloat(transferData.networkFeeExchangeRate) || 1,
-          finalBaseAmount: totalOutBase, 
-          isTransfer: true,
-          shiftId,
+          type: 'out', date: transferData.date, timestamp, currency: transferData.fromAsset,
+          foreignAmount: parseFloat(transferData.grossAmount), exchangeRate: parseFloat(transferData.fromExchangeRate) || 1,
+          fee: parseFloat(transferData.networkFee) || 0, feeAsset: transferData.networkFeeAsset, feeExchangeRate: parseFloat(transferData.networkFeeExchangeRate) || 1,
+          finalBaseAmount: totalOutBase, isTransfer: true, shiftId,
           notes: `Platform: ${transferData.routingPlatform} | Agent: ${transferData.routingAgent}`,
-          walletName: transferData.routingPlatform || 'Capital Shift', 
-          walletCategory: 'Fiat Wallet',
-          bankName: transferData.routingPlatform || 'Capital Shift',
-          transferType: 'Internal Transfer'
+          walletName: transferData.fromSubWallet || 'Capital Shift', // 🚀 Dynamic
+          bankName: transferData.fromSubWallet || 'Capital Shift', // 🚀 Dynamic
+          walletCategory: 'Fiat Wallet', transferType: 'Internal Transfer'
         };
       }
 
@@ -340,44 +345,34 @@ const CapitalShifting = () => {
 
       if (transferData.toVault === 'crypto') {
          inRecord = {
-          type: 'in',
-          coin: transferData.toAsset,
-          quantity: parseFloat(transferData.netReceived),
-          platform: transferData.toCryptoPlatform,
-          reason: `Received from ${transferData.fromVault}`,
-          referenceNo: transferData.referenceId,
-          date: transferData.date,
-          timestamp,
-          shiftId,
-          isTransfer: true
+          type: 'in', coin: transferData.toAsset, quantity: parseFloat(transferData.netReceived), platform: transferData.toCryptoPlatform,
+          reason: `Received from ${transferData.fromVault}`, referenceNo: transferData.referenceId, date: transferData.date, timestamp, shiftId, isTransfer: true
         };
       } else {
         inRecord = {
           title: `Received from ${transferData.fromVault.toUpperCase()}`,
-          type: 'in', 
-          date: transferData.date,
-          timestamp,
-          currency: transferData.toAsset,
-          foreignAmount: parseFloat(transferData.netReceived), 
-          exchangeRate: parseFloat(transferData.toExchangeRate) || 1, 
-          finalBaseAmount: toFinalBase,
-          fee: parseFloat(transferData.taxAndFees) || 0, 
-          isP2P: transferData.routingPlatform ? true : false, 
-          isTransfer: true,
-          shiftId,
-          referenceNo: transferData.referenceId,
+          type: 'in', date: transferData.date, timestamp, currency: transferData.toAsset,
+          foreignAmount: parseFloat(transferData.netReceived), exchangeRate: parseFloat(transferData.toExchangeRate) || 1, 
+          finalBaseAmount: toFinalBase, fee: parseFloat(transferData.taxAndFees) || 0, 
+          isP2P: transferData.routingPlatform ? true : false, isTransfer: true, shiftId, referenceNo: transferData.referenceId,
           notes: `Platform: ${transferData.routingPlatform} | Agent: ${transferData.routingAgent}`,
-          walletName: transferData.routingPlatform || 'Capital Shift',
-          walletCategory: 'Fiat Wallet',
-          bankName: transferData.routingPlatform || 'Capital Shift',
-          transferType: 'Internal Transfer'
+          walletName: transferData.toSubWallet || 'Capital Shift', // 🚀 Dynamic
+          bankName: transferData.toSubWallet || 'Capital Shift', // 🚀 Dynamic
+          walletCategory: 'Fiat Wallet', transferType: 'Internal Transfer'
         };
       }
 
       try {
         await addDoc(collection(db, "users", user.uid, fromCollection), outRecord);
         await addDoc(collection(db, "users", user.uid, toCollection), inRecord);
-        await addDoc(collection(db, "users", user.uid, "capitalShifts"), { ...transferData, shiftId, timestamp });
+        
+        // Save Master Shift Log
+        await addDoc(collection(db, "users", user.uid, "capitalShifts"), { 
+            ...transferData, 
+            fromSubWallet: transferData.fromVault === 'bank' || transferData.fromVault === 'online' ? transferData.fromSubWallet.trim() : '',
+            toSubWallet: transferData.toVault === 'bank' || transferData.toVault === 'online' ? transferData.toSubWallet.trim() : '',
+            shiftId, timestamp 
+        });
 
         // 🚀 AUTO-EXPENSE BRIDGE: Log fees to Expense Tracker
         const totalFeeInBase = feeFinalBase + destinationTaxBase;
@@ -386,6 +381,7 @@ const CapitalShifting = () => {
                 title: `Capital Shift Fee (${transferData.fromVault} to ${transferData.toVault})`,
                 category: "Forex & Bank Charges", 
                 vault: transferData.fromVault, 
+                subWallet: transferData.fromVault === 'bank' || transferData.fromVault === 'online' ? transferData.fromSubWallet.trim() : '', // 🚀 Match Deducted Vault
                 asset: baseCurrency, 
                 amount: totalFeeInBase,
                 exchangeRate: 1,
@@ -399,7 +395,7 @@ const CapitalShifting = () => {
         }
 
         alert("Capital Shifted Successfully!");
-        setTransferData({ ...transferData, grossAmount: '', networkFee: '', taxAndFees: '', netReceived: '', referenceId: ''});
+        setTransferData(prev => ({ ...prev, grossAmount: '', networkFee: '', taxAndFees: '', netReceived: '', referenceId: ''}));
       } catch (error) {
         console.error(error);
         alert("Transfer Failed!");
@@ -443,7 +439,7 @@ const CapitalShifting = () => {
       // 1. Delete Master Shift Record
       await deleteDoc(doc(db, "users", user.uid, "capitalShifts", deleteContext.id));
       
-      // 2. Remove from ALL possible vaults (Including Crypto) using the unique shiftId
+      // 2. Remove from ALL possible vaults
       const collectionsToCheck = ['cashWallet', 'bankWallet', 'onlineWallet', 'cryptoWalletLogs'];
       for (let col of collectionsToCheck) {
         const q = query(collection(db, "users", user.uid, col), where("shiftId", "==", deleteContext.shiftId));
@@ -453,7 +449,7 @@ const CapitalShifting = () => {
         });
       }
 
-      // 3. Remove from Expense Logs
+      // 3. Remove from Expense Logs (Fees)
       const expQuery = query(collection(db, "users", user.uid, "expenseLogs"), where("linkedExpenseId", "==", deleteContext.shiftId));
       const expSnapshot = await getDocs(expQuery);
       expSnapshot.forEach(async (document) => {
@@ -482,7 +478,7 @@ const CapitalShifting = () => {
           <div>
             <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Capital Shifting</h1>
             <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">
-              Move assets across Vaults. Supports Fiat-to-Crypto and Crypto-to-Fiat bridging.
+              Move assets across Vaults. Supports Fiat-to-Crypto and exact Sub-Wallet routing.
             </p>
           </div>
         </div>
@@ -524,9 +520,9 @@ const CapitalShifting = () => {
             <div className="space-y-2">
               <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Source Vault</label>
               <div className="relative">
-                 <select value={transferData.fromVault} onChange={e => setTransferData({...transferData, fromVault: e.target.value})} className="w-full pl-4 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 cursor-pointer appearance-none">
+                 <select value={transferData.fromVault} onChange={e => setTransferData({...transferData, fromVault: e.target.value, fromSubWallet: ''})} className="w-full pl-4 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 cursor-pointer appearance-none">
                    <option value="crypto">Crypto Engine</option>
-                   <option value="online">Online Wallet (PayPal, etc)</option>
+                   <option value="online">Online Wallet</option>
                    <option value="bank">Bank Account</option>
                    <option value="cash">Physical Cash</option>
                  </select>
@@ -534,9 +530,20 @@ const CapitalShifting = () => {
               </div>
             </div>
             
+            {/* 🚀 SUB-WALLET AUTOCOMPLETE FOR SOURCE */}
+            {(transferData.fromVault === 'bank' || transferData.fromVault === 'online') && (
+              <div className="space-y-2 animate-in fade-in">
+                <label className="text-[11px] font-black text-blue-500 uppercase tracking-widest ml-1">{transferData.fromVault === 'bank' ? 'Bank Name' : 'Wallet Name'}</label>
+                <input type="text" list="existing-vaults-source" required value={transferData.fromSubWallet} onChange={(e) => setTransferData({...transferData, fromSubWallet: e.target.value})} placeholder="e.g. SBI, PayPal" className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50" />
+                <datalist id="existing-vaults-source">
+                   {existingVaultNames.map(b => <option key={b} value={b} />)}
+                </datalist>
+              </div>
+            )}
+
             {/* Conditional Crypto Platform Select */}
             {transferData.fromVault === 'crypto' && (
-              <div className="space-y-2">
+              <div className="space-y-2 animate-in fade-in">
                 <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Platform</label>
                 <div className="relative">
                   <select value={transferData.fromCryptoPlatform} onChange={e => setTransferData({...transferData, fromCryptoPlatform: e.target.value})} className="w-full pl-4 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 cursor-pointer appearance-none">
@@ -650,9 +657,9 @@ const CapitalShifting = () => {
             <div className="space-y-2">
               <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Destination Vault</label>
               <div className="relative">
-                <select value={transferData.toVault} onChange={e => setTransferData({...transferData, toVault: e.target.value})} className="w-full pl-4 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 cursor-pointer appearance-none">
+                <select value={transferData.toVault} onChange={e => setTransferData({...transferData, toVault: e.target.value, toSubWallet: ''})} className="w-full pl-4 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 cursor-pointer appearance-none">
                   <option value="bank">Bank Account</option>
-                  <option value="online">Online Wallet (PayPal, etc)</option>
+                  <option value="online">Online Wallet</option>
                   <option value="cash">Physical Cash</option>
                   <option value="crypto">Crypto Engine</option>
                 </select>
@@ -660,9 +667,20 @@ const CapitalShifting = () => {
               </div>
             </div>
 
+            {/* 🚀 SUB-WALLET AUTOCOMPLETE FOR DESTINATION */}
+            {(transferData.toVault === 'bank' || transferData.toVault === 'online') && (
+              <div className="space-y-2 animate-in fade-in">
+                <label className="text-[11px] font-black text-blue-500 uppercase tracking-widest ml-1">{transferData.toVault === 'bank' ? 'Bank Name' : 'Wallet Name'}</label>
+                <input type="text" list="existing-vaults-dest" required value={transferData.toSubWallet} onChange={(e) => setTransferData({...transferData, toSubWallet: e.target.value})} placeholder="e.g. SBI, PayPal" className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50" />
+                <datalist id="existing-vaults-dest">
+                   {existingVaultNames.map(b => <option key={b} value={b} />)}
+                </datalist>
+              </div>
+            )}
+
             {/* Conditional Crypto Platform Select for Dest */}
             {transferData.toVault === 'crypto' && (
-              <div className="space-y-2">
+              <div className="space-y-2 animate-in fade-in">
                 <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Platform</label>
                 <div className="relative">
                   <select value={transferData.toCryptoPlatform} onChange={e => setTransferData({...transferData, toCryptoPlatform: e.target.value})} className="w-full pl-4 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 cursor-pointer appearance-none">
@@ -783,6 +801,14 @@ const CapitalShifting = () => {
                           <p className="font-black text-rose-600 dark:text-rose-400 text-base">
                             -{Number(shift.grossAmount).toLocaleString()} {shift.fromAsset}
                           </p>
+                          
+                          {/* 🚀 SUBWALLET RENDER FOR SOURCE */}
+                          {shift.fromVault !== 'crypto' && shift.fromSubWallet && (
+                             <p className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-widest bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded flex items-center gap-1">
+                               <FaBuilding/> {shift.fromSubWallet}
+                             </p>
+                          )}
+
                           {shift.fromVault === 'crypto' && shift.fromCryptoPlatform && (
                             <p className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-widest bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
                               {shift.fromCryptoPlatform}
@@ -806,6 +832,14 @@ const CapitalShifting = () => {
                           <p className="font-black text-emerald-600 dark:text-emerald-400 text-base">
                             +{Number(shift.netReceived).toLocaleString()} {shift.toAsset}
                           </p>
+
+                          {/* 🚀 SUBWALLET RENDER FOR DEST */}
+                          {shift.toVault !== 'crypto' && shift.toSubWallet && (
+                             <p className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-widest bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded flex items-center gap-1">
+                               <FaBuilding/> {shift.toSubWallet}
+                             </p>
+                          )}
+
                           {shift.toVault === 'crypto' && shift.toCryptoPlatform && (
                             <p className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-widest bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
                               {shift.toCryptoPlatform}
@@ -886,7 +920,7 @@ const CapitalShifting = () => {
                   Cancel
                 </button>
                 <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-2xl font-black text-white bg-rose-500 hover:bg-rose-600 transition-colors disabled:opacity-50">
-                  Verify & Revert
+                  Verify & Delete
                 </button>
               </div>
             </form>

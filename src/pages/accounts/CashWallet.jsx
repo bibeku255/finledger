@@ -13,7 +13,7 @@ import {
   HiOutlineTrendingUp, HiOutlineTrendingDown,
   HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable
 } from 'react-icons/hi';
-import { FaMoneyBillWave, FaArrowDown, FaArrowUp, FaGlobe, FaExchangeAlt } from 'react-icons/fa';
+import { FaMoneyBillWave, FaArrowDown, FaArrowUp, FaGlobe, FaExchangeAlt, FaWallet } from 'react-icons/fa';
 
 const commonCurrencies = ["USD", "EUR", "GBP", "AUD", "CAD", "SGD", "AED", "SAR", "JPY", "CNY", "INR", "NPR", "PKR", "BDT"];
 
@@ -99,6 +99,30 @@ const CashWallet = () => {
 
     return () => unsubscribe();
   }, [user]);
+
+  // 🚀 1. MULTI-CURRENCY AGGREGATOR LOGIC (Calculates exactly how much of each physical note you have)
+  const currencyBalances = useMemo(() => {
+    const balances = {};
+    
+    transactions.forEach(t => {
+      const curr = t.currency || baseCurrency;
+      const amt = Number(t.foreignAmount || t.amount || 0);
+      
+      if (!balances[curr]) balances[curr] = 0;
+      
+      if (t.type === 'in') {
+        balances[curr] += amt;
+      } else {
+        balances[curr] -= amt;
+      }
+    });
+
+    // Remove empty balances or dust
+    return Object.entries(balances)
+      .filter(([_, value]) => Math.abs(value) > 0.01)
+      .map(([curr, value]) => ({ currency: curr, value }));
+  }, [transactions, baseCurrency]);
+
 
   const processedLedger = useMemo(() => {
     const sorted = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -381,13 +405,28 @@ const CashWallet = () => {
         </div>
       </div>
 
-      <div className="p-8 bg-gradient-to-br from-slate-900 to-slate-800 dark:from-slate-800 dark:to-slate-900 rounded-[2rem] shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center justify-between">
+      <div className="p-8 bg-gradient-to-br from-slate-900 to-slate-800 dark:from-slate-800 dark:to-slate-900 rounded-[2rem] shadow-2xl relative overflow-hidden flex flex-col items-start justify-center min-h-[200px]">
         <div className="absolute -right-10 -top-10 opacity-10 text-white"><HiOutlineCash size={200} /></div>
-        <div className="relative z-10">
-          <p className="text-sm font-black text-slate-400 uppercase tracking-widest mb-2">Net Cash Vault Balance</p>
+        <div className="relative z-10 w-full">
+          <p className="text-sm font-black text-slate-400 uppercase tracking-widest mb-2">Net Cash Vault Balance (Base Equiv.)</p>
           <h2 className="text-5xl md:text-6xl font-black text-emerald-400 tracking-tight">
             {currencySymbol}{(totalBalance || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
           </h2>
+          
+          {/* 🚀 SUB-WALLET BALANCES RENDERED HERE */}
+          {currencyBalances.length > 0 && (
+             <div className="mt-6 pt-6 border-t border-slate-700/50 flex gap-4 overflow-x-auto custom-scrollbar pb-2">
+               {currencyBalances.map((item, idx) => (
+                  <div key={idx} className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-xl px-4 py-3 shrink-0 flex items-center gap-3">
+                     <img src={`https://flagcdn.com/w40/${fiatFlagMap[item.currency] || 'un'}.png`} alt="" className="w-8 h-8 rounded-full object-cover border border-slate-600" />
+                     <div>
+                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-tight">Physical {item.currency}</p>
+                       <p className="text-lg font-bold text-white leading-none mt-0.5">{item.value.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                     </div>
+                  </div>
+               ))}
+             </div>
+          )}
         </div>
       </div>
 

@@ -42,7 +42,6 @@ const hashPIN = async (pinCode) => {
 };
 
 const ExpenseTracker = () => {
-  // 🚀 ENGINE CONNECTED: Global Date Formatter
   const { user, baseCurrency = 'INR', selectedCryptos = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
 
@@ -63,12 +62,13 @@ const ExpenseTracker = () => {
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
 
-  const [customUserCoins, setCustomUserCoins] = useState([]); // Needed for Contract fetching
+  const [customUserCoins, setCustomUserCoins] = useState([]); 
   
   const todayDate = new Date().toISOString().split('T')[0];
 
   const defaultSplitSource = { 
     vault: 'bank', 
+    subWallet: '', 
     asset: baseCurrency, 
     cryptoPlatform: cryptoPlatformsList[12], 
     amount: '', 
@@ -83,12 +83,14 @@ const ExpenseTracker = () => {
     linkedExpenseId: '',
     isSplit: false,
     vault: 'bank', 
+    subWallet: '', 
     asset: baseCurrency, 
     cryptoPlatform: cryptoPlatformsList[12], 
     amount: '', 
     exchangeRate: 1, 
     isCustomSingle: false,
-    splitSources: [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ]
+    splitSources: [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ],
+    isSynced: false // 🚀 Track if it's an auto-synced entry
   });
 
   useEffect(() => {
@@ -101,7 +103,6 @@ const ExpenseTracker = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // Fetch Custom User Coins for Contract MetaData
   useEffect(() => {
     const fetchUserData = async () => {
       if (!user) return;
@@ -114,7 +115,6 @@ const ExpenseTracker = () => {
     fetchUserData();
   }, [user]);
 
-  // Master Merge Engine for Coins
   const fullDatabase = useMemo(() => {
     const coinMap = new Map();
     selectedCryptos.forEach(c => {
@@ -126,6 +126,20 @@ const ExpenseTracker = () => {
     });
     return Array.from(coinMap.values());
   }, [customUserCoins, selectedCryptos]);
+
+  // 🚀 FETCH EXISTING BANKS FOR AUTO-SUGGEST
+  const [bankWalletLogs, setBankWalletLogs] = useState([]);
+  useEffect(() => {
+     if(!user) return;
+     const fetchBanks = async () => {
+        const q = query(collection(db, "users", user.uid, "bankWallet"));
+        const snap = await getDocs(q);
+        setBankWalletLogs(snap.docs.map(d => d.data().bankName).filter(Boolean));
+     };
+     fetchBanks();
+  }, [user]);
+  
+  const existingBanks = useMemo(() => Array.from(new Set(bankWalletLogs)), [bankWalletLogs]);
 
   const activeAssetList = useMemo(() => {
     if (formData.vault === 'crypto') {
@@ -151,9 +165,7 @@ const ExpenseTracker = () => {
 
     sorted.forEach(t => {
       const dateObj = new Date(t.date || new Date());
-      // 🚀 NAYA LOGIC: Grouping based on the Global Date Format (Month & Year)
       const monthName = formatGlobalDate ? formatGlobalDate(dateObj, 'monthYear') : dateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
-      // Raw English 'YYYY-MM' key for correct chronological sorting behind the scenes
       const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
 
       if (!grouped[monthKey]) {
@@ -169,7 +181,6 @@ const ExpenseTracker = () => {
 
   const totalExpenseBase = expenses.reduce((acc, curr) => acc + (Number(curr.finalBaseAmount) || 0), 0);
 
-  // 🚀 REPORT DOWNLOAD LOGIC (Now includes Global Date)
   const handleDownloadReport = (format) => {
     const filteredForReport = expenses.filter(exp => {
       const matchSearch = exp.title.toLowerCase().includes(searchTerm.toLowerCase()) || (exp.asset && exp.asset.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -181,7 +192,7 @@ const ExpenseTracker = () => {
 
     const reportData = filteredForReport.map(rec => {
       const cleanTitle = (rec.title || 'N/A').replace(/(\r\n|\n|\r)/gm, " ");
-      const sourceText = rec.isSplit ? 'Split Payment (Multi)' : `${rec.vault.charAt(0).toUpperCase() + rec.vault.slice(1)} Vault`;
+      const sourceText = rec.isSplit ? 'Split Payment (Multi)' : `${rec.vault.charAt(0).toUpperCase() + rec.vault.slice(1)} Vault${rec.subWallet ? ` (${rec.subWallet})` : ''}`;
       const nativeAmtText = rec.isSplit ? 'Multiple Assets' : `${(Number(rec.amount) || 0).toLocaleString()} ${rec.asset}`;
 
       return {
@@ -213,7 +224,6 @@ const ExpenseTracker = () => {
     }
   };
 
-  // 🚀 UPDATED HYBRID LIVE RATE FETCHER (GeckoTerminal + CoinGecko + Binance)
   const fetchLiveRate = async (index = null) => {
     const isSingle = index === null;
     const assetToCheck = isSingle ? formData.asset : formData.splitSources[index].asset;
@@ -233,14 +243,11 @@ const ExpenseTracker = () => {
         const data = await res.json();
         finalRate = data.rates[baseCurrency] || 1;
       } else {
-        // 1. Get full coin object from fullDatabase
         const coinObj = fullDatabase.find(c => c.symbol === assetToCheck.toUpperCase()) || {};
-        
-        // 2. Identify the search ID
         const searchId = coinObj.id || assetToCheck.toLowerCase();
+
         let priceUsd = null;
 
-        // 3. Try GeckoTerminal First if it's a Contract Token
         if (coinObj.fetchMode === 'contract' && coinObj.network && coinObj.contractAddress) {
            try {
               const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${coinObj.network}/tokens/${coinObj.contractAddress}`);
@@ -251,16 +258,14 @@ const ExpenseTracker = () => {
            } catch(e) {}
         } 
 
-        // 4. Try CoinGecko First
         if (!priceUsd) {
            try {
                const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
                const cgData = await cgRes.json();
                if (cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
-           } catch(e) { console.warn("CoinGecko API Error"); }
+           } catch(e) {}
         }
 
-        // 5. Try Binance Fallback
         if (!priceUsd) {
             try {
                 const binanceSymbol = searchId === 'tether' ? 'BTCUSDT' : `${assetToCheck.toUpperCase()}USDT`;
@@ -269,10 +274,9 @@ const ExpenseTracker = () => {
                     const bData = await bRes.json();
                     priceUsd = searchId === 'tether' ? 1.00 : parseFloat(bData.price);
                 }
-            } catch(e) { console.warn("Binance API Error"); }
+            } catch(e) {}
         }
 
-        // 6. Final Calculation
         const finalPrice = priceUsd || (coinObj?.fallbackPrice || 0);
         finalRate = finalPrice * usdToBase;
       }
@@ -322,7 +326,9 @@ const ExpenseTracker = () => {
         type: 'out', date: formData.date, timestamp: new Date(formData.date).getTime(),
         currency: sourceData.asset, foreignAmount: sourceData.amount, exchangeRate: isForeignAsset ? parseFloat(sourceData.exchangeRate) : 1,
         fee: 0, finalBaseAmount: baseAmt, isExpense: true, linkedExpenseId: linkId,
-        walletName: formData.category, bankName: formData.category, transferType: 'Payment/Expense',
+        walletName: sourceData.subWallet || 'Default Wallet',
+        bankName: sourceData.subWallet || 'Default Bank', 
+        transferType: 'Payment/Expense',
         walletCategory: sourceData.vault === 'online' ? (fiatCurrencies.includes(sourceData.asset) ? 'Fiat Wallet' : 'Crypto Wallet') : 'Fiat Wallet'
       }
     };
@@ -334,12 +340,14 @@ const ExpenseTracker = () => {
 
     if (!formData.isSplit) {
       if (formData.vault === 'crypto' && !formData.cryptoPlatform.trim()) return alert("Please specify the crypto platform.");
+      if ((formData.vault === 'bank' || formData.vault === 'online') && !formData.subWallet.trim()) return alert("Please specify the Bank or Wallet Name (e.g. SBI, Paytm).");
       if (!formData.amount || parseFloat(formData.amount) <= 0) return alert("Amount must be greater than zero.");
     } else {
       for (let i = 0; i < formData.splitSources.length; i++) {
         const s = formData.splitSources[i];
         if (!s.amount || parseFloat(s.amount) <= 0) return alert(`Amount in Source ${i + 1} must be greater than zero.`);
         if (s.vault === 'crypto' && !s.cryptoPlatform.trim()) return alert(`Please specify the crypto platform for Source ${i + 1}.`);
+        if ((s.vault === 'bank' || s.vault === 'online') && !s.subWallet.trim()) return alert(`Please specify the Bank/Wallet Name for Source ${i + 1}.`);
       }
     }
 
@@ -361,36 +369,71 @@ const ExpenseTracker = () => {
       linkedExpenseId: linkId,
       isSplit: formData.isSplit,
       vault: formData.isSplit ? 'split' : formData.vault,
+      subWallet: !formData.isSplit && (formData.vault === 'bank' || formData.vault === 'online') ? formData.subWallet : '', 
       cryptoPlatform: !formData.isSplit && formData.vault === 'crypto' ? formData.cryptoPlatform : '', 
       splitDetails: formData.isSplit ? formData.splitSources.map(s => ({
-        vault: s.vault, asset: s.asset, amount: parseFloat(s.amount),
+        vault: s.vault, subWallet: s.subWallet, asset: s.asset, amount: parseFloat(s.amount),
         cryptoPlatform: s.vault === 'crypto' ? s.cryptoPlatform : '', exchangeRate: parseFloat(s.exchangeRate)
       })) : null
     };
 
     try {
       if (editingId) {
-        const vaults = ['cashWallet', 'bankWallet', 'onlineWallet', 'cryptoWalletLogs'];
-        for (const v of vaults) {
-           if(linkId) {
-             const q = query(collection(db, "users", user.uid, v), where("linkedExpenseId", "==", linkId));
-             const snap = await getDocs(q);
-             snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, v, d.id)));
-           }
+        // 🚀 SAFE EDIT MODE: If it's synced, we only update the BankName inside BankWallet/Expense.
+        if (formData.isSynced) {
+            await updateDoc(doc(db, "users", user.uid, "expenseLogs", editingId), {
+                subWallet: formData.subWallet, // Just update bank name
+                vault: formData.vault
+            });
+            // Update Vault entry as well
+            const vaults = ['bankWallet', 'onlineWallet'];
+            for (const v of vaults) {
+               if(linkId) {
+                 const q = query(collection(db, "users", user.uid, v), where("linkedExpenseId", "==", linkId));
+                 const snap = await getDocs(q);
+                 snap.forEach(async (d) => {
+                    await updateDoc(doc(db, "users", user.uid, v, d.id), {
+                        walletName: formData.subWallet,
+                        bankName: formData.subWallet
+                    });
+                 });
+               }
+            }
+        } else {
+            // Full destructive update for manually added expenses
+            const vaults = ['cashWallet', 'bankWallet', 'onlineWallet', 'cryptoWalletLogs'];
+            for (const v of vaults) {
+               if(linkId) {
+                 const q = query(collection(db, "users", user.uid, v), where("linkedExpenseId", "==", linkId));
+                 const snap = await getDocs(q);
+                 snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, v, d.id)));
+               }
+            }
+            await updateDoc(doc(db, "users", user.uid, "expenseLogs", editingId), expenseRecord);
+            
+            // Re-create vault records
+            if (formData.isSplit) {
+              for (let s of formData.splitSources) {
+                const rec = createVaultRecord(s, linkId);
+                await addDoc(collection(db, "users", user.uid, rec.collection), rec.data);
+              }
+            } else {
+              const singleRec = createVaultRecord({ vault: formData.vault, subWallet: formData.subWallet, asset: formData.asset, amount: parseFloat(formData.amount), exchangeRate: formData.exchangeRate, cryptoPlatform: formData.cryptoPlatform }, linkId);
+              await addDoc(collection(db, "users", user.uid, singleRec.collection), singleRec.data);
+            }
         }
-        await updateDoc(doc(db, "users", user.uid, "expenseLogs", editingId), expenseRecord);
       } else {
+        // Create new
         await addDoc(collection(db, "users", user.uid, "expenseLogs"), expenseRecord);
-      }
-
-      if (formData.isSplit) {
-        for (let s of formData.splitSources) {
-          const rec = createVaultRecord(s, linkId);
-          await addDoc(collection(db, "users", user.uid, rec.collection), rec.data);
+        if (formData.isSplit) {
+          for (let s of formData.splitSources) {
+            const rec = createVaultRecord(s, linkId);
+            await addDoc(collection(db, "users", user.uid, rec.collection), rec.data);
+          }
+        } else {
+          const singleRec = createVaultRecord({ vault: formData.vault, subWallet: formData.subWallet, asset: formData.asset, amount: parseFloat(formData.amount), exchangeRate: formData.exchangeRate, cryptoPlatform: formData.cryptoPlatform }, linkId);
+          await addDoc(collection(db, "users", user.uid, singleRec.collection), singleRec.data);
         }
-      } else {
-        const singleRec = createVaultRecord({ vault: formData.vault, asset: formData.asset, amount: parseFloat(formData.amount), exchangeRate: formData.exchangeRate, cryptoPlatform: formData.cryptoPlatform }, linkId);
-        await addDoc(collection(db, "users", user.uid, singleRec.collection), singleRec.data);
       }
 
       closeModal();
@@ -423,10 +466,8 @@ const ExpenseTracker = () => {
         return;
       }
       
-      // 1. Delete Master Expense Record
       await deleteDoc(doc(db, "users", user.uid, "expenseLogs", deleteContext.id));
       
-      // 2. Delete the synced Vault entries to auto-refund the money!
       if (deleteContext.linkedExpenseId) {
         const vaults = ['cashWallet', 'bankWallet', 'onlineWallet', 'cryptoWalletLogs'];
         for (const v of vaults) {
@@ -446,19 +487,30 @@ const ExpenseTracker = () => {
   const handleEdit = (rec) => {
     const isSplit = rec.isSplit || false;
     let mappedSplits = [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ];
+    
     if (isSplit && rec.splitDetails) {
       mappedSplits = rec.splitDetails.map(s => ({
-        vault: s.vault, asset: s.asset || baseCurrency, amount: s.amount || '',
-        cryptoPlatform: s.cryptoPlatform || cryptoPlatformsList[12], exchangeRate: s.exchangeRate || 1,
+        vault: s.vault, 
+        subWallet: s.subWallet || s.bankName || s.walletName || '', // Legacy fallback
+        asset: s.asset || baseCurrency, 
+        amount: s.amount || '',
+        cryptoPlatform: s.cryptoPlatform || cryptoPlatformsList[12], 
+        exchangeRate: s.exchangeRate || 1,
         isCustomPlatform: s.vault === 'crypto' && !cryptoPlatformsList.includes(s.cryptoPlatform)
       }));
     }
 
+    // 🚀 NEW: Detect if this is an auto-synced entry
+    const isSyncedEntry = !!(rec.linkedExpenseId && !rec.linkedExpenseId.startsWith('EXP_'));
+
     setFormData({
       title: rec.title, category: rec.category, date: rec.date, linkedExpenseId: rec.linkedExpenseId || '', isSplit: isSplit,
-      vault: isSplit ? 'bank' : (rec.vault || 'bank'), asset: isSplit ? baseCurrency : (rec.asset || baseCurrency), amount: isSplit ? '' : (rec.amount || ''),
+      vault: isSplit ? 'bank' : (rec.vault || 'bank'), 
+      subWallet: isSplit ? '' : (rec.subWallet || rec.bankName || rec.walletName || ''), // Legacy mapping
+      asset: isSplit ? baseCurrency : (rec.asset || baseCurrency), amount: isSplit ? '' : (rec.amount || ''),
       exchangeRate: isSplit ? 1 : (rec.exchangeRate || 1), cryptoPlatform: isSplit ? cryptoPlatformsList[12] : (rec.cryptoPlatform || cryptoPlatformsList[12]),
-      isCustomSingle: !isSplit && rec.vault === 'crypto' && !cryptoPlatformsList.includes(rec.cryptoPlatform), splitSources: mappedSplits
+      isCustomSingle: !isSplit && rec.vault === 'crypto' && !cryptoPlatformsList.includes(rec.cryptoPlatform), splitSources: mappedSplits,
+      isSynced: isSyncedEntry // 🚀 Set synced flag
     });
     setEditingId(rec.id);
     setIsModalOpen(true);
@@ -468,11 +520,13 @@ const ExpenseTracker = () => {
     setEditingId(null);
     setFormData({ 
       title: '', category: expenseCategories[0], date: todayDate, linkedExpenseId: '', isSplit: false,
-      vault: 'bank', asset: baseCurrency, amount: '', exchangeRate: 1, cryptoPlatform: cryptoPlatformsList[12], isCustomSingle: false,
-      splitSources: [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ]
+      vault: 'bank', subWallet: '', asset: baseCurrency, amount: '', exchangeRate: 1, cryptoPlatform: cryptoPlatformsList[12], isCustomSingle: false,
+      splitSources: [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ],
+      isSynced: false
     });
     setIsModalOpen(true);
   };
+  
   const closeModal = () => setIsModalOpen(false);
 
   const getVaultIcon = (v) => {
@@ -490,6 +544,7 @@ const ExpenseTracker = () => {
         const cList = getCryptoListForSplit();
         updated[index].asset = value === 'crypto' ? (cList[0] || 'BTC') : baseCurrency;
         updated[index].exchangeRate = 1;
+        if(value === 'cash' || value === 'crypto') updated[index].subWallet = ''; // Clean up if switched
     }
     if (field === 'isCustomPlatform' && !value) {
         updated[index].cryptoPlatform = cryptoPlatformsList[12];
@@ -519,12 +574,11 @@ const ExpenseTracker = () => {
             <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Expense Tracker</h1>
           </div>
           <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 max-w-xl">
-            Log expenses across Fiat and Crypto. Endless multi-tender splitting supported.
+            Log expenses across Fiat and Crypto. Auto-synced entries can be reassigned to correct banks.
           </p>
         </div>
         
         <div className="flex items-center gap-2 md:gap-3">
-          {/* 🚀 DOWNLOAD REPORT DROPDOWN */}
           <div className="relative group">
             <button className="flex items-center gap-1 md:gap-2 p-3 md:p-3.5 bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400 rounded-2xl font-bold text-xs md:text-sm hover:bg-indigo-100 transition-colors border border-indigo-100 dark:border-indigo-500/20 shadow-sm">
               <HiOutlineDownload size={18}/> 
@@ -609,7 +663,6 @@ const ExpenseTracker = () => {
                     {month.records.map((rec) => (
                       <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
                         
-                        {/* 🚀 GLOBAL DATE RENDERED HERE */}
                         <td className="p-4 pl-6 text-xs font-bold text-slate-500">
                           {formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rec.date}
                         </td>
@@ -623,13 +676,21 @@ const ExpenseTracker = () => {
                              <div className="flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">
                                {rec.isSplit ? <><FaRandom className="text-amber-500"/> Split Payment</> : <>{getVaultIcon(rec.vault)} {rec.vault} Vault</>}
                              </div>
+                             
+                             {/* 🚀 FIXED: SubWallet name logic corrected */}
+                             {!rec.isSplit && (rec.vault === 'bank' || rec.vault === 'online') && (rec.subWallet || rec.walletName || rec.bankName) && (
+                               <div className="text-[10px] font-black text-blue-500 flex items-center gap-1 mt-0.5 ml-1">
+                                 <FaBuilding/> {rec.subWallet || rec.walletName || rec.bankName}
+                               </div>
+                             )}
+
                              {!rec.isSplit && rec.vault === 'crypto' && rec.cryptoPlatform && (
                                <div className="text-[9px] font-bold text-slate-500 flex items-center gap-1"><FaBuilding/> {rec.cryptoPlatform}</div>
                              )}
                              {rec.isSplit && (
                                <div className="text-[9px] font-bold text-amber-600 dark:text-amber-400 mt-1 space-y-0.5">
                                  {rec.splitDetails.map((s, idx) => (
-                                    <div key={idx}>{s.vault}{s.cryptoPlatform ? `(${s.cryptoPlatform})` : ''}: {s.amount} {s.asset}</div>
+                                    <div key={idx}>{s.vault}{s.subWallet ? `(${s.subWallet})` : s.cryptoPlatform ? `(${s.cryptoPlatform})` : ''}: {s.amount} {s.asset}</div>
                                  ))}
                                </div>
                              )}
@@ -644,17 +705,18 @@ const ExpenseTracker = () => {
                         <td className="p-4 text-right"><p className="text-base font-black text-rose-600 dark:text-rose-400">-{currencySymbol}{(rec.finalBaseAmount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</p></td>
                         
                         <td className="p-4 pr-6 text-right">
-                          {rec.linkedExpenseId && !rec.linkedExpenseId.startsWith('EXP_') ? (
-                            <div className="flex items-center justify-end gap-2">
-                              <span className="inline-block px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 text-[9px] font-black uppercase tracking-widest rounded border border-slate-200 dark:border-slate-700">Auto-Synced</span>
-                              <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 hover:bg-rose-100 rounded-xl transition-all shadow-sm" title="Force Delete Auto-Synced Entry"><HiOutlineTrash size={18} /></button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-end gap-2">
-                              <button onClick={() => handleEdit(rec)} className="p-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 hover:bg-blue-100 rounded-xl transition-all shadow-sm"><HiOutlinePencil size={18} /></button>
-                              <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 hover:bg-rose-100 rounded-xl transition-all shadow-sm"><HiOutlineTrash size={18} /></button>
-                            </div>
-                          )}
+                          <div className="flex items-center justify-end gap-2">
+                             {/* 🚀 FIXED: Auto-synced entries now ALWAYS show Edit button so Bank Name can be assigned */}
+                             {rec.linkedExpenseId && !rec.linkedExpenseId.startsWith('EXP_') && (
+                                <span className="inline-block px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 text-[9px] font-black uppercase tracking-widest rounded border border-slate-200 dark:border-slate-700">Auto-Synced</span>
+                             )}
+                             <button onClick={() => handleEdit(rec)} className="p-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 hover:bg-blue-100 rounded-xl transition-all shadow-sm">
+                               <HiOutlinePencil size={18} />
+                             </button>
+                             <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 hover:bg-rose-100 rounded-xl transition-all shadow-sm" title={rec.linkedExpenseId && !rec.linkedExpenseId.startsWith('EXP_') ? "Force Delete Auto-Synced Entry" : "Delete"}>
+                               <HiOutlineTrash size={18} />
+                             </button>
+                          </div>
                         </td>
 
                       </tr>
@@ -689,15 +751,24 @@ const ExpenseTracker = () => {
               </div>
               
               <form onSubmit={handleSaveEntry} className="p-6 sm:p-8 space-y-6 flex-1">
+                
+                {/* 🚀 NEW: INFO FOR SYNCED ENTRIES */}
+                {formData.isSynced && (
+                   <div className="bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 p-4 rounded-xl text-xs font-bold leading-relaxed border border-amber-200 dark:border-amber-500/30">
+                     <span className="flex items-center gap-1 mb-1"><HiOutlineExclamationCircle size={16}/> Auto-Synced Entry</span>
+                     This expense came from outside (e.g. Loan Payment or Goal). You can only update the <span className="underline">Bank Name / Vault</span> here. To change amounts or dates, edit the original source.
+                   </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Payee / Item Name</label>
-                    <input type="text" required value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} placeholder="e.g. Amazon, Gas Fee" className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50" />
+                    <input disabled={formData.isSynced} type="text" required value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} placeholder="e.g. Amazon, Gas Fee" className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60" />
                   </div>
                   <div className="space-y-2">
                     <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Expense Category</label>
                     <div className="relative">
-                      <select value={formData.category} onChange={(e) => setFormData({...formData, category: e.target.value})} className="w-full pl-4 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 cursor-pointer appearance-none">
+                      <select disabled={formData.isSynced} value={formData.category} onChange={(e) => setFormData({...formData, category: e.target.value})} className="w-full pl-4 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 cursor-pointer appearance-none disabled:opacity-60">
                         {expenseCategories.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
                       <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
@@ -705,16 +776,18 @@ const ExpenseTracker = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/30 border border-slate-200 dark:border-slate-700 rounded-2xl">
-                  <div>
-                    <h4 className="font-black text-slate-800 dark:text-white text-sm">Split Payment Engine</h4>
-                    <p className="text-xs font-bold text-slate-500">Pay using multiple sources limitlessly (e.g. Bank + Crypto + Cash)</p>
+                {!formData.isSynced && (
+                  <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/30 border border-slate-200 dark:border-slate-700 rounded-2xl">
+                    <div>
+                      <h4 className="font-black text-slate-800 dark:text-white text-sm">Split Payment Engine</h4>
+                      <p className="text-xs font-bold text-slate-500">Pay using multiple sources limitlessly (e.g. Bank + Crypto + Cash)</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" className="sr-only peer" checked={formData.isSplit} onChange={(e) => setFormData({...formData, isSplit: e.target.checked})} />
+                      <div className="w-11 h-6 bg-slate-200 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                    </label>
                   </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" checked={formData.isSplit} onChange={(e) => setFormData({...formData, isSplit: e.target.checked})} />
-                    <div className="w-11 h-6 bg-slate-200 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
-                  </label>
-                </div>
+                )}
 
                 {/* DYNAMIC FORM ENGINE */}
                 {!formData.isSplit ? (
@@ -722,14 +795,25 @@ const ExpenseTracker = () => {
                   <div className="p-5 border border-rose-100 dark:border-rose-500/20 bg-rose-50/30 dark:bg-rose-500/5 rounded-2xl space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
-                        <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Deduct From</label>
-                        <select value={formData.vault} onChange={(e) => setFormData({...formData, vault: e.target.value, asset: e.target.value==='crypto' ? (activeAssetList[0]||'BTC') : baseCurrency, exchangeRate:1})} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer">
+                        <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Deduct From Vault</label>
+                        <select value={formData.vault} onChange={(e) => setFormData({...formData, vault: e.target.value, asset: e.target.value==='crypto' ? (activeAssetList[0]||'BTC') : baseCurrency, exchangeRate:1, subWallet: ''})} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer">
                           <option value="bank">Bank Account</option>
                           <option value="cash">Physical Cash</option>
                           <option value="online">Online E-Wallet</option>
                           <option value="crypto" className="font-black text-orange-500">Crypto Engine</option>
                         </select>
                       </div>
+
+                      {/* 🚀 AUTOCOMPLETE BANK/WALLET INPUT */}
+                      {(formData.vault === 'bank' || formData.vault === 'online') && (
+                        <div className="space-y-2 animate-in fade-in">
+                          <label className="text-[11px] font-black text-blue-500 uppercase tracking-widest ml-1">{formData.vault === 'bank' ? 'Bank Name' : 'Wallet Name'}</label>
+                          <input type="text" list="sub-wallets" required value={formData.subWallet} onChange={(e) => setFormData({...formData, subWallet: e.target.value})} placeholder={formData.vault === 'bank' ? "e.g. SBI, RRR" : "e.g. Paytm, eSewa"} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50" />
+                          <datalist id="sub-wallets">
+                             {existingBanks.map(b => <option key={b} value={b} />)}
+                          </datalist>
+                        </div>
+                      )}
 
                       {formData.vault === 'crypto' ? (
                         <div className="space-y-2 animate-in fade-in">
@@ -748,8 +832,8 @@ const ExpenseTracker = () => {
                         </div>
                       ) : (
                         <div className="space-y-2">
-                          <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Asset</label>
-                          <select value={formData.asset} onChange={(e) => setFormData({...formData, asset: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer">
+                          <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Asset Currency</label>
+                          <select disabled={formData.isSynced} value={formData.asset} onChange={(e) => setFormData({...formData, asset: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer disabled:opacity-60">
                             <option value={baseCurrency}>{baseCurrency} (Base)</option>
                             {fiatCurrencies.filter(c => c !== baseCurrency).map(c => <option key={c} value={c}>{c}</option>)}
                           </select>
@@ -759,7 +843,7 @@ const ExpenseTracker = () => {
                       {formData.vault === 'crypto' && (
                         <div className="space-y-2">
                           <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Coin</label>
-                          <select value={formData.asset} onChange={(e) => setFormData({...formData, asset: e.target.value, exchangeRate: 1})} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer">
+                          <select disabled={formData.isSynced} value={formData.asset} onChange={(e) => setFormData({...formData, asset: e.target.value, exchangeRate: 1})} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer disabled:opacity-60">
                             {activeAssetList.map(c => <option key={c} value={c}>{c}</option>)}
                           </select>
                         </div>
@@ -767,15 +851,15 @@ const ExpenseTracker = () => {
 
                       <div className="space-y-2">
                         <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">{formData.vault === 'crypto' ? 'Quantity' : 'Total Amount'}</label>
-                        <input type="number" step="any" required value={formData.amount} onChange={(e) => setFormData({...formData, amount: e.target.value})} placeholder="0.00" className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-rose-600 dark:text-rose-400 text-lg outline-none focus:ring-2 focus:ring-rose-500/50" />
+                        <input disabled={formData.isSynced} type="number" step="any" required value={formData.amount} onChange={(e) => setFormData({...formData, amount: e.target.value})} placeholder="0.00" className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-rose-600 dark:text-rose-400 text-lg outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60" />
                       </div>
                     </div>
 
                     {formData.asset !== baseCurrency && (
-                      <div className="flex items-center gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
-                        <button type="button" onClick={()=>fetchLiveRate(null)} disabled={isFetchingRate === 'single'} className="text-[10px] font-black bg-rose-600 text-white px-2 py-2 rounded-lg flex items-center gap-1 whitespace-nowrap"><HiOutlineRefresh className={isFetchingRate === 'single' ? 'animate-spin' : ''} /> Get Rate</button>
+                      <div className={`flex items-center gap-3 pt-4 border-t border-slate-200 dark:border-slate-700 ${formData.isSynced ? 'opacity-60' : ''}`}>
+                        <button type="button" onClick={()=>fetchLiveRate(null)} disabled={isFetchingRate === 'single' || formData.isSynced} className="text-[10px] font-black bg-rose-600 text-white px-2 py-2 rounded-lg flex items-center gap-1 whitespace-nowrap"><HiOutlineRefresh className={isFetchingRate === 'single' ? 'animate-spin' : ''} /> Get Rate</button>
                         <span className="text-sm font-black text-slate-500">1 {formData.asset} = </span>
-                        <input type="number" step="any" required value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} placeholder="Rate" className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg font-bold dark:text-white outline-none" />
+                        <input disabled={formData.isSynced} type="number" step="any" required value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} placeholder="Rate" className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg font-bold dark:text-white outline-none disabled:opacity-60" />
                       </div>
                     )}
                   </div>
@@ -798,6 +882,16 @@ const ExpenseTracker = () => {
                             <option value="online">Online Wallet</option>
                             <option value="crypto" className="font-black text-orange-500">Crypto Engine</option>
                           </select>
+
+                          {/* 🚀 AUTOCOMPLETE SUB-WALLET INPUT FOR SPLIT */}
+                          {(split.vault === 'bank' || split.vault === 'online') && (
+                            <>
+                               <input type="text" list={`split-banks-${index}`} required value={split.subWallet} onChange={(e) => updateSplit(index, 'subWallet', e.target.value)} placeholder={split.vault === 'bank' ? "Bank Name (e.g. SBI)" : "Wallet Name"} className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50" />
+                               <datalist id={`split-banks-${index}`}>
+                                  {existingBanks.map(b => <option key={b} value={b} />)}
+                               </datalist>
+                            </>
+                          )}
 
                           {split.vault === 'crypto' ? (
                              split.isCustomPlatform ? (
@@ -848,8 +942,7 @@ const ExpenseTracker = () => {
                       <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1 flex justify-between">
                          <span>Date</span>
                       </label>
-                      <input type="date" required value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} className="w-full p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl font-bold dark:text-white outline-none" />
-                      {/* 🚀 GLOBAL DATE FOR MODAL INPUT */}
+                      <input disabled={formData.isSynced} type="date" required value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} className="w-full p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl font-bold dark:text-white outline-none disabled:opacity-60" />
                       <span className="block text-[10px] font-bold text-rose-500 mt-1">{formatGlobalDate ? formatGlobalDate(formData.date, 'full') : ''}</span>
                    </div>
                    <div className="text-right">
@@ -880,7 +973,6 @@ const ExpenseTracker = () => {
               <h3 className="text-2xl font-black text-slate-900 dark:text-white">Security Check</h3>
               <p className="text-sm font-bold text-slate-500 mt-2">You are about to delete <span className="text-slate-800 dark:text-white uppercase">"{deleteContext.title}"</span>.</p>
               
-              {/* ⚠️ DYNAMIC WARNING FOR AUTO-SYNCED VS NORMAL */}
               {deleteContext.linkedExpenseId && !deleteContext.linkedExpenseId.startsWith('EXP_') ? (
                 <div className="mt-4 p-3 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 rounded-xl">
                   <p className="text-xs font-black text-rose-700 dark:text-rose-400 flex items-start gap-1 text-left">

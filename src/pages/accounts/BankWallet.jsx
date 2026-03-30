@@ -34,7 +34,6 @@ const hashPIN = async (pinCode) => {
 };
 
 const BankWallet = () => {
-  // 🚀 BROUGHT IN `formatGlobalDate` FROM CONTEXT
   const { user, baseCurrency = 'INR', formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
 
@@ -49,10 +48,8 @@ const BankWallet = () => {
   const [editingId, setEditingId] = useState(null);
   const [isFetchingRate, setIsFetchingRate] = useState(false);
   
-  // 🚀 LIVE FOREX TICKER STATE
   const [tickerData, setTickerData] = useState([]);
 
-  // 🔐 Security (Delete) States
   const [deleteContext, setDeleteContext] = useState(null); 
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
@@ -61,10 +58,10 @@ const BankWallet = () => {
   const todayDate = new Date().toISOString().split('T')[0];
   const [formData, setFormData] = useState({
     title: '', bankName: '', transferType: 'UPI', referenceNo: '', 
-    isP2P: false, foreignAmount: '', currency: baseCurrency, exchangeRate: 1, fee: '', date: todayDate
+    isP2P: false, foreignAmount: '', currency: baseCurrency, exchangeRate: 1, fee: '', date: todayDate,
+    isSynced: false // 🚀 Added to track if we can only edit the Bank Name
   });
 
-  // 🌍 FETCH ONLY FIAT RATES FOR TICKER
   useEffect(() => {
     const fetchTickerData = async () => {
       try {
@@ -82,7 +79,6 @@ const BankWallet = () => {
         console.error("Ticker fetch failed:", error);
       }
     };
-
     fetchTickerData();
     const interval = setInterval(fetchTickerData, 60000); 
     return () => clearInterval(interval);
@@ -92,7 +88,6 @@ const BankWallet = () => {
     if (!user) return;
     const bankRef = collection(db, "users", user.uid, "bankWallet");
     const q = query(bankRef, orderBy("timestamp", "desc"));
-
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const dbRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setTransactions(dbRecords);
@@ -101,6 +96,37 @@ const BankWallet = () => {
     return () => unsubscribe();
   }, [user]);
 
+  // 🚀 UNIQUE BANK NAMES FOR AUTO-COMPLETE
+  const existingBanks = useMemo(() => {
+    const banks = new Set(transactions.map(t => t.bankName).filter(b => b && b.trim() !== ''));
+    return Array.from(banks);
+  }, [transactions]);
+
+  // 🚀 PERFECTED MULTI-CURRENCY & SUB-BANK AGGREGATOR LOGIC
+  const subWalletBalances = useMemo(() => {
+    const balances = {};
+    
+    transactions.forEach(t => {
+      const curr = t.currency || baseCurrency;
+      const originalBankName = t.bankName?.trim() ? t.bankName.trim() : 'Main Vault';
+      const key = `${originalBankName.toUpperCase()}_${curr.toUpperCase()}`;
+      
+      if (!balances[key]) balances[key] = { bank: originalBankName, currency: curr, value: 0 };
+      
+      const amt = Number(t.foreignAmount || t.amount || 0); 
+      
+      if (t.type === 'in') {
+        balances[key].value += amt;
+      } else {
+        balances[key].value -= amt;
+      }
+    });
+
+    return Object.values(balances)
+      .filter(b => Math.abs(b.value) > 0.01)
+      .sort((a, b) => b.value - a.value);
+  }, [transactions, baseCurrency]);
+
   const processedLedger = useMemo(() => {
     const sorted = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
     let runningBalance = 0;
@@ -108,9 +134,7 @@ const BankWallet = () => {
 
     sorted.forEach(t => {
       const dateObj = new Date(t.date || new Date());
-      // 🚀 NAYA LOGIC: Grouping based on the Global Date Format (Month & Year)
       const monthName = formatGlobalDate ? formatGlobalDate(dateObj, 'monthYear') : dateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
-      // Raw English 'YYYY-MM' key for correct chronological sorting behind the scenes
       const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
 
       if (!grouped[monthKey]) {
@@ -154,7 +178,6 @@ const BankWallet = () => {
 
   const totalBalance = processedLedger.length > 0 ? processedLedger[0].closingBalance : 0;
 
-  // 🚀 REPORT DOWNLOAD LOGIC (Now includes Global Date)
   const handleDownloadReport = (format) => {
     if (transactions.length === 0) return alert("No bank records found to download.");
 
@@ -215,29 +238,50 @@ const BankWallet = () => {
   const handleSaveEntry = async (e) => {
     e.preventDefault();
     if (!user) return alert("Please login first!");
+    if (!formData.bankName.trim()) return alert("Please provide a Bank Name (e.g. SBI)");
     
     setIsSaving(true);
 
-    const recordData = {
-      title: formData.title,
-      bankName: formData.bankName || 'Default Bank',
-      transferType: formData.transferType,
-      referenceNo: formData.referenceNo || '',
-      isP2P: formData.isP2P || false,
-      type: 'in', 
-      date: formData.date,
-      timestamp: editingId ? transactions.find(t => t.id === editingId)?.timestamp : new Date(formData.date).getTime(),
-      currency: formData.currency,
-      foreignAmount: parseFloat(formData.foreignAmount) || 0,
-      exchangeRate: isForeign ? parseFloat(formData.exchangeRate) : 1,
-      fee: feeDeduction, 
-      finalBaseAmount: calculatedFinalAmount
-    };
-
     try {
       if (editingId) {
-        await setDoc(doc(db, "users", user.uid, "bankWallet", editingId), recordData, { merge: true });
+        // 🚀 SAFE SYNC EDITING: If it's synced, ONLY update the bankName to prevent math errors in parent!
+        if (formData.isSynced) {
+          await setDoc(doc(db, "users", user.uid, "bankWallet", editingId), { 
+            bankName: formData.bankName.trim() 
+          }, { merge: true });
+        } else {
+          // Full Update for manual entries
+          const recordData = {
+            title: formData.title,
+            bankName: formData.bankName.trim(),
+            transferType: formData.transferType,
+            referenceNo: formData.referenceNo || '',
+            isP2P: formData.isP2P || false,
+            date: formData.date,
+            currency: formData.currency,
+            foreignAmount: parseFloat(formData.foreignAmount) || 0,
+            exchangeRate: isForeign ? parseFloat(formData.exchangeRate) : 1,
+            fee: feeDeduction, 
+            finalBaseAmount: calculatedFinalAmount
+          };
+          await setDoc(doc(db, "users", user.uid, "bankWallet", editingId), recordData, { merge: true });
+        }
       } else {
+        const recordData = {
+          title: formData.title,
+          bankName: formData.bankName.trim(),
+          transferType: formData.transferType,
+          referenceNo: formData.referenceNo || '',
+          isP2P: formData.isP2P || false,
+          type: 'in', 
+          date: formData.date,
+          timestamp: new Date(formData.date).getTime(),
+          currency: formData.currency,
+          foreignAmount: parseFloat(formData.foreignAmount) || 0,
+          exchangeRate: isForeign ? parseFloat(formData.exchangeRate) : 1,
+          fee: feeDeduction, 
+          finalBaseAmount: calculatedFinalAmount
+        };
         await addDoc(collection(db, "users", user.uid, "bankWallet"), recordData);
       }
       closeModal();
@@ -249,17 +293,21 @@ const BankWallet = () => {
   };
 
   const handleEdit = (rec) => {
+    // 🚀 NEW: Detect if this is an auto-synced entry
+    const isSyncedEntry = !!(rec.linkedExpenseId || rec.linkedIncomeId || rec.shiftId || rec.linkedPartyId);
+
     setFormData({
       title: rec.title || '',
       bankName: rec.bankName || '',
       transferType: rec.transferType || 'UPI',
       referenceNo: rec.referenceNo || '',
       isP2P: rec.isP2P || false,
-      foreignAmount: rec.foreignAmount || rec.finalBaseAmount || '', 
+      foreignAmount: rec.foreignAmount || rec.amount || '', 
       currency: rec.currency || baseCurrency,
       exchangeRate: rec.exchangeRate || 1,
       fee: rec.fee || '', 
-      date: rec.date || todayDate
+      date: rec.date || todayDate,
+      isSynced: isSyncedEntry // Flag to lock other fields
     });
     setEditingId(rec.id);
     setIsModalOpen(true);
@@ -284,7 +332,6 @@ const BankWallet = () => {
     try {
       const userDoc = await getDoc(doc(db, "users", user.uid));
       const userData = userDoc.data();
-      
       const hashedInput = await hashPIN(pinInput.trim());
       const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin; 
 
@@ -306,7 +353,8 @@ const BankWallet = () => {
 
   const openModal = () => {
     setEditingId(null);
-    setFormData({ title: '', bankName: '', transferType: 'UPI', referenceNo: '', isP2P: false, foreignAmount: '', currency: baseCurrency, exchangeRate: 1, fee: '', date: todayDate });
+    const lastBank = existingBanks.length > 0 ? existingBanks[0] : '';
+    setFormData({ title: '', bankName: lastBank, transferType: 'UPI', referenceNo: '', isP2P: false, foreignAmount: '', currency: baseCurrency, exchangeRate: 1, fee: '', date: todayDate, isSynced: false });
     setIsModalOpen(true);
   };
 
@@ -364,13 +412,11 @@ const BankWallet = () => {
             <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Bank Ledger</h1>
           </div>
           <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 max-w-xl">
-            Professional dashboard to track incoming bank deposits, SWIFT transfers, and isolate P2P crypto risks.
+            Professional dashboard to track incoming bank deposits, expenses, and isolate P2P crypto risks.
           </p>
         </div>
         
         <div className="flex items-center gap-2 md:gap-3">
-          
-          {/* 🚀 DOWNLOAD REPORT DROPDOWN */}
           <div className="relative group">
             <button className="flex items-center gap-1 md:gap-2 p-3 md:p-3.5 bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400 rounded-2xl font-bold text-xs md:text-sm hover:bg-indigo-100 transition-colors border border-indigo-100 dark:border-indigo-500/20 shadow-sm">
               <HiOutlineDownload size={18}/> 
@@ -399,15 +445,30 @@ const BankWallet = () => {
         <div className="absolute -right-10 -top-10 opacity-5 text-white blur-[2px]">
           <FaUniversity size={250} />
         </div>
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="relative z-10 w-full flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
-            <p className="text-sm font-black text-slate-400 uppercase tracking-[0.2em] mb-3">Total Vault Balance</p>
+            <p className="text-sm font-black text-slate-400 uppercase tracking-[0.2em] mb-3">Total Vault Balance (Base Equiv.)</p>
             <h2 className="text-5xl md:text-7xl font-black text-white tracking-tighter">
               <span className="text-blue-500 mr-2">{currencySymbol}</span>
               {(totalBalance || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
             </h2>
           </div>
         </div>
+
+        {/* 🚀 SUB-BANK & MULTI-CURRENCY BALANCES RENDERED HERE */}
+        {subWalletBalances.length > 0 && (
+          <div className="mt-6 pt-6 border-t border-slate-700/50 flex gap-4 overflow-x-auto custom-scrollbar pb-2 relative z-10">
+            {subWalletBalances.map((item, idx) => (
+              <div key={idx} className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-xl px-4 py-3 shrink-0 flex items-center gap-3">
+                <img src={`https://flagcdn.com/w40/${fiatFlagMap[item.currency] || 'un'}.png`} alt="" className="w-8 h-8 rounded-full object-cover border border-slate-600" />
+                <div>
+                  <p className="text-[10px] font-black text-blue-200 uppercase tracking-widest leading-tight">{item.bank} <span className="opacity-70">({item.currency})</span></p>
+                  <p className="text-lg font-bold text-white leading-none mt-0.5">{item.value.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* FILTERS & SEARCH */}
@@ -486,9 +547,8 @@ const BankWallet = () => {
                                 {rec.isP2P && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1"><FaShieldAlt size={8}/> P2P Risk</span>}
                               </p>
                               <p className="text-[11px] font-bold text-slate-500 flex items-center gap-2">
-                                {rec.bankName} <span className="text-slate-300 dark:text-slate-600">•</span> {rec.transferType}
+                                {rec.bankName || 'Main Bank'} <span className="text-slate-300 dark:text-slate-600">•</span> {rec.transferType || 'Direct/Expense'}
                               </p>
-                              {/* 🚀 UPDATED DATE RENDERING HERE */}
                               <p className="text-[10px] font-bold text-slate-400 mt-1 flex items-center gap-2">
                                 {formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rec.date} {rec.referenceNo && <span className="text-slate-300 dark:text-slate-600">|</span>} {rec.referenceNo && `Ref: ${rec.referenceNo}`}
                               </p>
@@ -523,7 +583,6 @@ const BankWallet = () => {
                           <p className={`text-lg font-black tracking-tight ${rec.netChange >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-rose-600 dark:text-rose-400'}`}>
                             {rec.netChange >= 0 ? '+' : ''}{currencySymbol}{(Math.abs(Number(rec.netChange) || 0)).toLocaleString(undefined, {minimumFractionDigits: 2})}
                           </p>
-                          {/* Visual indicator for fees applied on manual deposit */}
                           {rec.fee > 0 && rec.type === 'in' && (
                             <p className="text-[10px] font-bold text-rose-500 mt-1 uppercase tracking-wider flex items-center justify-end gap-1">
                               Fee: -{rec.fee.toLocaleString()} {rec.currency === baseCurrency ? baseCurrency : 'Base'}
@@ -533,12 +592,10 @@ const BankWallet = () => {
                         
                         <td className="p-4 pr-6">
                           <div className="flex items-center justify-end gap-2">
-                             {/* Read-Only restriction for auto-synced entries */}
-                            {(!rec.linkedExpenseId && !rec.linkedIncomeId && !rec.shiftId && !rec.linkedPartyId) && (
-                              <button onClick={() => handleEdit(rec)} className="p-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-xl transition-all shadow-sm">
-                                <HiOutlinePencil size={18} />
-                              </button>
-                            )}
+                             {/* 🚀 FIXED: Now Pencil icon is ALWAYS visible so users can fix old bank names! */}
+                             <button onClick={() => handleEdit(rec)} className="p-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-xl transition-all shadow-sm">
+                               <HiOutlinePencil size={18} />
+                             </button>
                             
                             <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-xl transition-all shadow-sm">
                               <HiOutlineTrash size={18} />
@@ -565,33 +622,43 @@ const BankWallet = () => {
         )}
       </div>
 
-      {/* 🚀 FIXED MODAL (Safe Zone Bottom Sheet style on Mobile) */}
+      {/* --- MODAL --- */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[500] bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 pt-24 sm:pt-4">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[calc(100dvh-6rem)] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-100 dark:border-slate-800">
-            
-            <div className={`px-6 sm:px-8 py-5 shrink-0 flex justify-between items-center transition-colors duration-300 ${formData.isP2P ? 'bg-amber-500' : 'bg-blue-600'}`}>
-              <div className="flex items-center gap-3 text-white">
-                {formData.isP2P ? <FaShieldAlt size={24} /> : <HiOutlineLibrary size={24} />}
-                <h3 className="text-xl font-black">{editingId ? 'Edit Bank Record' : 'Log Bank Deposit'}</h3>
-              </div>
-              <button onClick={closeModal} className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors">
-                <HiOutlineX size={20} />
+        <div className="fixed inset-0 z-[400] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 dark:border-white/5 flex justify-between items-center bg-blue-600 text-white">
+              <h3 className="text-xl font-black">
+                {editingId ? 'Edit Bank Record' : 'Log Bank Deposit'}
+              </h3>
+              <button onClick={closeModal} className="text-white/70 hover:text-white transition-colors">
+                <HiOutlineX size={24} />
               </button>
             </div>
             
-            <form onSubmit={handleSaveEntry} className="p-6 sm:p-8 flex-1 overflow-y-auto custom-scrollbar space-y-6">
+            <form onSubmit={handleSaveEntry} className="p-6 space-y-5 max-h-[75vh] overflow-y-auto custom-scrollbar">
               
+              {/* 🚀 NEW: SYNCED ENTRY WARNING */}
+              {formData.isSynced && (
+                 <div className="bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 p-4 rounded-xl text-xs font-bold leading-relaxed border border-amber-200 dark:border-amber-500/30">
+                   <span className="flex items-center gap-1 mb-1"><HiOutlineExclamationCircle size={16}/> Auto-Synced Entry</span>
+                   This transaction came from Expenses or Incomes. You can only update the <span className="underline">Bank Name</span> here to organize your vault. To change the amount, please edit the original source.
+                 </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Bank Name</label>
-                  <input type="text" required value={formData.bankName} onChange={(e) => setFormData({...formData, bankName: e.target.value})} placeholder="e.g., SBI, Chase" 
+                  {/* 🚀 AUTOCOMPLETE DATALIST ADDED */}
+                  <input type="text" list="bank-names" required value={formData.bankName} onChange={(e) => setFormData({...formData, bankName: e.target.value})} placeholder="e.g., SBI, Chase" 
                     className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all" />
+                  <datalist id="bank-names">
+                    {existingBanks.map(b => <option key={b} value={b} />)}
+                  </datalist>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Transfer Method</label>
-                  <select value={formData.transferType} onChange={(e) => setFormData({...formData, transferType: e.target.value})} 
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all cursor-pointer">
+                  <select disabled={formData.isSynced} value={formData.transferType} onChange={(e) => setFormData({...formData, transferType: e.target.value})} 
+                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all cursor-pointer appearance-none disabled:opacity-60">
                     {bankTransferTypes.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
@@ -599,14 +666,14 @@ const BankWallet = () => {
 
               <div className="space-y-2">
                 <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Sender / Reason</label>
-                <input type="text" required value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} placeholder="e.g., Upwork Withdrawal" 
-                  className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all" />
+                <input disabled={formData.isSynced} type="text" required value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} placeholder="e.g., Upwork Withdrawal" 
+                  className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all disabled:opacity-60" />
               </div>
 
               {/* PROFESSIONAL P2P TOGGLE */}
-              <label className={`flex items-start gap-4 p-5 rounded-2xl border-2 cursor-pointer transition-all duration-300 ${formData.isP2P ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-400 dark:border-amber-500/50' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-blue-300'}`}>
+              <label className={`flex items-start gap-4 p-5 rounded-2xl border-2 transition-all duration-300 ${formData.isSynced ? 'opacity-60 pointer-events-none' : 'cursor-pointer'} ${formData.isP2P ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-400 dark:border-amber-500/50' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-blue-300'}`}>
                 <div className="relative flex items-center justify-center mt-0.5">
-                  <input type="checkbox" checked={formData.isP2P} onChange={(e) => setFormData({...formData, isP2P: e.target.checked})} className="sr-only" />
+                  <input disabled={formData.isSynced} type="checkbox" checked={formData.isP2P} onChange={(e) => setFormData({...formData, isP2P: e.target.checked})} className="sr-only" />
                   <div className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors ${formData.isP2P ? 'bg-amber-500 border-amber-500' : 'border-slate-300 dark:border-slate-600'}`}>
                     {formData.isP2P && <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                   </div>
@@ -620,31 +687,31 @@ const BankWallet = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Currency</label>
-                  <select value={formData.currency} onChange={(e) => setFormData({...formData, currency: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})} 
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all cursor-pointer">
+                  <select disabled={formData.isSynced} value={formData.currency} onChange={(e) => setFormData({...formData, currency: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})} 
+                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all cursor-pointer appearance-none disabled:opacity-60">
                     {!commonCurrencies.includes(baseCurrency) && <option value={baseCurrency}>{baseCurrency} (Base)</option>}
                     {commonCurrencies.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Deposit Amount</label>
-                  <input type="number" step="any" required value={formData.foreignAmount} onChange={(e) => setFormData({...formData, foreignAmount: e.target.value})} placeholder="0.00" 
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all text-lg" />
+                  <input disabled={formData.isSynced} type="number" step="any" required value={formData.foreignAmount} onChange={(e) => setFormData({...formData, foreignAmount: e.target.value})} placeholder="0.00" 
+                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all text-lg disabled:opacity-60" />
                 </div>
               </div>
 
               {formData.currency !== baseCurrency && (
-                <div className="p-5 bg-blue-50/50 dark:bg-blue-500/5 border border-blue-100 dark:border-blue-500/20 rounded-2xl space-y-4">
+                <div className={`p-5 bg-blue-50/50 dark:bg-blue-500/5 border border-blue-100 dark:border-blue-500/20 rounded-2xl space-y-4 ${formData.isSynced ? 'opacity-60' : ''}`}>
                   <div className="flex justify-between items-center">
                     <span className="text-xs font-black text-blue-700 dark:text-blue-400 uppercase tracking-widest flex items-center gap-1"><FaExchangeAlt/> Exchange Rate</span>
-                    <button type="button" onClick={fetchLiveRate} disabled={isFetchingRate} className="text-[10px] font-black bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1">
+                    <button type="button" onClick={fetchLiveRate} disabled={isFetchingRate || formData.isSynced} className="text-[10px] font-black bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1">
                       <HiOutlineRefresh className={isFetchingRate ? 'animate-spin' : ''} /> {isFetchingRate ? 'Fetching...' : 'Get Live Rate'}
                     </button>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-black text-slate-500">1 {formData.currency} = </span>
-                    <input type="number" step="any" required value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} placeholder={`Rate in ${baseCurrency}`} 
-                      className="flex-1 p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all" />
+                    <input disabled={formData.isSynced} type="number" step="any" required value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} placeholder={`Rate in ${baseCurrency}`} 
+                      className="flex-1 p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all disabled:opacity-60" />
                   </div>
                 </div>
               )}
@@ -655,13 +722,13 @@ const BankWallet = () => {
                     Bank / Service Fee 
                     <span className="text-[8px] bg-rose-100 text-rose-600 dark:bg-rose-500/20 px-2 py-0.5 rounded-full">DEDUCTION</span>
                   </label>
-                  <input type="number" step="any" value={formData.fee} onChange={(e) => setFormData({...formData, fee: e.target.value})} placeholder={`Fee in base currency`} 
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-all" />
+                  <input disabled={formData.isSynced} type="number" step="any" value={formData.fee} onChange={(e) => setFormData({...formData, fee: e.target.value})} placeholder={`Fee in base currency`} 
+                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-all disabled:opacity-60" />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">UTR / Ref No. (Optional)</label>
-                  <input type="text" value={formData.referenceNo} onChange={(e) => setFormData({...formData, referenceNo: e.target.value})} placeholder="e.g. UTR123..." 
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all" />
+                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">UTR / Ref No.</label>
+                  <input disabled={formData.isSynced} type="text" value={formData.referenceNo} onChange={(e) => setFormData({...formData, referenceNo: e.target.value})} placeholder="e.g. UTR123..." 
+                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all disabled:opacity-60" />
                 </div>
               </div>
 
@@ -687,14 +754,13 @@ const BankWallet = () => {
                   <span>Date</span>
                   <span className="text-blue-500">{formatGlobalDate ? formatGlobalDate(formData.date, 'full') : ''}</span>
                 </label>
-                <input type="date" required value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} 
-                  className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all" />
+                <input disabled={formData.isSynced} type="date" required value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} 
+                  className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all disabled:opacity-60" />
               </div>
 
-              {/* PROFESSIONAL SUBMIT BUTTON */}
               <button type="submit" disabled={isSaving} className={`w-full p-4 rounded-2xl font-black text-white text-lg transition-all shadow-xl flex items-center justify-center gap-2 shrink-0 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'active:scale-95'} ${formData.isP2P ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'}`}>
                 {isSaving ? <HiOutlineRefresh className="animate-spin text-2xl" /> : null}
-                {isSaving ? 'Processing...' : (editingId ? 'Update Bank Record' : 'Secure Deposit')}
+                {isSaving ? 'Processing...' : (editingId ? 'Save Bank Settings' : 'Secure Deposit')}
               </button>
 
             </form>
@@ -744,7 +810,8 @@ const BankWallet = () => {
                 <button type="button" onClick={() => setDeleteContext(null)} className="flex-1 p-4 rounded-2xl font-black text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
                   Cancel
                 </button>
-                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-2xl font-black text-white bg-rose-500 hover:bg-rose-600 transition-colors disabled:opacity-50">
+                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-2xl font-black text-white bg-rose-500 hover:bg-rose-600 transition-colors disabled:opacity-50 flex justify-center items-center gap-2">
+                  {isVerifying ? <HiOutlineRefresh className="animate-spin text-xl"/> : null}
                   Verify & Delete
                 </button>
               </div>

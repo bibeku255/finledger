@@ -13,7 +13,7 @@ import {
   HiOutlineLockClosed, HiOutlineExclamationCircle, HiOutlineArrowDown, HiOutlineArrowUp,
   HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable
 } from 'react-icons/hi';
-import { FaExchangeAlt, FaBuilding, FaWallet, FaRandom, FaBitcoin } from 'react-icons/fa';
+import { FaExchangeAlt, FaBuilding, FaWallet, FaRandom, FaBitcoin, FaUniversity } from 'react-icons/fa';
 
 // 🚀 SECURE SHA-256 HASHING ALGORITHM
 const hashPIN = async (pinCode) => {
@@ -120,14 +120,14 @@ const HistoryLogs = () => {
 
   const getVaultIcon = (v) => {
     if (!v) return <FaWallet />;
-    if (v.toLowerCase() === 'bank') return <HiOutlineDocumentSearch />;
-    if (v.toLowerCase() === 'cash') return <FaWallet />;
+    if (v.toLowerCase() === 'bank') return <FaUniversity />;
+    if (v.toLowerCase() === 'cash') return <FaMoneyBillWave />;
     if (v.toLowerCase() === 'crypto') return <FaBitcoin />;
     if (v.toLowerCase() === 'online') return <FaWallet />;
     return <FaWallet />;
   };
 
-  // 🚀 REPORT DOWNLOAD LOGIC (Now includes Global Date)
+  // 🚀 REPORT DOWNLOAD LOGIC
   const handleDownloadReport = (format) => {
     const allRecords = [...incomes, ...expenses, ...shifts];
     const filteredForReport = allRecords.filter(rec => {
@@ -149,14 +149,14 @@ const HistoryLogs = () => {
       if (rec.logType === 'income') {
         typeLabel = '[INCOME]';
         detailsLabel = `${(rec.title || 'N/A').replace(/(\r\n|\n|\r)/gm, " ")} (${rec.category})`;
-        vaultImpactLabel = `To ${rec.vault} Vault`;
+        vaultImpactLabel = `To ${rec.vault} Vault ${rec.subWallet ? `(${rec.subWallet})` : ''}`;
         amountLabel = `+${Number(rec.amount || 0).toLocaleString()} ${rec.asset || rec.currency}`;
         baseValueLabel = `+${currencySymbol}${Math.abs(rec.finalBaseAmount || 0).toFixed(2)}`;
       } 
       else if (rec.logType === 'expense') {
         typeLabel = '[EXPENSE]';
         detailsLabel = `${(rec.title || 'N/A').replace(/(\r\n|\n|\r)/gm, " ")} (${rec.category})`;
-        vaultImpactLabel = rec.isSplit ? 'Split Payment' : `From ${rec.vault} Vault`;
+        vaultImpactLabel = rec.isSplit ? 'Split Payment' : `From ${rec.vault} Vault ${rec.subWallet ? `(${rec.subWallet})` : ''}`;
         amountLabel = rec.isSplit ? 'Multi-Asset' : `-${Number(rec.amount || 0).toLocaleString()} ${rec.asset || rec.currency}`;
         baseValueLabel = `-${currencySymbol}${Math.abs(rec.finalBaseAmount || 0).toFixed(2)}`;
       } 
@@ -237,7 +237,6 @@ const HistoryLogs = () => {
       } 
       else if (rec.logType === 'expense') {
         await deleteDoc(doc(db, "users", user.uid, "expenseLogs", rec.id));
-        // 🔥 FIXED: Checking both linkedExpenseId and linkedIncomeId (in case of Goal Refunds)
         if (rec.linkedExpenseId) {
           for (const v of allVaults) {
             const q = query(collection(db, "users", user.uid, v), where("linkedExpenseId", "==", rec.linkedExpenseId));
@@ -373,11 +372,11 @@ const HistoryLogs = () => {
                 <div className="flex gap-4 text-right">
                   <div className="hidden md:block">
                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Month Inflow</p>
-                    <p className="text-sm font-black text-emerald-500">+{currencySymbol}{month.monthInflow.toLocaleString()}</p>
+                    <p className="text-sm font-black text-emerald-500">+{currencySymbol}{month.monthInflow.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
                   </div>
                   <div>
                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Month Outflow</p>
-                    <p className="text-sm font-black text-rose-500">-{currencySymbol}{month.monthOutflow.toLocaleString()}</p>
+                    <p className="text-sm font-black text-rose-500">-{currencySymbol}{month.monthOutflow.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
                   </div>
                 </div>
               </div>
@@ -416,7 +415,6 @@ const HistoryLogs = () => {
                                  <p className="text-[10px] font-bold text-slate-500 flex items-center gap-1">
                                    <HiOutlineSwitchHorizontal/> via {rec.routingPlatform || 'Internal'}
                                  </p>
-                                 {/* 🚀 GLOBAL DATE */}
                                  <p className="text-[9px] font-bold text-slate-400 mt-1">
                                    {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date}
                                  </p>
@@ -427,7 +425,6 @@ const HistoryLogs = () => {
                                  <span className={`inline-block px-2 py-0.5 text-[9px] font-black uppercase tracking-wider rounded ${style.bg} ${style.text}`}>
                                    {rec.category}
                                  </span>
-                                 {/* 🚀 GLOBAL DATE */}
                                  <p className="text-[9px] font-bold text-slate-400 mt-1">
                                    {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date}
                                  </p>
@@ -435,7 +432,7 @@ const HistoryLogs = () => {
                             )}
                           </td>
 
-                          {/* Vault Impact */}
+                          {/* 🚀 Vault Impact (SUB-WALLET INCLUDED HERE) */}
                           <td className="p-4">
                             {rec.logType === 'shift' ? (
                                <div className="flex flex-col gap-1 items-start">
@@ -463,8 +460,11 @@ const HistoryLogs = () => {
                             ) : (
                                <div className="flex flex-col gap-1 items-start">
                                   <span className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded w-max flex items-center gap-1">
-                                    {rec.vault === 'crypto' ? <FaBitcoin/> : <FaWallet/>} {rec.vault} Vault
+                                    {getVaultIcon(rec.vault)} {rec.vault} Vault
                                   </span>
+                                  {(rec.vault === 'bank' || rec.vault === 'online') && rec.subWallet && (
+                                     <span className="text-[9px] font-bold text-blue-500 flex items-center gap-1 ml-1"><FaBuilding/> {rec.subWallet}</span>
+                                  )}
                                   {rec.vault === 'crypto' && rec.cryptoPlatform && (
                                      <span className="text-[9px] font-bold text-slate-400 flex items-center gap-1 ml-1"><FaBuilding/> {rec.cryptoPlatform}</span>
                                   )}
@@ -513,7 +513,7 @@ const HistoryLogs = () => {
                               </p>
                             )}
 
-                            {/* 🚀 THE SECURE DELETE BUTTON (Unlocked for all Auto-Synced too) */}
+                            {/* THE SECURE DELETE BUTTON */}
                             <button 
                               onClick={() => initiateDelete(rec)}
                               className="absolute right-4 top-1/2 -translate-y-1/2 p-2 bg-rose-100 text-rose-600 rounded-lg opacity-0 lg:group-hover:opacity-100 transition-all hover:bg-rose-500 hover:text-white"
@@ -545,7 +545,7 @@ const HistoryLogs = () => {
               <div className="w-16 h-16 bg-rose-100 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400 rounded-full flex items-center justify-center text-3xl mb-4">
                 <HiOutlineLockClosed />
               </div>
-              <h3 className="text-2xl font-black text-slate-900 dark:text-white">Security Check</h3>
+              <h3 className="text-xl font-black text-slate-900 dark:text-white">Security Check</h3>
               <p className="text-sm font-bold text-slate-500 mt-2">
                 You are about to permanently delete this {deleteContext.logType}.
               </p>

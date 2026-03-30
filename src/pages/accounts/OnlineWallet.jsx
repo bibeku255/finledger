@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
-// 🚀 FIXED: Added setDoc and removed updateDoc for crash-free editing
 import { collection, addDoc, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 
@@ -13,7 +12,7 @@ import {
   HiOutlineTrendingUp, HiOutlineTrendingDown, HiOutlineLockClosed, HiOutlineExclamationCircle,
   HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable
 } from 'react-icons/hi';
-import { FaGlobe, FaWallet, FaArrowDown, FaArrowUp, FaExchangeAlt } from 'react-icons/fa';
+import { FaGlobe, FaWallet, FaArrowDown, FaArrowUp, FaExchangeAlt, FaShieldAlt } from 'react-icons/fa';
 
 // 🚀 STRICTLY FIAT CURRENCIES NOW
 const fiatCurrencies = ["USD", "EUR", "GBP", "AUD", "CAD", "SGD", "AED", "SAR", "JPY", "CNY", "INR", "NPR", "PKR", "BDT"];
@@ -59,7 +58,8 @@ const OnlineWallet = () => {
   const todayDate = new Date().toISOString().split('T')[0];
   const [formData, setFormData] = useState({
     title: '', walletName: '', referenceNo: '', 
-    foreignAmount: '', currency: 'USD', exchangeRate: 1, fee: '', date: todayDate
+    isP2P: false, foreignAmount: '', currency: 'USD', exchangeRate: 1, fee: '', date: todayDate,
+    isSynced: false // 🚀 Added to track synced edits
   });
 
   // 🌍 FETCH ONLY FIAT RATES FOR TICKER
@@ -99,6 +99,37 @@ const OnlineWallet = () => {
     return () => unsubscribe();
   }, [user]);
 
+  // 🚀 UNIQUE WALLET NAMES FOR AUTO-COMPLETE
+  const existingWallets = useMemo(() => {
+    const wallets = new Set(transactions.map(t => t.walletName).filter(w => w && w.trim() !== ''));
+    return Array.from(wallets);
+  }, [transactions]);
+
+  // 🚀 PERFECTED MULTI-CURRENCY & SUB-WALLET AGGREGATOR LOGIC
+  const subWalletBalances = useMemo(() => {
+    const balances = {};
+    
+    transactions.forEach(t => {
+      const curr = t.currency || baseCurrency;
+      const originalWalletName = t.walletName?.trim() ? t.walletName.trim() : 'Main Wallet';
+      const key = `${originalWalletName.toUpperCase()}_${curr.toUpperCase()}`;
+      
+      if (!balances[key]) balances[key] = { wallet: originalWalletName, currency: curr, value: 0 };
+      
+      const amt = Number(t.foreignAmount || t.amount || 0); 
+      
+      if (t.type === 'in') {
+        balances[key].value += amt;
+      } else {
+        balances[key].value -= amt;
+      }
+    });
+
+    return Object.values(balances)
+      .filter(b => Math.abs(b.value) > 0.01)
+      .sort((a, b) => b.value - a.value);
+  }, [transactions, baseCurrency]);
+
   const processedLedger = useMemo(() => {
     const sorted = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
     let runningBalance = 0;
@@ -106,9 +137,7 @@ const OnlineWallet = () => {
 
     sorted.forEach(t => {
       const dateObj = new Date(t.date || new Date());
-      // 🚀 NAYA LOGIC: Grouping based on the Global Date Format (Month & Year)
       const monthName = formatGlobalDate ? formatGlobalDate(dateObj, 'monthYear') : dateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
-      // Raw English 'YYYY-MM' key for correct chronological sorting behind the scenes
       const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
 
       if (!grouped[monthKey]) {
@@ -146,7 +175,6 @@ const OnlineWallet = () => {
 
   const totalBalance = processedLedger.length > 0 ? processedLedger[0].closingBalance : 0;
 
-  // 🚀 REPORT DOWNLOAD LOGIC FOR ONLINE WALLET (Now includes Global Date)
   const handleDownloadReport = (format) => {
     if (transactions.length === 0) return alert("No records found to download.");
 
@@ -184,7 +212,6 @@ const OnlineWallet = () => {
     }
   };
 
-  // 💱 FETCH FIAT EXCHANGE RATE ONLY
   const fetchLiveRate = async () => {
     if (formData.currency === baseCurrency) return;
     setIsFetchingRate(true);
@@ -208,29 +235,50 @@ const OnlineWallet = () => {
   const handleSaveEntry = async (e) => {
     e.preventDefault();
     if (!user) return alert("Please login first!");
+    if (!formData.walletName.trim()) return alert("Please provide a Wallet Name (e.g. PayPal)");
     
     setIsSaving(true);
 
-    const recordData = {
-      title: formData.title,
-      walletName: formData.walletName || 'Unknown Wallet',
-      walletCategory: "Fiat E-Wallet", // Hardcoded now for simplicity
-      referenceNo: formData.referenceNo || '',
-      type: 'in', 
-      date: formData.date,
-      timestamp: editingId ? transactions.find(t => t.id === editingId)?.timestamp : new Date(formData.date).getTime(),
-      currency: formData.currency,
-      foreignAmount: grossDeposit, 
-      fee: nativeFee, 
-      netForeignAmount: netNativeAmount, 
-      exchangeRate: exchangeRate,
-      finalBaseAmount: calculatedFinalAmount 
-    };
-
     try {
       if (editingId) {
-        await setDoc(doc(db, "users", user.uid, "onlineWallet", editingId), recordData, { merge: true });
+        if (formData.isSynced) {
+           await setDoc(doc(db, "users", user.uid, "onlineWallet", editingId), { 
+             walletName: formData.walletName.trim() 
+           }, { merge: true });
+        } else {
+           const recordData = {
+             title: formData.title,
+             walletName: formData.walletName.trim(),
+             walletCategory: "Fiat E-Wallet",
+             referenceNo: formData.referenceNo || '',
+             isP2P: formData.isP2P || false,
+             date: formData.date,
+             currency: formData.currency,
+             foreignAmount: grossDeposit, 
+             fee: nativeFee, 
+             netForeignAmount: netNativeAmount, 
+             exchangeRate: exchangeRate,
+             finalBaseAmount: calculatedFinalAmount 
+           };
+           await setDoc(doc(db, "users", user.uid, "onlineWallet", editingId), recordData, { merge: true });
+        }
       } else {
+        const recordData = {
+          title: formData.title,
+          walletName: formData.walletName.trim(),
+          walletCategory: "Fiat E-Wallet",
+          referenceNo: formData.referenceNo || '',
+          isP2P: formData.isP2P || false,
+          type: 'in', 
+          date: formData.date,
+          timestamp: new Date(formData.date).getTime(),
+          currency: formData.currency,
+          foreignAmount: grossDeposit, 
+          fee: nativeFee, 
+          netForeignAmount: netNativeAmount, 
+          exchangeRate: exchangeRate,
+          finalBaseAmount: calculatedFinalAmount 
+        };
         await addDoc(collection(db, "users", user.uid, "onlineWallet"), recordData);
       }
       closeModal();
@@ -242,15 +290,19 @@ const OnlineWallet = () => {
   };
 
   const handleEdit = (rec) => {
+    const isSyncedEntry = !!(rec.linkedExpenseId || rec.linkedIncomeId || rec.shiftId || rec.linkedPartyId);
+
     setFormData({
       title: rec.title || '',
       walletName: rec.walletName || '',
       referenceNo: rec.referenceNo || '',
+      isP2P: rec.isP2P || false,
       foreignAmount: rec.foreignAmount || rec.finalBaseAmount || '', 
       currency: rec.currency || 'USD',
       exchangeRate: rec.exchangeRate || 1,
       fee: rec.fee || '', 
-      date: rec.date || todayDate
+      date: rec.date || todayDate,
+      isSynced: isSyncedEntry
     });
     setEditingId(rec.id);
     setIsModalOpen(true);
@@ -297,14 +349,14 @@ const OnlineWallet = () => {
 
   const openModal = () => {
     setEditingId(null);
-    setFormData({ title: '', walletName: '', referenceNo: '', foreignAmount: '', currency: 'USD', exchangeRate: 1, fee: '', date: todayDate });
+    const lastWallet = existingWallets.length > 0 ? existingWallets[0] : '';
+    setFormData({ title: '', walletName: lastWallet, referenceNo: '', isP2P: false, foreignAmount: '', currency: 'USD', exchangeRate: 1, fee: '', date: todayDate, isSynced: false });
     setIsModalOpen(true);
   };
 
   const closeModal = () => { setIsModalOpen(false); setEditingId(null); };
 
   return (
-    // 🚀 FIX: pt-24 globally offsets below navbar
     <div className="pt-24 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 max-w-7xl mx-auto px-4 md:px-0">
       
       <style>{`
@@ -360,8 +412,6 @@ const OnlineWallet = () => {
         </div>
         
         <div className="flex items-center gap-2 md:gap-3">
-          
-          {/* 🚀 DOWNLOAD REPORT DROPDOWN */}
           <div className="relative group">
             <button className="flex items-center gap-1 md:gap-2 p-3 md:p-3.5 bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400 rounded-2xl font-bold text-xs md:text-sm hover:bg-indigo-100 transition-colors border border-indigo-100 dark:border-indigo-500/20 shadow-sm">
               <HiOutlineDownload size={18}/> 
@@ -390,15 +440,30 @@ const OnlineWallet = () => {
         <div className="absolute -right-10 -top-10 opacity-5 text-white blur-[2px]">
           <FaGlobe size={250} />
         </div>
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="relative z-10 w-full flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
-            <p className="text-sm font-black text-slate-400 uppercase tracking-[0.2em] mb-3">Total Cloud Balance</p>
+            <p className="text-sm font-black text-slate-400 uppercase tracking-[0.2em] mb-3">Total Cloud Balance (Base)</p>
             <h2 className="text-5xl md:text-7xl font-black text-white tracking-tighter">
               <span className="text-purple-500 mr-2">{currencySymbol}</span>
               {(totalBalance || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
             </h2>
           </div>
         </div>
+
+        {/* 🚀 SUB-WALLET BALANCES RENDERED HERE */}
+        {subWalletBalances.length > 0 && (
+          <div className="mt-6 pt-6 border-t border-slate-700/50 flex gap-4 overflow-x-auto custom-scrollbar pb-2 relative z-10">
+            {subWalletBalances.map((item, idx) => (
+              <div key={idx} className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-xl px-4 py-3 shrink-0 flex items-center gap-3">
+                <img src={`https://flagcdn.com/w40/${fiatFlagMap[item.currency] || 'un'}.png`} alt="" className="w-8 h-8 rounded-full object-cover border border-slate-600" />
+                <div>
+                  <p className="text-[10px] font-black text-purple-200 uppercase tracking-widest leading-tight">{item.wallet} <span className="opacity-70">({item.currency})</span></p>
+                  <p className="text-lg font-bold text-white leading-none mt-0.5">{item.value.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col md:flex-row gap-4 bg-white dark:bg-slate-900 p-2 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800">
@@ -461,9 +526,11 @@ const OnlineWallet = () => {
                               <FaWallet />
                             </div>
                             <div>
-                              <p className="font-black text-slate-800 dark:text-white text-sm">{rec.walletName}</p>
+                              <p className="font-black text-slate-800 dark:text-white text-sm flex items-center gap-2">
+                                {rec.walletName || 'Main Wallet'}
+                                {rec.isP2P && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 text-[9px] font-black uppercase tracking-widest flex items-center gap-1"><FaShieldAlt size={8}/> P2P Risk</span>}
+                              </p>
                               <p className="text-[11px] font-bold text-slate-500 mt-0.5">{rec.title}</p>
-                              {/* 🚀 UPDATED DATE RENDERING HERE */}
                               <p className="text-[10px] font-bold text-slate-400 mt-0.5 flex items-center gap-2">
                                 {formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rec.date} {rec.referenceNo && <span className="text-slate-300 dark:text-slate-600">|</span>} {rec.referenceNo && `Ref: ${rec.referenceNo}`}
                               </p>
@@ -515,14 +582,14 @@ const OnlineWallet = () => {
                         
                         <td className="p-4 pr-6">
                           <div className="flex items-center justify-end gap-2">
-                             {(!rec.linkedExpenseId && !rec.linkedIncomeId && !rec.shiftId) && (
-                              <button onClick={() => handleEdit(rec)} className="p-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-xl transition-all shadow-sm">
-                                <HiOutlinePencil size={18} />
-                              </button>
-                             )}
-                            <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-xl transition-all shadow-sm">
-                              <HiOutlineTrash size={18} />
-                            </button>
+                             {/* 🚀 ALWAYS SHOW PENCIL FOR SYNCED ENTRIES TO FIX WALLET NAME */}
+                             <button onClick={() => handleEdit(rec)} className="p-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-xl transition-all shadow-sm">
+                               <HiOutlinePencil size={18} />
+                             </button>
+
+                             <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-xl transition-all shadow-sm" title={rec.linkedExpenseId || rec.linkedIncomeId || rec.shiftId ? "Force Delete Auto-Synced Entry" : "Delete"}>
+                               <HiOutlineTrash size={18} />
+                             </button>
                           </div>
                         </td>
 
@@ -545,7 +612,7 @@ const OnlineWallet = () => {
         )}
       </div>
 
-      {/* 🚀 FIXED MODAL: Safe Bottom Sheet Behavior with Highest z-index */}
+      {/* 🚀 MODAL: Edit & Entry */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90dvh] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-100 dark:border-slate-800">
@@ -562,52 +629,67 @@ const OnlineWallet = () => {
             
             <form onSubmit={handleSaveEntry} className="p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
               
+              {/* 🚀 WARNING FOR AUTO-SYNCED ENTRIES */}
+              {formData.isSynced && (
+                 <div className="bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 p-4 rounded-xl text-xs font-bold leading-relaxed border border-amber-200 dark:border-amber-500/30">
+                   <span className="flex items-center gap-1 mb-1"><HiOutlineExclamationCircle size={16}/> Auto-Synced Entry</span>
+                   This entry is linked to an Income or Expense log. You can only update the <span className="underline">Wallet Name</span> here. To change the amount, please edit the source transaction.
+                 </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Platform Name</label>
-                  <input type="text" required value={formData.walletName} onChange={(e) => setFormData({...formData, walletName: e.target.value})} placeholder="e.g., PayPal, Skrill" 
+                  {/* 🚀 AUTOCOMPLETE DATALIST ADDED */}
+                  <input type="text" list="online-wallets" required value={formData.walletName} onChange={(e) => setFormData({...formData, walletName: e.target.value})} placeholder="e.g., PayPal, Skrill" 
                     className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-purple-500/50 transition-all" />
+                  <datalist id="online-wallets">
+                    {existingWallets.map(w => <option key={w} value={w} />)}
+                  </datalist>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Sender / Source</label>
-                  <input type="text" required value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} placeholder="e.g., Freelance Client" 
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-purple-500/50 transition-all" />
-                </div>
+                {!formData.isSynced && (
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Sender / Source</label>
+                    <input type="text" required value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} placeholder="e.g., Freelance Client" 
+                      className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-purple-500/50 transition-all" />
+                  </div>
+                )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Fiat Currency</label>
-                  <select value={formData.currency} onChange={(e) => setFormData({...formData, currency: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})} 
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-purple-500/50 transition-all cursor-pointer">
-                    {!fiatCurrencies.includes(baseCurrency) && <option value={baseCurrency}>{baseCurrency} (Base)</option>}
-                    {fiatCurrencies.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+              {!formData.isSynced && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Fiat Currency</label>
+                    <select value={formData.currency} onChange={(e) => setFormData({...formData, currency: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})} 
+                      className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-purple-500/50 transition-all cursor-pointer appearance-none">
+                      {!fiatCurrencies.includes(baseCurrency) && <option value={baseCurrency}>{baseCurrency} (Base)</option>}
+                      {fiatCurrencies.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Deposit Amount ({formData.currency})</label>
+                    <input type="number" step="any" required value={formData.foreignAmount} onChange={(e) => setFormData({...formData, foreignAmount: e.target.value})} placeholder="0.00" 
+                      className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-purple-500/50 transition-all text-lg" />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Deposit Amount ({formData.currency})</label>
-                  <input type="number" step="any" required value={formData.foreignAmount} onChange={(e) => setFormData({...formData, foreignAmount: e.target.value})} placeholder="0.00" 
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-purple-500/50 transition-all text-lg" />
-                </div>
-              </div>
+              )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2">
-                    Gateway Fee 
-                    <span className="text-[8px] bg-rose-100 text-rose-600 dark:bg-rose-500/20 px-2 py-0.5 rounded-full">IN {formData.currency}</span>
-                  </label>
-                  <input type="number" step="any" value={formData.fee} onChange={(e) => setFormData({...formData, fee: e.target.value})} placeholder={`Fee in ${formData.currency}`} 
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-all" />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Ref ID / TxHash (Optional)</label>
-                  <input type="text" value={formData.referenceNo} onChange={(e) => setFormData({...formData, referenceNo: e.target.value})} placeholder="e.g. TXN123..." 
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-purple-500/50 transition-all" />
-                </div>
-              </div>
+              {!formData.isSynced && (
+                <label className={`flex items-start gap-4 p-5 rounded-2xl border-2 cursor-pointer transition-all duration-300 ${formData.isP2P ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-400 dark:border-amber-500/50' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-blue-300'}`}>
+                  <div className="relative flex items-center justify-center mt-0.5">
+                    <input type="checkbox" checked={formData.isP2P} onChange={(e) => setFormData({...formData, isP2P: e.target.checked})} className="sr-only" />
+                    <div className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors ${formData.isP2P ? 'bg-amber-500 border-amber-500' : 'border-slate-300 dark:border-slate-600'}`}>
+                      {formData.isP2P && <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                    </div>
+                  </div>
+                  <div>
+                    <p className={`font-black ${formData.isP2P ? 'text-amber-700 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}`}>Tag as P2P / Crypto Origin</p>
+                    <p className="text-xs font-semibold text-slate-500 mt-1">Isolate this transaction for risk management and tax auditing.</p>
+                  </div>
+                </label>
+              )}
 
-              {formData.currency !== baseCurrency && (
+              {!formData.isSynced && formData.currency !== baseCurrency && (
                 <div className="p-5 border rounded-2xl space-y-4 transition-colors bg-purple-50/50 dark:bg-purple-500/5 border-purple-100 dark:border-purple-500/20">
                   <div className="flex justify-between items-center">
                     <span className="text-xs font-black uppercase tracking-widest flex items-center gap-1 text-purple-700 dark:text-purple-400">
@@ -625,19 +707,39 @@ const OnlineWallet = () => {
                 </div>
               )}
 
-              <div className="px-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <div className="flex justify-between items-end">
-                  <div className="space-y-1">
-                    <span className="block text-xs font-bold text-slate-500">Net Deposit: {netNativeAmount.toLocaleString(undefined, {maximumFractionDigits: 2})} {formData.currency}</span>
+              {!formData.isSynced && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2">
+                      Gateway Fee 
+                      <span className="text-[8px] bg-rose-100 text-rose-600 dark:bg-rose-500/20 px-2 py-0.5 rounded-full">IN {formData.currency}</span>
+                    </label>
+                    <input type="number" step="any" value={formData.fee} onChange={(e) => setFormData({...formData, fee: e.target.value})} placeholder={`Fee in ${formData.currency}`} 
+                      className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-all" />
                   </div>
-                  <div className="text-right">
-                    <span className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Final Base Value</span>
-                    <span className="text-xl font-black tracking-tight text-purple-600 dark:text-purple-400">
-                      {currencySymbol}{calculatedFinalAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}
-                    </span>
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Ref ID / TxHash</label>
+                    <input type="text" value={formData.referenceNo} onChange={(e) => setFormData({...formData, referenceNo: e.target.value})} placeholder="e.g. TXN123..." 
+                      className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-purple-500/50 transition-all" />
                   </div>
                 </div>
-              </div>
+              )}
+
+              {!formData.isSynced && (
+                <div className="px-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div className="flex justify-between items-end">
+                    <div className="space-y-1">
+                      <span className="block text-xs font-bold text-slate-500">Net Deposit: {netNativeAmount.toLocaleString(undefined, {maximumFractionDigits: 2})} {formData.currency}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Final Base Value</span>
+                      <span className="text-xl font-black tracking-tight text-purple-600 dark:text-purple-400">
+                        {currencySymbol}{calculatedFinalAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* 🚀 DATE PICKER WITH LOCAL DATE INFO */}
               <div className="space-y-2">
@@ -645,13 +747,13 @@ const OnlineWallet = () => {
                   <span>Date</span>
                   <span className="text-purple-500">{formatGlobalDate ? formatGlobalDate(formData.date, 'full') : ''}</span>
                 </label>
-                <input type="date" required value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} 
-                  className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-purple-500/50 transition-all" />
+                <input disabled={formData.isSynced} type="date" required value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} 
+                  className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-purple-500/50 transition-all disabled:opacity-60" />
               </div>
 
               <button type="submit" disabled={isSaving} className={`w-full p-4 shrink-0 rounded-2xl font-black text-white text-lg transition-all shadow-xl flex items-center justify-center gap-2 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'active:scale-95'} bg-purple-600 hover:bg-purple-700 shadow-purple-500/20`}>
                 {isSaving ? <HiOutlineRefresh className="animate-spin text-2xl" /> : null}
-                {isSaving ? 'Processing...' : (editingId ? 'Update Record' : 'Secure E-Deposit')}
+                {isSaving ? 'Processing...' : (editingId ? 'Update Wallet Name' : 'Secure E-Deposit')}
               </button>
 
             </form>
