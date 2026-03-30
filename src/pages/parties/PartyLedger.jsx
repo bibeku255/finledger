@@ -43,7 +43,6 @@ const PartyLedger = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isFetchingRate, setIsFetchingRate] = useState(false);
   
-  // 🚀 NEW STATE: To handle mobile-friendly 3-dot menu
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   // 🔐 Security Delete States
@@ -55,11 +54,30 @@ const PartyLedger = () => {
   const localTime = new Date().toISOString().substring(0, 16); 
   const todayDate = new Date().toISOString().split('T')[0];
 
+  // 🚀 FETCH EXISTING BANKS/WALLETS FOR AUTO-SUGGEST
+  const [existingVaultNames, setExistingVaultNames] = useState([]);
+  useEffect(() => {
+     if(!user) return;
+     const fetchVaults = async () => {
+        const qBank = query(collection(db, "users", user.uid, "bankWallet"));
+        const snapBank = await getDocs(qBank);
+        const qOnline = query(collection(db, "users", user.uid, "onlineWallet"));
+        const snapOnline = await getDocs(qOnline);
+        
+        const names = new Set();
+        snapBank.docs.forEach(d => { if(d.data().bankName) names.add(d.data().bankName) });
+        snapOnline.docs.forEach(d => { if(d.data().walletName) names.add(d.data().walletName) });
+        setExistingVaultNames(Array.from(names));
+     };
+     fetchVaults();
+  }, [user]);
+
   const [formData, setFormData] = useState({
     amount: '',
     currency: baseCurrency,
     exchangeRate: 1,
     vault: 'bank', 
+    subWallet: '', // 🚀 NEW: SubWallet Field Added
     note: '',
     purpose: 'Friendly Support (0% Interest)', 
     datetime: localTime,
@@ -159,7 +177,6 @@ const PartyLedger = () => {
   const isForeign = formData.currency !== baseCurrency;
   const baseValue = (parseFloat(formData.amount) || 0) * (isForeign ? (parseFloat(formData.exchangeRate) || 1) : 1);
 
-  // 🚀 FIXED: REPLACED WINDOW.CONFIRM WITH SECURE DELETE
   const initiateDelete = (entry) => {
     setDeleteContext(entry);
     setPinInput('');
@@ -196,16 +213,13 @@ const PartyLedger = () => {
       let newNetBalance = party.netBalance + balanceAdjustment;
       let newStatus = newNetBalance === 0 ? 'settled' : 'active';
       
-      // 1. Update Party Balance
       await setDoc(doc(db, "users", user.uid, "parties", party.id), { 
         netBalance: newNetBalance,
         status: newStatus 
       }, { merge: true });
 
-      // 2. Delete Ledger Entry
       await deleteDoc(doc(db, "users", user.uid, "parties", party.id, "ledger", entry.id));
       
-      // 3. 🚀 CLEANUP SYNCED VAULT ENTRIES (Refund money to bank/cash)
       if (entry.linkId) {
         const collectionsToCheck = ['bankWallet', 'cashWallet', 'onlineWallet', 'cryptoWalletLogs', 'expenseLogs', 'incomeLogs'];
         for (const colName of collectionsToCheck) {
@@ -265,6 +279,12 @@ const PartyLedger = () => {
   const handleTransaction = async (e) => {
     e.preventDefault();
     if (!user || !party) return;
+
+    // 🚀 NEW: Validate SubWallet Input
+    if (activeModal !== 'interest' && (formData.vault === 'bank' || formData.vault === 'online') && !formData.subWallet.trim()) {
+        return alert("Please specify the exact Bank or Wallet Name (e.g. SBI, PayPal).");
+    }
+
     setIsProcessing(true);
 
     const timestamp = new Date(formData.datetime).getTime();
@@ -280,6 +300,7 @@ const PartyLedger = () => {
       baseAmount: baseValue,
       note: formData.note,
       vault: activeModal === 'interest' ? null : formData.vault,
+      subWallet: activeModal === 'interest' ? null : formData.subWallet.trim(), // 🚀 Saved to ledger
       date: formattedDate,
       timestamp,
       linkId
@@ -302,8 +323,8 @@ const PartyLedger = () => {
         exchangeRate: ledgerEntry.exchangeRate,
         finalBaseAmount: baseValue,
         fee: 0,
-        walletName: party.name,
-        bankName: party.name,
+        walletName: formData.subWallet.trim() || 'Default Wallet', // 🚀 Accurate Vault Info
+        bankName: formData.subWallet.trim() || 'Default Bank',     // 🚀 Accurate Vault Info
         transferType: 'EMI Payment',
         linkedPartyId: party.id,
         linkId
@@ -323,8 +344,8 @@ const PartyLedger = () => {
         exchangeRate: ledgerEntry.exchangeRate,
         finalBaseAmount: baseValue,
         fee: 0,
-        walletName: party.name,
-        bankName: party.name,
+        walletName: formData.subWallet.trim() || 'Default Wallet', // 🚀 Accurate Vault Info
+        bankName: formData.subWallet.trim() || 'Default Bank',     // 🚀 Accurate Vault Info
         transferType: 'Lent/Give',
         linkedPartyId: party.id,
         linkId
@@ -343,8 +364,8 @@ const PartyLedger = () => {
         exchangeRate: ledgerEntry.exchangeRate,
         finalBaseAmount: baseValue,
         fee: 0,
-        walletName: party.name,
-        bankName: party.name,
+        walletName: formData.subWallet.trim() || 'Default Wallet', // 🚀 Accurate Vault Info
+        bankName: formData.subWallet.trim() || 'Default Bank',     // 🚀 Accurate Vault Info
         transferType: isInterestIncome ? 'Income' : 'Repayment/Receive',
         linkedPartyId: party.id,
         linkId
@@ -387,6 +408,7 @@ const PartyLedger = () => {
               title: `EMI Paid: ${party.name}`,
               category: "Bills & Utilities", 
               vault: formData.vault,
+              subWallet: formData.subWallet.trim(), // 🚀 To pass to expense logs
               asset: formData.currency,
               amount: parseFloat(formData.amount),
               exchangeRate: isForeign ? parseFloat(formData.exchangeRate) : 1,
@@ -394,7 +416,7 @@ const PartyLedger = () => {
               date: formattedDate,
               timestamp,
               linkedExpenseId: linkId,
-              linkId: linkId, // For easy deletion later
+              linkId: linkId,
               isSplit: false
             });
         }
@@ -409,6 +431,7 @@ const PartyLedger = () => {
           exchangeRate: isForeign ? parseFloat(formData.exchangeRate) : 1,
           finalBaseAmount: baseValue,
           vault: formData.vault,
+          subWallet: formData.subWallet.trim(), // 🚀 To pass to income logs
           date: formattedDate,
           timestamp,
           linkId: linkId,
@@ -451,6 +474,7 @@ const PartyLedger = () => {
             date: formattedDate,
             timestamp,
             vault: 'cash',
+            subWallet: '',
             isSplit: false
           });
         }
@@ -469,17 +493,18 @@ const PartyLedger = () => {
 
   const openModal = (type) => {
     setActiveModal(type);
-    setIsMenuOpen(false); // 🚀 Ensure menu closes when opening modal
+    setIsMenuOpen(false); 
+    const lastVaultName = existingVaultNames.length > 0 ? existingVaultNames[0] : '';
     
     if (type === 'emi_payment' && party) {
       setFormData({
-         amount: party.emiAmount || '', currency: baseCurrency, exchangeRate: 1, vault: 'bank', note: 'Monthly Installment Paid', 
+         amount: party.emiAmount || '', currency: baseCurrency, exchangeRate: 1, vault: 'bank', subWallet: lastVaultName, note: 'Monthly Installment Paid', 
          purpose: 'EMI', datetime: localTime, receiveType: 'principal',
          interestPrincipal: '', interestRate: '', interestType: 'monthly', interestMethod: 'simple', startDate: todayDate, endDate: todayDate
       });
     } else {
       setFormData({ 
-        amount: '', currency: baseCurrency, exchangeRate: 1, vault: 'bank', note: '', 
+        amount: '', currency: baseCurrency, exchangeRate: 1, vault: 'bank', subWallet: lastVaultName, note: '', 
         purpose: 'Friendly Support (0% Interest)', 
         datetime: localTime, receiveType: 'principal',
         interestPrincipal: party ? Math.abs(party.netBalance).toString() : '', 
@@ -493,8 +518,6 @@ const PartyLedger = () => {
   if (isLoading || !party) {
     return <div className="p-20 text-center font-bold text-slate-400 animate-pulse">Loading Account Details...</div>;
   }
-
-  const displayExactDays = Math.max(0, Math.round((new Date(formData.endDate).getTime() - new Date(formData.startDate).getTime()) / (1000 * 3600 * 24)));
 
   return (
     <div className="flex flex-col h-[calc(100dvh-80px)] max-w-4xl mx-auto bg-slate-50 dark:bg-slate-950/50 md:rounded-3xl overflow-hidden border-x border-slate-200 dark:border-slate-800 shadow-sm relative pt-16 md:pt-0">
@@ -560,14 +583,12 @@ const PartyLedger = () => {
               <div className="w-px h-6 bg-indigo-200 dark:bg-indigo-800"></div>
               <div>
                  <p className="text-[9px] font-black text-indigo-400 dark:text-indigo-500 uppercase tracking-widest">Next Due Date</p>
-                 {/* 🚀 GLOBAL DATE FOR EMI DUE */}
                  <p className="text-sm font-black text-indigo-600 dark:text-indigo-300 flex items-center gap-1">
                    <HiOutlineCalendar size={14}/> 
                    {formatGlobalDate ? formatGlobalDate(party.emiDueDate, 'short') : party.emiDueDate}
                  </p>
               </div>
            </div>
-           
            <button onClick={() => openModal('emi_payment')} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-xl shadow-lg shadow-indigo-500/30 transition-transform active:scale-95 flex items-center gap-1">
              Pay EMI Now
            </button>
@@ -576,9 +597,7 @@ const PartyLedger = () => {
 
       {/* 📜 CHAT / LEDGER AREA */}
       <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 custom-scrollbar bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] dark:bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] bg-fixed opacity-90">
-        
         <div className="text-center mt-4">
-           {/* 🚀 GLOBAL DATE FOR ACCOUNT CREATION */}
            <span className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 text-[10px] font-black uppercase tracking-widest px-4 py-1.5 rounded-full shadow-sm">
              Ledger Created on {formatGlobalDate ? formatGlobalDate(party.createdAt, 'short') : new Date(party.createdAt).toLocaleDateString()}
            </span>
@@ -623,11 +642,13 @@ const PartyLedger = () => {
                     </span>
                     {rec.vault && (
                       <span className="text-[9px] font-bold text-slate-500 ml-2 uppercase tracking-wider flex items-center gap-1 inline-flex">
-                        {rec.vault === 'bank' ? <FaUniversity/> : rec.vault === 'cash' ? <FaMoneyBillWave/> : <FaWallet/>} {rec.vault}
+                        {rec.vault === 'bank' ? <FaUniversity/> : rec.vault === 'cash' ? <FaMoneyBillWave/> : <FaWallet/>} 
+                        {rec.vault} 
+                        {/* 🚀 RENDER SUB WALLET IN CHAT */}
+                        {rec.subWallet && <span className="text-blue-500 ml-1">({rec.subWallet})</span>}
                       </span>
                     )}
                   </div>
-                  {/* 🚀 GLOBAL DATE IN CHAT WITH TIME */}
                   <span className="text-[9px] font-bold text-slate-400 whitespace-nowrap">
                     {formatGlobalDate ? formatGlobalDate(rec.timestamp, 'short') : new Date(rec.timestamp).toLocaleDateString()} 
                     {" - "}{new Date(rec.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
@@ -665,7 +686,6 @@ const PartyLedger = () => {
       </div>
 
       {/* 🚀 ACTION FOOTER */}
-      {/* 🛠️ FIXED: Added safe-area padding for mobile overlap issues */}
       <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 p-4 shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))] z-20 shadow-[0_-10px_20px_rgba(0,0,0,0.02)] dark:shadow-[0_-10px_20px_rgba(0,0,0,0.2)]">
         {party.status === 'bad_debt' || party.status === 'settled' ? (
           <div className="text-center p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700">
@@ -692,7 +712,6 @@ const PartyLedger = () => {
               </>
             )}
             
-            {/* 🛠️ FIXED: Replaced CSS Hover with React State Click for 100% Mobile Reliability */}
             <div className="relative">
               <button 
                 onClick={() => setIsMenuOpen(!isMenuOpen)} 
@@ -703,7 +722,6 @@ const PartyLedger = () => {
                 •••
               </button>
               
-              {/* Invisible Overlay to close menu when clicking outside */}
               {isMenuOpen && (
                 <div className="fixed inset-0 z-40" onClick={() => setIsMenuOpen(false)}></div>
               )}
@@ -787,14 +805,12 @@ const PartyLedger = () => {
                       <label className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest flex items-center gap-1"><HiOutlineCalendar/> From</label>
                       <input type="date" required value={formData.startDate} onChange={(e) => setFormData({...formData, startDate: e.target.value})} 
                         className="w-full p-3 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 rounded-xl font-bold text-sm dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50" />
-                      {/* 🚀 GLOBAL DATE FOR FROM DATE */}
                       <span className="block text-[8px] font-bold text-blue-500 mt-1">{formatGlobalDate ? formatGlobalDate(formData.startDate, 'short') : ''}</span>
                     </div>
                     <div className="w-1/2 space-y-2">
                       <label className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest flex items-center gap-1"><HiOutlineCalendar/> To</label>
                       <input type="date" required value={formData.endDate} onChange={(e) => setFormData({...formData, endDate: e.target.value})} 
                         className="w-full p-3 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 rounded-xl font-bold text-sm dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50" />
-                      {/* 🚀 GLOBAL DATE FOR TO DATE */}
                       <span className="block text-[8px] font-bold text-blue-500 mt-1">{formatGlobalDate ? formatGlobalDate(formData.endDate, 'short') : ''}</span>
                     </div>
                   </div>
@@ -866,22 +882,34 @@ const PartyLedger = () => {
               )}
 
               {activeModal !== 'interest' && (
-                <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">
-                    {activeModal === 'give' || activeModal === 'emi_payment' ? 'Deduct from Vault' : 'Add to Vault'}
-                  </label>
-                  <div className="relative">
-                    <select value={formData.vault} onChange={(e) => setFormData({...formData, vault: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer appearance-none">
-                      <option value="bank">Bank Account</option>
-                      <option value="cash">Physical Cash</option>
-                      <option value="online">Online / Crypto Wallet</option>
-                    </select>
-                    <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">
+                      {activeModal === 'give' || activeModal === 'emi_payment' ? 'Deduct from Vault' : 'Add to Vault'}
+                    </label>
+                    <div className="relative">
+                      <select value={formData.vault} onChange={(e) => setFormData({...formData, vault: e.target.value, subWallet: ''})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer appearance-none">
+                        <option value="bank">Bank Account</option>
+                        <option value="cash">Physical Cash</option>
+                        <option value="online">Online / Crypto Wallet</option>
+                      </select>
+                      <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    </div>
                   </div>
+
+                  {/* 🚀 NEW: SubWallet Input inside PartyLedger */}
+                  {(formData.vault === 'bank' || formData.vault === 'online') && (
+                    <div className="space-y-2 animate-in fade-in">
+                      <label className="text-[11px] font-black text-blue-500 uppercase tracking-widest ml-1">{formData.vault === 'bank' ? 'Bank Name' : 'Wallet Name'}</label>
+                      <input type="text" list="existing-vaults-party" required value={formData.subWallet} onChange={(e) => setFormData({...formData, subWallet: e.target.value})} placeholder={formData.vault === 'bank' ? "e.g. SBI, RRR" : "e.g. Paytm, PayPal"} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50" />
+                      <datalist id="existing-vaults-party">
+                         {existingVaultNames.map(b => <option key={b} value={b} />)}
+                      </datalist>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* 🚀 GLOBAL DATE FOR TIME ENTRY */}
               <div className="space-y-2">
                 <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1 flex justify-between">
                   <span>Date & Time</span>
