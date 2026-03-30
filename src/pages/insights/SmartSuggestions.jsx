@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAIVoice } from '../../hooks/useAIVoice';
 import { useAIBrain } from '../../hooks/useAIBrain'; 
-import { useAuth } from '../../hooks/useAuth'; // 🚀 Required to fetch Firebase Notifs
-import { collection, query, where, onSnapshot } from 'firebase/firestore'; // 🚀 Firebase Hooks
+import { useAuth } from '../../hooks/useAuth'; 
+import { collection, query, where, onSnapshot } from 'firebase/firestore'; 
 import { db } from '../../firebase/firebaseConfig';
 
 import { 
@@ -11,35 +11,32 @@ import {
   HiOutlinePlay, HiOutlineStop, HiOutlineRefresh,
   HiOutlineShieldCheck, HiOutlineTrendingDown, HiOutlineTrendingUp, HiOutlineLightBulb 
 } from 'react-icons/hi';
-import { FaRobot } from 'react-icons/fa';
+import { FaRobot, FaBellSlash } from 'react-icons/fa';
 
 // 🚀 Upgraded Icon Renderer
 const getAlertIcon = (type) => {
   switch(type) {
-    case 'shield': return <HiOutlineShieldCheck className="text-indigo-500" />;
-    case 'bulb': return <HiOutlineLightBulb className="text-blue-500" />;
-    case 'trendDown': return <HiOutlineTrendingDown className="text-rose-500" />;
-    case 'trendUp': return <HiOutlineTrendingUp className="text-emerald-500" />; // Added for Market Pump
-    default: return <HiOutlineLightBulb className="text-slate-500" />;
+    case 'shield': return <HiOutlineShieldCheck className="text-indigo-500" size={24} />;
+    case 'bulb': return <HiOutlineLightBulb className="text-blue-500" size={24} />;
+    case 'trendDown': return <HiOutlineTrendingDown className="text-rose-500" size={24} />;
+    case 'trendUp': return <HiOutlineTrendingUp className="text-emerald-500" size={24} />; 
+    default: return <HiOutlineLightBulb className="text-slate-500" size={24} />;
   }
 };
 
 const SmartSuggestions = () => {
   const navigate = useNavigate(); 
-  // 🚀 ENGINE CONNECTED: Global Date Formatter available if needed for timestamps
-  const { user, formatGlobalDate } = useAuth();
+  const { user } = useAuth();
   const { speak, stop, isSpeaking, isMuted, toggleMute } = useAIVoice();
   const { alerts: liveAlerts, isBrainLoading } = useAIBrain(); 
   const [activeId, setActiveId] = useState(null);
 
-  // 🚀 NAYA STATE: For fetching Firebase Notifications that are NOT in Live Alerts
   const [firebaseAlerts, setFirebaseAlerts] = useState([]);
 
   // Fetch Unread Firebase Notifications (Like Market Pumps/Dumps)
   useEffect(() => {
     if (!user) return;
     
-    // Fetch only unread notifications to show as "Pending Actions"
     const q = query(
       collection(db, "users", user.uid, "notifications"),
       where("isRead", "==", false)
@@ -51,9 +48,9 @@ const SmartSuggestions = () => {
         return {
           id: doc.id,
           type: data.type === 'market_alert' ? 'MARKET ALERT' : 'SYSTEM ALERT',
-          title: data.title,
-          message: data.message,
-          iconType: data.title.includes('Pump') ? 'trendUp' : data.title.includes('Dump') ? 'trendDown' : 'bulb',
+          title: data.title || 'Notification',
+          message: data.message || '',
+          iconType: data.title?.includes('Pump') ? 'trendUp' : data.title?.includes('Dump') ? 'trendDown' : 'bulb',
           actionText: 'View Details',
           actionLink: data.link || '/dashboard'
         };
@@ -64,26 +61,21 @@ const SmartSuggestions = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // 🚀 MASTER MERGE: Combine Live Brain Alerts with Firebase Inbox Alerts
-  // We use filter to ensure no exact duplicates appear (if an alert is in both places)
+  // 🚀 MASTER MERGE: Combine Live Brain Alerts with Firebase Inbox Alerts Safely
   const combinedAlerts = [...liveAlerts];
   firebaseAlerts.forEach(fbAlert => {
-    // Basic deduplication: Check if an alert with a similar title already exists in liveAlerts
     const exists = liveAlerts.some(live => live.title === fbAlert.title);
     if (!exists) {
       combinedAlerts.push(fbAlert);
     }
   });
 
-
-  // Auto-reset active state when naturally finished speaking
   useEffect(() => {
     if (!isSpeaking) {
       setActiveId(null);
     }
   }, [isSpeaking]);
 
-  // Stop speaking immediately if user leaves this page
   useEffect(() => {
     return () => {
       stop();
@@ -126,7 +118,7 @@ const SmartSuggestions = () => {
             )}
           </div>
           <p className="text-sm font-semibold text-slate-400 max-w-lg leading-relaxed">
-            Your personalized AI financial assistant. I monitor your vaults, staking periods, and expenses to give you actionable insights.
+            Your personalized AI financial assistant. I monitor your vaults, sub-wallets, and expenses to give you actionable insights.
           </p>
         </div>
 
@@ -139,28 +131,29 @@ const SmartSuggestions = () => {
       {/* SUGGESTIONS LIST */}
       <div className="space-y-4">
         {isBrainLoading ? (
-          <div className="p-10 flex justify-center items-center text-slate-400 font-bold animate-pulse bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm">
-             <HiOutlineRefresh className="animate-spin text-2xl mr-3" /> J.A.R.V.I.S is analyzing your vaults...
+          <div className="p-10 flex flex-col justify-center items-center text-slate-500 font-bold animate-pulse bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm min-h-[250px]">
+             <HiOutlineRefresh className="animate-spin text-4xl mb-4 text-blue-500" /> 
+             <p>J.A.R.V.I.S is analyzing your vaults...</p>
           </div>
         ) : (!combinedAlerts || combinedAlerts.length === 0) ? (
-          <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm">
-            <FaRobot className="text-6xl text-slate-200 dark:text-slate-800 mx-auto mb-4" />
-            <h3 className="text-xl font-black text-slate-700 dark:text-white mb-1">All Clear!</h3>
-            <p className="text-sm font-bold text-slate-500 dark:text-slate-400">No new alerts. Your portfolio is perfectly balanced.</p>
+          <div className="p-16 text-center bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col items-center min-h-[300px] justify-center">
+            <FaBellSlash className="text-6xl text-slate-300 dark:text-slate-700 mb-6 drop-shadow-md" />
+            <h3 className="text-2xl font-black text-slate-700 dark:text-white mb-2">All Clear!</h3>
+            <p className="text-sm font-bold text-slate-500 dark:text-slate-400">No new alerts or suggestions. Your portfolio is perfectly balanced.</p>
           </div>
         ) : (
           combinedAlerts.map((item) => {
             const isActive = activeId === item.id && isSpeaking;
             return (
-            <div key={item.id} className={`p-6 rounded-[2rem] border transition-all duration-300 ${isActive ? 'bg-blue-50 dark:bg-blue-900/10 border-blue-400 shadow-lg shadow-blue-500/10 scale-[1.01]' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'}`}>
+            <div key={item.id} className={`p-6 rounded-[2rem] border transition-all duration-300 ${isActive ? 'bg-blue-50 dark:bg-blue-900/10 border-blue-400 shadow-lg shadow-blue-500/10 scale-[1.01]' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-md'}`}>
               <div className="flex flex-col md:flex-row gap-6 items-start md:items-center">
                 
-                <div className={`w-14 h-14 rounded-full flex items-center justify-center text-2xl shrink-0 border transition-colors ${isActive ? 'bg-white dark:bg-slate-800 border-blue-200 dark:border-blue-700 shadow-inner' : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`}>
+                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 border transition-colors ${isActive ? 'bg-white dark:bg-slate-800 border-blue-200 dark:border-blue-700 shadow-inner' : 'bg-slate-50 dark:bg-slate-800 border-slate-100 dark:border-slate-700'}`}>
                   {getAlertIcon(item.iconType)}
                 </div>
 
                 <div className="flex-1">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{item.type}</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">{item.type}</p>
                   <h3 className="text-lg font-black text-slate-900 dark:text-white mb-2 leading-tight">{item.title}</h3>
                   <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 leading-relaxed">{item.message}</p>
                 </div>

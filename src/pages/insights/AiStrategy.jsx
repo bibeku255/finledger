@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth';
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db } from '../../firebase/firebaseConfig';
+import { useNavigate } from 'react-router-dom';
+
 import { 
   HiOutlineLightBulb, HiOutlineShieldCheck, HiOutlineTrendingUp, 
   HiOutlineExclamation, HiOutlineChartPie, HiOutlineRefresh,
@@ -9,63 +13,188 @@ import { FaBrain, FaRobot, FaLeaf, FaWallet, FaChartLine } from 'react-icons/fa'
 
 const AiStrategy = () => {
   // 🚀 ENGINE CONNECTED: Global Date Formatter
-  const { user, baseCurrency = 'USD', formatGlobalDate } = useAuth();
+  const { user, baseCurrency = 'INR', formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
+  const navigate = useNavigate();
   
   const [isAnalyzing, setIsAnalyzing] = useState(true);
 
-  // 🚀 Simulated AI Analysis Data (In future, this will be calculated from Firebase)
+  // 🚀 REAL DATA STATES
+  const [bankBalance, setBankBalance] = useState(0);
+  const [cashBalance, setCashBalance] = useState(0);
+  const [onlineBalance, setOnlineBalance] = useState(0);
+  const [cryptoBalance, setCryptoBalance] = useState(0);
+  
   const [strategyData, setStrategyData] = useState(null);
 
+  // 📥 FETCH REAL VAULT BALANCES
   useEffect(() => {
-    // Simulate AI thinking and analyzing vaults
+    if (!user) return;
+
+    const calcVaultBalance = (snapshot) => {
+      return snapshot.docs.reduce((acc, doc) => {
+        const data = doc.data();
+        let finalAmount = Number(data.finalBaseAmount || data.amount || 0);
+        let feeAmount = 0;
+        
+        if (data.fee && data.feeExchangeRate) {
+            feeAmount = Number(data.fee) * Number(data.feeExchangeRate);
+        } else if (data.fee && data.exchangeRate) { 
+            feeAmount = Number(data.fee) * Number(data.exchangeRate);
+        } else if (data.fee) {
+            feeAmount = Number(data.fee);
+        }
+
+        const netChange = data.type === 'in' ? finalAmount : -(finalAmount + feeAmount);
+        return acc + netChange;
+      }, 0);
+    };
+
+    const unsubBank = onSnapshot(collection(db, "users", user.uid, "bankWallet"), snap => setBankBalance(calcVaultBalance(snap)));
+    const unsubCash = onSnapshot(collection(db, "users", user.uid, "cashWallet"), snap => setCashBalance(calcVaultBalance(snap)));
+    const unsubOnline = onSnapshot(collection(db, "users", user.uid, "onlineWallet"), snap => setOnlineBalance(calcVaultBalance(snap)));
+    const unsubCrypto = onSnapshot(collection(db, "users", user.uid, "cryptoWalletLogs"), snap => {
+        // Simple aggregate for crypto base value if saved (this might need complex API logic if live price is needed, using saved base for now)
+        setCryptoBalance(calcVaultBalance(snap)); 
+    });
+
+    return () => { unsubBank(); unsubCash(); unsubOnline(); unsubCrypto(); };
+  }, [user]);
+
+  // 🧠 THE J.A.R.V.I.S ALGORITHM (Dynamic Calculation)
+  useEffect(() => {
+    if (bankBalance === 0 && cashBalance === 0 && cryptoBalance === 0 && onlineBalance === 0) {
+        // Default Wait
+        const timer = setTimeout(() => {
+          setStrategyData(generateEmptyStrategy());
+          setIsAnalyzing(false);
+        }, 1500);
+        return () => clearTimeout(timer);
+    }
+
     const timer = setTimeout(() => {
-      setStrategyData({
-        optimizationScore: 72, // Out of 100
-        riskLevel: 'Moderate', // Safe, Moderate, High
-        allocations: {
-          fiat: 25,     // Bank & Cash
-          crypto: 55,   // Holding Crypto
-          yield: 20     // Staked/Farming
-        },
-        actionPlan: [
-          {
-            id: 1,
-            type: 'opportunity',
-            icon: <HiOutlineTrendingUp className="text-emerald-500" />,
+      
+      const totalFiat = bankBalance + cashBalance + onlineBalance;
+      const totalPortfolio = totalFiat + cryptoBalance;
+      
+      // Prevent division by zero
+      if(totalPortfolio <= 0) {
+         setStrategyData(generateEmptyStrategy());
+         setIsAnalyzing(false);
+         return;
+      }
+
+      // Calculate Percentages
+      let fiatPct = Math.round((totalFiat / totalPortfolio) * 100);
+      let cryptoPct = Math.round((cryptoBalance / totalPortfolio) * 100);
+      let yieldPct = 0; // Hardcoded for now until we build a yield farm tracker
+
+      // Determine Risk Level
+      let risk = 'Safe';
+      let score = 85;
+      
+      if (cryptoPct > 70) {
+          risk = 'High';
+          score = 65;
+      } else if (cryptoPct > 35) {
+          risk = 'Moderate';
+          score = 80;
+      } else if (cryptoPct < 5 && totalFiat > 10000) {
+          // Too much idle fiat, losing to inflation
+          risk = 'Low Yield';
+          score = 70;
+      }
+
+      // Generate Smart Action Plan based on Real Balances
+      const plan = [];
+
+      // 1. Fiat Strategy
+      if (fiatPct > 70) {
+          plan.push({
+            id: 1, type: 'opportunity', icon: <HiOutlineTrendingUp className="text-emerald-500" />,
             title: "Rebalance Idle Cash",
-            desc: `You have ${currencySymbol}1,250 sitting idle in your Bank Vault. Allocating 40% of this to a stablecoin yield farm could generate approx ${currencySymbol}45/year passively.`,
-            actionText: "Explore Vaults",
-            color: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400',
-            borderColor: 'border-emerald-200 dark:border-emerald-800'
-          },
-          {
-            id: 2,
-            type: 'risk',
-            icon: <HiOutlineExclamation className="text-rose-500" />,
-            title: "High Crypto Volatility",
-            desc: "Your portfolio is heavily weighted (55%) in volatile digital assets. Consider booking 10-15% profit on your top performer (BNB) and moving it to Fiat or Stablecoins to reduce risk.",
-            actionText: "Review Assets",
-            color: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400',
-            borderColor: 'border-rose-200 dark:border-rose-800'
-          },
-          {
-            id: 3,
-            type: 'health',
-            icon: <HiOutlineShieldCheck className="text-blue-500" />,
-            title: "Excellent Savings Rate",
-            desc: "Your income-to-expense ratio this month is extremely healthy. You've saved 68% of your inflows. Keep this up to reach your financial independence goal 2 years early.",
-            actionText: "View Analytics",
-            color: 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400',
-            borderColor: 'border-blue-200 dark:border-blue-800'
-          }
-        ]
+            desc: `You have ${currencySymbol}${totalFiat.toLocaleString()} sitting in fiat vaults. Inflation is eating your purchasing power. Consider shifting 20% to fixed deposits or stablecoins.`,
+            actionText: "Capital Shift", link: "/dashboard/shifting",
+            color: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400', borderColor: 'border-emerald-200 dark:border-emerald-800'
+          });
+      } else {
+          plan.push({
+            id: 1, type: 'health', icon: <HiOutlineShieldCheck className="text-blue-500" />,
+            title: "Good Fiat Reserves",
+            desc: `Your fiat balance is ${fiatPct}% of your portfolio. This provides an excellent safety net for emergencies and sudden expenses.`,
+            actionText: "View Bank Ledger", link: "/dashboard/accounts/bank",
+            color: 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400', borderColor: 'border-blue-200 dark:border-blue-800'
+          });
+      }
+
+      // 2. Crypto Strategy
+      if (cryptoPct > 50) {
+          plan.push({
+            id: 2, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" />,
+            title: "High Crypto Volatility Risk",
+            desc: `Your portfolio is heavily weighted (${cryptoPct}%) in digital assets. Consider booking profits and shifting some capital to secure Bank Vaults.`,
+            actionText: "Crypto Dashboard", link: "/dashboard/crypto/hold-profit",
+            color: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400', borderColor: 'border-rose-200 dark:border-rose-800'
+          });
+      } else if (cryptoPct > 0) {
+          plan.push({
+            id: 2, type: 'opportunity', icon: <FaLeaf className="text-emerald-500" />,
+            title: "Optimize Crypto Assets",
+            desc: "You have a balanced crypto portfolio. Explore Staking or Yield Farming to generate passive income on your idle tokens.",
+            actionText: "Explore Staking", link: "/dashboard/crypto/staking",
+            color: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400', borderColor: 'border-emerald-200 dark:border-emerald-800'
+          });
+      } else {
+          plan.push({
+            id: 2, type: 'opportunity', icon: <FaChartLine className="text-orange-500" />,
+            title: "Missing Digital Assets",
+            desc: "You currently hold 0% in crypto. Diversifying a small amount (2-5%) into Bitcoin or Ethereum could hedge against fiat inflation.",
+            actionText: "Add Crypto", link: "/dashboard/crypto/hold-profit",
+            color: 'bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400', borderColor: 'border-orange-200 dark:border-orange-800'
+          });
+      }
+
+      // 3. Savings / Overall Health
+      plan.push({
+        id: 3, type: 'health', icon: <HiOutlineChartPie className="text-purple-500" />,
+        title: "Portfolio Snapshot",
+        desc: `Net Worth tracked: ${currencySymbol}${totalPortfolio.toLocaleString()}. Keep logging your expenses meticulously to maintain an accurate optimization score.`,
+        actionText: "View Master Audit", link: "/dashboard/history",
+        color: 'bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400', borderColor: 'border-purple-200 dark:border-purple-800'
       });
+
+      setStrategyData({
+        optimizationScore: score,
+        riskLevel: risk,
+        allocations: { fiat: fiatPct, crypto: cryptoPct, yield: yieldPct },
+        actionPlan: plan
+      });
+
       setIsAnalyzing(false);
-    }, 2000); // 2.0 seconds scanning animation
+    }, 2000); 
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [bankBalance, cashBalance, cryptoBalance, onlineBalance, currencySymbol]);
+
+  // Fallback for Empty Data
+  const generateEmptyStrategy = () => ({
+      optimizationScore: 0, riskLevel: 'Unknown',
+      allocations: { fiat: 0, crypto: 0, yield: 0 },
+      actionPlan: [
+        {
+          id: 1, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" />,
+          title: "Insufficient Data",
+          desc: "J.A.R.V.I.S needs data to analyze. Please add funds to your Bank, Cash, or Crypto vaults to generate a personalized strategy.",
+          actionText: "Log Deposit", link: "/dashboard/accounts/bank",
+          color: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400', borderColor: 'border-rose-200 dark:border-rose-800'
+        }
+      ]
+  });
+
+  const reAnalyze = () => {
+     setIsAnalyzing(true);
+     setTimeout(() => setIsAnalyzing(false), 2000);
+  };
 
   if (isAnalyzing) {
     return (
@@ -102,7 +231,7 @@ const AiStrategy = () => {
             Last Scanned: {formatGlobalDate ? formatGlobalDate(new Date(), 'full') : 'Just now'}
           </p>
         </div>
-        <button onClick={() => { setIsAnalyzing(true); setTimeout(() => setIsAnalyzing(false), 2000); }} className="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-white px-6 py-3.5 rounded-2xl font-black text-sm transition-all active:scale-95 shadow-sm border border-slate-200 dark:border-slate-700">
+        <button onClick={reAnalyze} className="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-white px-6 py-3.5 rounded-2xl font-black text-sm transition-all active:scale-95 shadow-sm border border-slate-200 dark:border-slate-700">
           <HiOutlineRefresh size={20} /> Re-Analyze
         </button>
       </div>
@@ -127,7 +256,7 @@ const AiStrategy = () => {
 
           <div className="flex items-center gap-2 bg-white/10 px-4 py-2 rounded-xl border border-white/5 backdrop-blur-md z-10">
             <span className="text-xs font-bold text-slate-300">Portfolio Risk:</span>
-            <span className={`text-xs font-black uppercase tracking-wider ${strategyData.riskLevel === 'Safe' ? 'text-emerald-400' : strategyData.riskLevel === 'Moderate' ? 'text-yellow-400' : 'text-rose-400'}`}>
+            <span className={`text-xs font-black uppercase tracking-wider ${strategyData.riskLevel === 'Safe' || strategyData.riskLevel === 'Low Yield' ? 'text-emerald-400' : strategyData.riskLevel === 'Moderate' ? 'text-yellow-400' : 'text-rose-400'}`}>
               {strategyData.riskLevel}
             </span>
           </div>
@@ -139,7 +268,7 @@ const AiStrategy = () => {
             <h3 className="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2">
               <HiOutlineChartPie className="text-blue-500" size={24}/> Asset Allocation Blueprint
             </h3>
-            <button className="p-2 bg-slate-50 dark:bg-white/5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors border border-slate-200 dark:border-slate-700">
+            <button onClick={reAnalyze} className="p-2 bg-slate-50 dark:bg-white/5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors border border-slate-200 dark:border-slate-700">
               <HiOutlineAdjustments className="text-slate-500" size={20}/>
             </button>
           </div>
@@ -178,7 +307,7 @@ const AiStrategy = () => {
               <div className="flex justify-between items-end mb-2">
                 <div className="flex items-center gap-2">
                   <div className="p-1.5 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-lg"><FaLeaf size={12}/></div>
-                  <span className="text-sm font-black text-slate-700 dark:text-slate-300">Yield Farms & Staking</span>
+                  <span className="text-sm font-black text-slate-700 dark:text-slate-300">Yield Farms & Staking (Est.)</span>
                 </div>
                 <span className="text-sm font-black text-slate-900 dark:text-white">{strategyData.allocations.yield}%</span>
               </div>
@@ -212,7 +341,7 @@ const AiStrategy = () => {
                 </p>
               </div>
 
-              <button className="w-full py-4 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-white rounded-xl font-black text-xs uppercase tracking-widest transition-colors flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700">
+              <button onClick={() => navigate(action.link)} className="w-full py-4 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-white rounded-xl font-black text-xs uppercase tracking-widest transition-colors flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700">
                 {action.actionText} <HiOutlineArrowRight />
               </button>
             </div>

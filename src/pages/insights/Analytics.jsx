@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -32,7 +32,7 @@ const Analytics = () => {
   const [fiatRate, setFiatRate] = useState(1);
   const [customUserCoins, setCustomUserCoins] = useState([]);
 
-  // 🚀 1. SECURE REAL-TIME DATA FETCHER
+  // 🚀 1. SECURE REAL-TIME DATA FETCHER (WITH PROPER FEE MATH)
   useEffect(() => {
     if (!user) return;
 
@@ -51,10 +51,22 @@ const Analytics = () => {
       loadedStatus.exp = true; checkLoading();
     });
 
+    // 🚀 FIXED CALCULATION LOGIC TO MATCH DASHBOARD & VAULTS EXACTLY
     const calcBal = (snap) => snap.docs.reduce((acc, doc) => {
-      const d = doc.data();
-      const amt = Number(d.finalBaseAmount || d.amount || 0);
-      return acc + (d.type === 'in' ? amt : -amt);
+      const data = doc.data();
+      const finalAmount = Number(data.finalBaseAmount || data.amount || 0);
+      
+      let feeAmount = 0;
+      if (data.fee && data.feeExchangeRate) {
+          feeAmount = Number(data.fee) * Number(data.feeExchangeRate);
+      } else if (data.fee && data.exchangeRate) { 
+          feeAmount = Number(data.fee) * Number(data.exchangeRate);
+      } else if (data.fee) {
+          feeAmount = Number(data.fee);
+      }
+
+      const netChange = data.type === 'in' ? finalAmount : -(finalAmount + feeAmount);
+      return acc + netChange;
     }, 0);
 
     const unsubBank = onSnapshot(collection(db, "users", user.uid, "bankWallet"), snap => {
@@ -77,13 +89,16 @@ const Analytics = () => {
       loadedStatus.cry = true; checkLoading();
     });
 
-    const unsubUser = onSnapshot(doc(db, "users", user.uid), snap => {
-       if (snap.exists() && snap.data().customCoins) {
-         setCustomUserCoins(snap.data().customCoins);
-       }
-    });
+    const fetchUserData = async () => {
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists() && userSnap.data().customCoins) {
+          setCustomUserCoins(userSnap.data().customCoins);
+        }
+    };
+    fetchUserData();
 
-    return () => { unsubInc(); unsubExp(); unsubBank(); unsubCash(); unsubOnline(); unsubCrypto(); unsubUser(); };
+    return () => { unsubInc(); unsubExp(); unsubBank(); unsubCash(); unsubOnline(); unsubCrypto(); };
   }, [user]);
 
   // 🚀 LIVE CRYPTO VALUATION ENGINE
@@ -207,9 +222,10 @@ const Analytics = () => {
         setLivePrices(priceMap);
       } catch (error) {}
     };
+    
     if (!isLoading) {
        fetchLivePrices();
-       const interval = setInterval(fetchLivePrices, 120000); // 2 Min Refresh for Analytics
+       const interval = setInterval(fetchLivePrices, 120000); 
        return () => clearInterval(interval);
     }
   }, [isLoading, cryptoHoldings, cryptoSymbols, baseCurrency, fullDatabase]);
@@ -221,18 +237,17 @@ const Analytics = () => {
     }, 0);
   }, [cryptoHoldings, livePrices]);
 
+
   // 🚀 2. DYNAMIC METRICS CALCULATOR
   const { metrics, cashFlowData, assetAllocation } = useMemo(() => {
     let tIncome = 0;
     let tExpense = 0;
     const monthlyData = {};
 
-    // Process Incomes
     incomes.forEach(data => {
       const amt = parseFloat(data.finalBaseAmount || data.amount) || 0;
       tIncome += amt;
       const dateObj = new Date(data.date || new Date());
-      // 🚀 Global Format for Chart Labels
       const monthName = formatGlobalDate ? formatGlobalDate(dateObj, 'monthYear') : dateObj.toLocaleString('default', { month: 'short', year: 'numeric' });
       const sortKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
       
@@ -240,12 +255,10 @@ const Analytics = () => {
       monthlyData[sortKey].Income += amt;
     });
 
-    // Process Expenses
     expenses.forEach(data => {
       const amt = parseFloat(data.finalBaseAmount || data.amount) || 0;
       tExpense += amt;
       const dateObj = new Date(data.date || new Date());
-      // 🚀 Global Format for Chart Labels
       const monthName = formatGlobalDate ? formatGlobalDate(dateObj, 'monthYear') : dateObj.toLocaleString('default', { month: 'short', year: 'numeric' });
       const sortKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
       
@@ -253,17 +266,11 @@ const Analytics = () => {
       monthlyData[sortKey].Expense += amt;
     });
 
-    // Sort Chronologically & Format
     const sortedCashFlow = Object.values(monthlyData)
       .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
-      .slice(-6) // Last 6 active months
-      .map(item => ({
-        name: item.monthName,
-        Income: item.Income,
-        Expense: item.Expense
-      }));
+      .slice(-6)
+      .map(item => ({ name: item.monthName, Income: item.Income, Expense: item.Expense }));
 
-    // Generate REAL Asset Allocation
     const realAssetAllocation = [
       { name: 'Bank Ledger', value: Math.max(0, balances.bank) },
       { name: 'Physical Cash', value: Math.max(0, balances.cash) },
@@ -283,7 +290,7 @@ const Analytics = () => {
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
-        <div className="bg-slate-900 dark:bg-slate-800 text-white p-4 rounded-xl border border-slate-700 shadow-2xl">
+        <div className="bg-slate-900 dark:bg-slate-800 text-white p-4 rounded-xl border border-slate-700 shadow-2xl z-50">
           <p className="font-black mb-2 text-slate-300">{label}</p>
           {payload.map((entry, index) => (
             <p key={index} style={{ color: entry.color }} className="text-sm font-bold flex items-center gap-2">
@@ -302,14 +309,14 @@ const Analytics = () => {
       <div className="pt-24 flex items-center justify-center min-h-[60vh]">
         <div className="flex flex-col items-center gap-4">
            <HiOutlineRefresh className="animate-spin text-4xl text-blue-500" />
-           <p className="text-xs font-black text-slate-400 tracking-widest uppercase animate-pulse">Syncing Financials...</p>
+           <p className="text-xs font-black text-slate-400 tracking-widest uppercase animate-pulse">Syncing Analytics...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="pt-24 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 max-w-7xl mx-auto px-4 md:px-0">
+    <div className="pt-24 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-24 max-w-7xl mx-auto px-4 md:px-0">
       
       {/* 🚀 HEADER */}
       <div className="flex items-center gap-3 mb-2">
@@ -317,8 +324,8 @@ const Analytics = () => {
           <HiOutlineChartPie size={26} />
         </div>
         <div>
-          <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Financial Intelligence</h1>
-          <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">Deep real-time insights into your cash flow and net worth.</p>
+          <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Analytics Center</h1>
+          <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">Deep insights into your cash flow and net worth.</p>
         </div>
       </div>
 
@@ -347,11 +354,11 @@ const Analytics = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* 📈 CASH FLOW CHART (BAR) */}
-        <div className="lg:col-span-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] p-6 md:p-8 shadow-sm">
-          <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest mb-6 flex items-center gap-2">
+        <div className="lg:col-span-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] p-6 md:p-8 shadow-sm flex flex-col min-w-0">
+          <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest mb-6 flex items-center gap-2 shrink-0">
              <HiOutlineCash className="text-emerald-500" size={20}/> 6-Month Cash Flow Trend
           </h3>
-          <div className="h-[300px] w-full">
+          <div className="flex-1 w-full min-h-[300px] relative">
             {cashFlowData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={cashFlowData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
@@ -365,7 +372,7 @@ const Analytics = () => {
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 font-bold border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-3xl">
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 font-bold border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-3xl">
                 <HiOutlineChartPie size={40} className="mb-2 opacity-50"/>
                 <p>Not enough data to map trends.</p>
               </div>
@@ -374,15 +381,15 @@ const Analytics = () => {
         </div>
 
         {/* 🍕 ASSET ALLOCATION (PIE) */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] p-6 md:p-8 shadow-sm flex flex-col">
-          <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest mb-2 flex items-center gap-2">
-             <FaWallet className="text-blue-500" size={16}/> Live Asset Allocation
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] p-6 md:p-8 shadow-sm flex flex-col min-w-0">
+          <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest mb-2 flex items-center gap-2 shrink-0">
+             <FaWallet className="text-blue-500" size={16}/> Asset Allocation
           </h3>
-          <p className="text-xs text-slate-500 font-semibold mb-4">Calculated from Vault Balances</p>
+          <p className="text-xs text-slate-500 font-semibold mb-4 shrink-0">Calculated from Real-Time Vault Balances</p>
           
           {assetAllocation.length > 0 ? (
             <>
-              <div className="flex-1 min-h-[250px] relative">
+              <div className="flex-1 w-full min-h-[200px] relative">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -403,21 +410,19 @@ const Analytics = () => {
                     <Tooltip content={<CustomTooltip />} />
                   </PieChart>
                 </ResponsiveContainer>
-                {/* Center Text */}
                 <div className="absolute inset-0 flex items-center justify-center flex-col pointer-events-none">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Portfolio</span>
                 </div>
               </div>
               
-              {/* Custom Legend */}
-              <div className="mt-4 space-y-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700/50">
+              <div className="mt-4 space-y-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700/50 shrink-0">
                 {assetAllocation.map((item, idx) => (
                    <div key={idx} className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></span>
-                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{item.name}</span>
+                        <span className="w-3 h-3 rounded-full shadow-sm shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></span>
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300 truncate">{item.name}</span>
                       </div>
-                      <span className="text-xs font-black text-slate-900 dark:text-white tracking-tight">
+                      <span className="text-xs font-black text-slate-900 dark:text-white tracking-tight shrink-0 pl-2">
                         {currencySymbol}{(item.value || 0).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}
                       </span>
                    </div>
@@ -425,7 +430,7 @@ const Analytics = () => {
               </div>
             </>
           ) : (
-             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 font-bold border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-3xl mt-4">
+             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 font-bold border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-3xl mt-4 min-h-[250px]">
                <FaPiggyBank size={40} className="mb-2 opacity-50"/>
                <p className="text-xs">Vaults are currently empty.</p>
              </div>

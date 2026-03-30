@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { useAIVoice } from '../../hooks/useAIVoice'; 
 import { collection, addDoc, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDocs, where, getDoc } from 'firebase/firestore';
@@ -10,7 +10,7 @@ import {
   HiOutlineShieldCheck, HiOutlineSparkles, HiOutlineLockClosed,
   HiOutlineExclamationCircle
 } from 'react-icons/hi';
-import { FaTrophy, FaPiggyBank, FaStar, FaUniversity, FaMoneyBillWave, FaLock, FaUnlockAlt } from 'react-icons/fa';
+import { FaTrophy, FaPiggyBank, FaStar, FaUniversity, FaMoneyBillWave, FaLock, FaUnlockAlt, FaWallet } from 'react-icons/fa';
 
 // 🚀 SECURE SHA-256 HASHING ALGORITHM
 const hashPIN = async (pinCode) => {
@@ -54,8 +54,27 @@ const Goals = () => {
   const [fundData, setFundData] = useState({
     amount: '',
     sourceVault: 'bank', 
+    subWallet: '', // 🚀 NEW: Added SubWallet Tracker
     date: todayDate
   });
+
+  // 🚀 FETCH EXISTING BANKS/WALLETS FOR AUTO-SUGGEST
+  const [existingVaultNames, setExistingVaultNames] = useState([]);
+  useEffect(() => {
+     if(!user) return;
+     const fetchVaults = async () => {
+        const qBank = query(collection(db, "users", user.uid, "bankWallet"));
+        const snapBank = await getDocs(qBank);
+        const qOnline = query(collection(db, "users", user.uid, "onlineWallet"));
+        const snapOnline = await getDocs(qOnline);
+        
+        const names = new Set();
+        snapBank.docs.forEach(d => { if(d.data().bankName) names.add(d.data().bankName) });
+        snapOnline.docs.forEach(d => { if(d.data().walletName) names.add(d.data().walletName) });
+        setExistingVaultNames(Array.from(names));
+     };
+     fetchVaults();
+  }, [user]);
 
   // 📥 Fetch Goals
   useEffect(() => {
@@ -109,12 +128,16 @@ const Goals = () => {
     }
   };
 
+  // 🔒 LOCK FUNDS INTO GOAL
   const handleAddFunds = async (e) => {
     e.preventDefault();
     if (!user || !activeGoal) return;
 
     const addAmount = parseFloat(fundData.amount);
     if (addAmount <= 0) return alert("Amount must be greater than 0");
+    if ((fundData.sourceVault === 'bank' || fundData.sourceVault === 'online') && !fundData.subWallet.trim()) {
+        return alert("Please specify the exact Bank or Wallet Name.");
+    }
 
     setIsProcessing(true);
     
@@ -135,7 +158,9 @@ const Goals = () => {
         status: isCompleted ? 'achieved' : 'active'
       }, { merge: true });
 
-      const vaultCollection = fundData.sourceVault === 'bank' ? 'bankWallet' : 'cashWallet';
+      const vaultCollection = fundData.sourceVault === 'bank' ? 'bankWallet' : 
+                              fundData.sourceVault === 'online' ? 'onlineWallet' : 'cashWallet';
+      
       const vaultRecord = {
         title: `Locked for Goal: ${activeGoal.title}`,
         type: 'out',
@@ -148,9 +173,10 @@ const Goals = () => {
         fee: 0,
         isGoalLock: true,
         linkedExpenseId: lockId,
-        walletName: 'Savings Lock',
+        walletName: fundData.subWallet.trim() || 'Savings Lock', // 🚀 Accurate Vault Info
+        bankName: fundData.subWallet.trim() || 'Savings Lock',   // 🚀 Accurate Vault Info
         transferType: 'Investment/Savings',
-        goalId: activeGoal.id // 🔥 Track relation for delete reversal
+        goalId: activeGoal.id 
       };
       await addDoc(collection(db, "users", user.uid, vaultCollection), vaultRecord);
 
@@ -158,6 +184,7 @@ const Goals = () => {
         title: `Goal Contribution: ${activeGoal.title}`,
         category: "Investments & Interest",
         vault: fundData.sourceVault,
+        subWallet: fundData.sourceVault === 'bank' || fundData.sourceVault === 'online' ? fundData.subWallet.trim() : '', // 🚀 Accurate Expense Sync
         asset: baseCurrency,
         amount: addAmount,
         exchangeRate: 1,
@@ -165,7 +192,7 @@ const Goals = () => {
         date: fundData.date,
         timestamp,
         linkedExpenseId: lockId,
-        goalId: activeGoal.id, // 🔥 Track relation for delete reversal
+        goalId: activeGoal.id, 
         isSplit: false
       });
 
@@ -195,7 +222,7 @@ const Goals = () => {
       }
 
       setIsFundModalOpen(false);
-      setFundData({ amount: '', sourceVault: 'bank', date: todayDate });
+      setFundData({ amount: '', sourceVault: 'bank', subWallet: existingVaultNames[0] || '', date: todayDate });
     } catch (error) {
       alert("Failed to lock funds.");
     } finally {
@@ -203,6 +230,7 @@ const Goals = () => {
     }
   };
 
+  // 🔓 RELEASE FUNDS FROM GOAL
   const handleReleaseFunds = async (e) => {
     e.preventDefault();
     if (!user || !activeGoal) return;
@@ -211,6 +239,9 @@ const Goals = () => {
     if (releaseAmount <= 0) return alert("Amount must be greater than 0");
     if (releaseAmount > (activeGoal.currentSaved || 0)) {
        return alert(`You only have ${currencySymbol}${activeGoal.currentSaved} saved. Cannot release more than that.`);
+    }
+    if ((fundData.sourceVault === 'bank' || fundData.sourceVault === 'online') && !fundData.subWallet.trim()) {
+        return alert("Please specify the exact Bank or Wallet Name to receive funds.");
     }
 
     setIsProcessing(true);
@@ -227,7 +258,9 @@ const Goals = () => {
         status: isCompleted ? 'achieved' : 'active'
       }, { merge: true });
 
-      const vaultCollection = fundData.sourceVault === 'bank' ? 'bankWallet' : 'cashWallet';
+      const vaultCollection = fundData.sourceVault === 'bank' ? 'bankWallet' : 
+                              fundData.sourceVault === 'online' ? 'onlineWallet' : 'cashWallet';
+
       const vaultRecord = {
         title: `Funds Released from: ${activeGoal.title}`,
         type: 'in', 
@@ -240,7 +273,8 @@ const Goals = () => {
         fee: 0,
         isGoalLock: true,
         linkedIncomeId: releaseId,
-        walletName: 'Savings Unlock',
+        walletName: fundData.subWallet.trim() || 'Savings Unlock', // 🚀 Accurate Vault Refund
+        bankName: fundData.subWallet.trim() || 'Savings Unlock',   // 🚀 Accurate Vault Refund
         transferType: 'Refund/Reversal',
         goalId: activeGoal.id
       };
@@ -250,6 +284,7 @@ const Goals = () => {
         title: `Goal Funds Released: ${activeGoal.title}`,
         category: "Other Income",
         vault: fundData.sourceVault,
+        subWallet: fundData.sourceVault === 'bank' || fundData.sourceVault === 'online' ? fundData.subWallet.trim() : '', // 🚀 Accurate Income Sync
         asset: baseCurrency,
         amount: releaseAmount,
         exchangeRate: 1,
@@ -261,7 +296,7 @@ const Goals = () => {
       });
 
       setIsReleaseModalOpen(false);
-      setFundData({ amount: '', sourceVault: 'bank', date: todayDate });
+      setFundData({ amount: '', sourceVault: 'bank', subWallet: existingVaultNames[0] || '', date: todayDate });
     } catch (error) {
       alert("Failed to release funds.");
     } finally {
@@ -328,6 +363,7 @@ const Goals = () => {
          { col: "incomeLogs", field: "goalId" },
          { col: "bankWallet", field: "goalId" },
          { col: "cashWallet", field: "goalId" },
+         { col: "onlineWallet", field: "goalId" }
       ];
 
       for (let q of cleanQueries) {
@@ -352,14 +388,23 @@ const Goals = () => {
 
   const openFundModal = (goal) => {
     setActiveGoal(goal);
-    setFundData({ amount: '', sourceVault: 'bank', date: todayDate });
+    const lastBank = existingVaultNames.length > 0 ? existingVaultNames[0] : '';
+    setFundData({ amount: '', sourceVault: 'bank', subWallet: lastBank, date: todayDate });
     setIsFundModalOpen(true);
   };
 
   const openReleaseModal = (goal) => {
     setActiveGoal(goal);
-    setFundData({ amount: '', sourceVault: 'bank', date: todayDate });
+    const lastBank = existingVaultNames.length > 0 ? existingVaultNames[0] : '';
+    setFundData({ amount: '', sourceVault: 'bank', subWallet: lastBank, date: todayDate });
     setIsReleaseModalOpen(true);
+  };
+
+  const getVaultIcon = (v) => {
+    if (v === 'bank') return <FaUniversity />;
+    if (v === 'cash') return <FaMoneyBillWave />;
+    if (v === 'online') return <FaWallet />;
+    return <FaUniversity />;
   };
 
   return (
@@ -549,11 +594,25 @@ const Goals = () => {
                   <button type="button" onClick={() => setFundData({...fundData, sourceVault: 'bank'})} className={`flex-1 py-3 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex justify-center items-center gap-2 ${fundData.sourceVault === 'bank' ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}>
                     <FaUniversity/> Bank
                   </button>
+                  <button type="button" onClick={() => setFundData({...fundData, sourceVault: 'online'})} className={`flex-1 py-3 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex justify-center items-center gap-2 ${fundData.sourceVault === 'online' ? 'bg-white dark:bg-slate-700 shadow-sm text-purple-600 dark:text-purple-400' : 'text-slate-400 hover:text-slate-600'}`}>
+                    <FaWallet/> Online
+                  </button>
                   <button type="button" onClick={() => setFundData({...fundData, sourceVault: 'cash'})} className={`flex-1 py-3 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex justify-center items-center gap-2 ${fundData.sourceVault === 'cash' ? 'bg-white dark:bg-slate-700 shadow-sm text-emerald-600 dark:text-emerald-400' : 'text-slate-400 hover:text-slate-600'}`}>
                     <FaMoneyBillWave/> Cash
                   </button>
                 </div>
               </div>
+
+              {/* 🚀 SUB-WALLET NAME SELECTOR */}
+              {(fundData.sourceVault === 'bank' || fundData.sourceVault === 'online') && (
+                <div className="space-y-2 animate-in fade-in">
+                  <label className="text-[11px] font-black text-blue-500 uppercase tracking-widest ml-1">{fundData.sourceVault === 'bank' ? 'Bank Name' : 'Wallet Name'}</label>
+                  <input type="text" list="fund-vaults" required value={fundData.subWallet} onChange={(e) => setFundData({...fundData, subWallet: e.target.value})} placeholder={fundData.sourceVault === 'bank' ? "e.g. HDFC, SBI" : "e.g. Paytm, PayPal"} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50" />
+                  <datalist id="fund-vaults">
+                     {existingVaultNames.map(b => <option key={b} value={b} />)}
+                  </datalist>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Amount to Lock In</label>
@@ -602,11 +661,25 @@ const Goals = () => {
                   <button type="button" onClick={() => setFundData({...fundData, sourceVault: 'bank'})} className={`flex-1 py-3 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex justify-center items-center gap-2 ${fundData.sourceVault === 'bank' ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}>
                     <FaUniversity/> Bank
                   </button>
+                  <button type="button" onClick={() => setFundData({...fundData, sourceVault: 'online'})} className={`flex-1 py-3 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex justify-center items-center gap-2 ${fundData.sourceVault === 'online' ? 'bg-white dark:bg-slate-700 shadow-sm text-purple-600 dark:text-purple-400' : 'text-slate-400 hover:text-slate-600'}`}>
+                    <FaWallet/> Online
+                  </button>
                   <button type="button" onClick={() => setFundData({...fundData, sourceVault: 'cash'})} className={`flex-1 py-3 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex justify-center items-center gap-2 ${fundData.sourceVault === 'cash' ? 'bg-white dark:bg-slate-700 shadow-sm text-emerald-600 dark:text-emerald-400' : 'text-slate-400 hover:text-slate-600'}`}>
                     <FaMoneyBillWave/> Cash
                   </button>
                 </div>
               </div>
+
+              {/* 🚀 SUB-WALLET NAME SELECTOR */}
+              {(fundData.sourceVault === 'bank' || fundData.sourceVault === 'online') && (
+                <div className="space-y-2 animate-in fade-in">
+                  <label className="text-[11px] font-black text-blue-500 uppercase tracking-widest ml-1">{fundData.sourceVault === 'bank' ? 'Bank Name' : 'Wallet Name'}</label>
+                  <input type="text" list="release-vaults" required value={fundData.subWallet} onChange={(e) => setFundData({...fundData, subWallet: e.target.value})} placeholder={fundData.sourceVault === 'bank' ? "e.g. HDFC, SBI" : "e.g. Paytm, PayPal"} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50" />
+                  <datalist id="release-vaults">
+                     {existingVaultNames.map(b => <option key={b} value={b} />)}
+                  </datalist>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Amount to Release</label>
@@ -651,7 +724,7 @@ const Goals = () => {
               <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-xl">
                 <p className="text-xs font-black text-amber-700 dark:text-amber-400 flex items-start gap-1 text-left">
                   <HiOutlineExclamationCircle size={16} className="shrink-0" />
-                  WARNING: The remaining locked amount of {currencySymbol}{(deleteContext.currentSaved || 0).toLocaleString()} will be automatically refunded to your Bank Vault. All related tracking logs will be wiped.
+                  WARNING: The remaining locked amount of {currencySymbol}{(deleteContext.currentSaved || 0).toLocaleString()} will be automatically refunded to your Default Bank Vault. All related tracking logs will be wiped.
                 </p>
               </div>
             </div>
