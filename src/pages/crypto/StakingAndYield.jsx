@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
-// 🚀 FIXED: Added setDoc for safe updates
-import { collection, addDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc, arrayUnion } from 'firebase/firestore';
+// 🚀 FIXED: Added getDocs, where, getDoc for Secure Delete Sync
+import { collection, addDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc, getDocs, where } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 
 // 🚀 IMPORTED REPORT UTILS
@@ -10,11 +10,10 @@ import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils'
 import { 
   HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
   HiOutlineSearch, HiOutlineRefresh, HiOutlineLockClosed, 
-  HiOutlineLightningBolt, HiOutlineChevronDown, HiOutlineClock,
-  HiOutlineTrendingUp, HiOutlineGift, HiOutlineUserGroup, HiOutlineSparkles,
-  HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable
+  HiOutlineSparkles, HiOutlineChevronDown, HiOutlineClock,
+  HiOutlineTrendingUp, HiOutlineTrendingDown, HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable
 } from 'react-icons/hi';
-import { FaBitcoin, FaWallet, FaLeaf, FaPiggyBank, FaCoins, FaExchangeAlt } from 'react-icons/fa';
+import { FaBitcoin, FaGift, FaWallet, FaMedal, FaTrophy } from 'react-icons/fa';
 
 // 🚀 Database of Platforms
 const stakingPlatforms = [
@@ -22,7 +21,7 @@ const stakingPlatforms = [
   "Trust Wallet", "CoinDCX Earn", "KuCoin Earn", "Phantom (Solana)", "Other"
 ];
 
-// 🚀 VERIFIED DATABASE (Fallback if AuthContext object is missing logo)
+// 🚀 VERIFIED DATABASE
 const defaultCryptoDatabase = [
   { id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png', fallbackPrice: 65000, color: 'text-orange-500', bg: 'bg-orange-500/10' },
   { id: 'ethereum', symbol: 'ETH', name: 'Ethereum', logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png', fallbackPrice: 3000, color: 'text-blue-500', bg: 'bg-blue-500/10' },
@@ -173,7 +172,7 @@ const StakingAndYield = () => {
         const userBaseRate = fiatData.rates[baseCurrency] || 1;
         setFiatRate(userBaseRate);
 
-        // Fetch prices for all coins currently in use (in dashboard or in active claims)
+        // Fetch prices for all coins currently in use
         const coinsToFetch = Array.from(new Set([
           ...activeCryptos, formData.coin, formData.rewardCoin, formData.poolCoin2,
           ...stakes.flatMap(s => [s.coin, s.rewardCoin, s.poolCoin2])
@@ -326,7 +325,7 @@ const StakingAndYield = () => {
     return { totalValueLocked, totalRewardsClaimedFiat, totalDailyPassiveIncome };
   }, [stakes, livePrices]);
 
-  // 🚀 REPORT DOWNLOAD LOGIC FOR STAKING (Now includes Global Date)
+  // 🚀 REPORT DOWNLOAD LOGIC
   const handleDownloadReport = (format) => {
     if (stakes.length === 0) return alert("No active stakes or streams found.");
 
@@ -474,26 +473,27 @@ const StakingAndYield = () => {
          
          const uniqueId = `YIELD_${timestamp}_${Math.floor(Math.random() * 100000)}`;
 
-         const claimRecord = { amount: netQty, coin: claim.claimCoin, date: claimData.date, timestamp };
+         const claimRecord = { amount: netQty, coin: claim.claimCoin, date: claimData.date, timestamp, linkedId: uniqueId };
 
          // Update Master Staking Log
          await setDoc(doc(db, "users", user.uid, "stakingLogs", activeClaimStake.id), {
            claimedHistory: arrayUnion(claimRecord)
          }, { merge: true });
 
-         // Add to Crypto Wallet
+         // 🚀 Sync to Crypto Wallet with explicit stakeId linking
          await addDoc(collection(db, "users", user.uid, "cryptoWalletLogs"), {
            type: 'in', coin: claim.claimCoin, quantity: netQty, platform: activeClaimStake.platform,
            reason: `${sourceString} Reward`, referenceNo: uniqueId, date: claimData.date, timestamp,
-           isMicroEarn: true, linkedRecordId: uniqueId
+           isMicroEarn: true, linkedRecordId: uniqueId, stakeId: activeClaimStake.id
          });
 
-         // Add to Income Logs
+         // 🚀 Sync to Income Logs with explicit subWallet sync
          await addDoc(collection(db, "users", user.uid, "incomeLogs"), {
            title: `${sourceString}: ${claim.claimCoin}`, category: "Crypto Staking Rewards", vault: 'crypto',
+           subWallet: activeClaimStake.platform, // SubWallet sync
            cryptoPlatform: activeClaimStake.platform, asset: claim.claimCoin, amount: netQty,
            exchangeRate: currentPriceBase > 0 ? currentPriceBase : 1, finalBaseAmount: finalFiatValue, date: claimData.date, timestamp,
-           linkedIncomeId: uniqueId, isMicroEarn: true
+           linkedIncomeId: uniqueId, isMicroEarn: true, stakeId: activeClaimStake.id
          });
       }
 
@@ -522,6 +522,7 @@ const StakingAndYield = () => {
      setClaimData(prev => ({ ...prev, multipleClaims: updated }));
   };
 
+  // 🚀 FIXED: EXECUTE SECURE DELETE WITH CASCADE EFFECT
   const executeSecureDelete = async (e) => {
     e.preventDefault();
     if (!pinInput.trim()) return setPinError("Enter PIN.");
@@ -535,7 +536,17 @@ const StakingAndYield = () => {
         setPinError("Incorrect PIN."); setIsVerifying(false); return;
       }
       
+      // 1. Delete the main Stake stream
       await deleteDoc(doc(db, "users", user.uid, "stakingLogs", deleteContext.id));
+
+      // 2. Cascade delete any harvested rewards synced to the vaults
+      const collectionsToClean = ["cryptoWalletLogs", "incomeLogs"];
+      for (const colName of collectionsToClean) {
+          const q = query(collection(db, "users", user.uid, colName), where("stakeId", "==", deleteContext.id));
+          const snap = await getDocs(q);
+          snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, colName, d.id)));
+      }
+
       setDeleteContext(null); 
     } catch (error) { setPinError("Error."); } finally { setIsVerifying(false); }
   };
@@ -564,7 +575,6 @@ const StakingAndYield = () => {
       setIsClaimModalOpen(true);
   };
 
-  // 🚀 THIS WAS THE MISSING VARIABLE
   const isAffiliateModeModal = activeClaimStake && activeClaimStake.earningType === 'affiliate';
 
   return (
@@ -982,7 +992,7 @@ const StakingAndYield = () => {
               </div>
 
               {/* 🚀 FIXED: isAffiliateModeModal uses correct value */}
-              {activeClaimStake && activeClaimStake.earningType === 'affiliate' ? (
+              {isAffiliateModeModal ? (
                  <div className="space-y-4">
                     <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Coins Received</label>
                     {claimData.multipleClaims.map((claimRow, idx) => (
@@ -1042,6 +1052,15 @@ const StakingAndYield = () => {
                 </div>
               )}
 
+              {/* 🚀 DATE PICKER WITH GLOBAL DATE DISPLAY ADDED FOR CLAIM MODAL */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1 flex justify-between">
+                  <span>Date</span>
+                  <span className="text-emerald-500">{formatGlobalDate ? formatGlobalDate(claimData.date, 'short') : ''}</span>
+                </label>
+                <input type="date" required value={claimData.date} onChange={(e) => setClaimData({...claimData, date: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50" />
+              </div>
+
               <button type="submit" disabled={isSaving} className={`w-full p-4 rounded-2xl font-black text-white text-lg transition-all shadow-xl active:scale-95 disabled:opacity-70 bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/20 flex items-center justify-center gap-2`}>
                 {isSaving ? <HiOutlineRefresh className="animate-spin text-2xl" /> : 'Harvest & Auto-Sync Ledgers'}
               </button>
@@ -1053,7 +1072,7 @@ const StakingAndYield = () => {
       {/* 🔐 DELETE SECURITY MODAL */}
       {deleteContext && (
         <div className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 pt-[100px] md:pt-[120px] animate-in fade-in">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl p-8 border border-rose-100 dark:border-rose-900/50 relative overflow-hidden">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl p-8 border border-rose-100 dark:border-rose-900/50 relative overflow-hidden max-h-[calc(100dvh-6rem)] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95">
             <div className="absolute top-0 left-0 w-full h-2 bg-rose-500"></div>
             <div className="flex flex-col items-center text-center mb-6">
               <div className="w-16 h-16 bg-rose-100 text-rose-600 dark:bg-rose-500/20 rounded-full flex items-center justify-center text-3xl mb-4"><HiOutlineLockClosed /></div>

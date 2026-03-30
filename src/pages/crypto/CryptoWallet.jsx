@@ -149,8 +149,26 @@ const CryptoWallet = () => {
     reason: '',
     referenceNo: '',
     date: todayDate,
-    fiatAmount: '', fiatFee: '', fiatCurrency: baseCurrency, fiatExchangeRate: 1, destinationVault: 'bankWallet', destinationVaultName: 'CoinDCX P2P'
+    fiatAmount: '', fiatFee: '', fiatCurrency: baseCurrency, fiatExchangeRate: 1, destinationVault: 'bankWallet', destinationVaultName: ''
   });
+
+  // 🚀 FETCH EXISTING BANKS/WALLETS FOR AUTO-SUGGEST (Bridging)
+  const [existingVaultNames, setExistingVaultNames] = useState([]);
+  useEffect(() => {
+     if(!user) return;
+     const fetchVaults = async () => {
+        const qBank = query(collection(db, "users", user.uid, "bankWallet"));
+        const snapBank = await getDocs(qBank);
+        const qOnline = query(collection(db, "users", user.uid, "onlineWallet"));
+        const snapOnline = await getDocs(qOnline);
+        
+        const names = new Set();
+        snapBank.docs.forEach(d => { if(d.data().bankName) names.add(d.data().bankName) });
+        snapOnline.docs.forEach(d => { if(d.data().walletName) names.add(d.data().walletName) });
+        setExistingVaultNames(Array.from(names));
+     };
+     fetchVaults();
+  }, [user]);
 
   // Fetch Wallet Transactions
   useEffect(() => {
@@ -274,7 +292,7 @@ const CryptoWallet = () => {
 
           // Combine results into priceMap
           const priceMap = {};
-          coinsToFetch.forEach(sym => {
+          coinsToFetch.forEach(async (sym) => {
             const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase()) || {};
             const searchId = dbCoin.id || sym.toLowerCase();
             
@@ -282,9 +300,24 @@ const CryptoWallet = () => {
             if (dbCoin.fetchMode === 'contract') {
                 liveData = geckoTerminalData[searchId];
             } else {
-                liveData = cgJson.find(c => c.id === searchId);
+                liveData = cgJson.length > 0 ? cgJson.find(c => c.id === searchId) : null;
             }
             
+            // Fallback Binance
+            if(!liveData || !liveData.current_price) {
+               try {
+                 const bSym = searchId === 'tether' ? 'BTCUSDT' : `${sym.toUpperCase()}USDT`;
+                 const bRes = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${bSym}`);
+                 if (bRes.ok) {
+                   const bData = await bRes.json();
+                   liveData = {
+                     current_price: searchId === 'tether' ? 1.00 : parseFloat(bData.lastPrice),
+                     price_change_percentage_24h: searchId === 'tether' ? 0.01 : parseFloat(bData.priceChangePercent)
+                   };
+                 }
+               } catch(e) {}
+            }
+
             priceMap[sym.toUpperCase()] = {
               priceUSD: liveData?.current_price || dbCoin.fallbackPrice || 0,
               change: liveData?.price_change_percentage_24h || 0
@@ -384,6 +417,13 @@ const CryptoWallet = () => {
     if (qty <= 0) return alert("Quantity must be greater than zero.");
     if (transactionType !== 'transfer' && !formData.platform.trim()) return alert("Please enter a wallet name!");
 
+    // 🚀 Require exact bank/wallet name when bridging out to fiat
+    if (transactionType === 'out' && isBridging && !editingId) {
+       if ((formData.destinationVault === 'bankWallet' || formData.destinationVault === 'onlineWallet') && !formData.destinationVaultName.trim()) {
+           return alert("Please specify the exact Bank or Wallet Name to receive fiat funds.");
+       }
+    }
+
     if (!editingId) {
       if (transactionType === 'out') {
         const platBal = holdings[formData.coin]?.platforms[formData.platform] || 0;
@@ -436,12 +476,12 @@ const CryptoWallet = () => {
           const vaultFeeBase = fiatFee * exRate; 
           const finalBase = (grossFiat * exRate) - vaultFeeBase;
           fiatRecord.foreignAmount = grossFiat; fiatRecord.exchangeRate = exRate; fiatRecord.fee = vaultFeeBase; 
-          fiatRecord.finalBaseAmount = finalBase; fiatRecord.bankName = formData.destinationVaultName || 'Bank';
+          fiatRecord.finalBaseAmount = finalBase; fiatRecord.bankName = formData.destinationVaultName.trim() || 'Bank';
           fiatRecord.transferType = 'Crypto Sell'; fiatRecord.isP2P = true;
         } else if (formData.destinationVault === 'onlineWallet') {
           const netFiat = grossFiat - fiatFee; const finalBase = netFiat * exRate;
           fiatRecord.foreignAmount = grossFiat; fiatRecord.fee = fiatFee; fiatRecord.netForeignAmount = netFiat;
-          fiatRecord.exchangeRate = exRate; fiatRecord.finalBaseAmount = finalBase; fiatRecord.walletName = formData.destinationVaultName || 'E-Wallet';
+          fiatRecord.exchangeRate = exRate; fiatRecord.finalBaseAmount = finalBase; fiatRecord.walletName = formData.destinationVaultName.trim() || 'E-Wallet';
           fiatRecord.walletCategory = 'Fiat Wallet';
         } else if (formData.destinationVault === 'cashWallet') {
           const netFiat = grossFiat - fiatFee; const finalBase = netFiat * exRate;
@@ -465,7 +505,7 @@ const CryptoWallet = () => {
       coin: rec.coin, quantity: rec.quantity, platform: rec.platform || allPlatforms[0],
       fromPlatform: rec.fromPlatform || 'FaucetPay', toPlatform: rec.toPlatform || 'Binance',
       networkFee: rec.networkFee || '', reason: rec.reason || '', referenceNo: rec.referenceNo || '', date: rec.date,
-      fiatAmount: '', fiatFee: '', fiatCurrency: baseCurrency, fiatExchangeRate: 1, destinationVault: 'bankWallet', destinationVaultName: 'CoinDCX P2P'
+      fiatAmount: '', fiatFee: '', fiatCurrency: baseCurrency, fiatExchangeRate: 1, destinationVault: 'bankWallet', destinationVaultName: existingVaultNames[0] || ''
     });
     setEditingId(rec.id); setIsModalOpen(true);
   };
@@ -506,7 +546,10 @@ const CryptoWallet = () => {
 
   const openModal = (type) => {
     setTransactionType(type); setEditingId(null); setIsBridging(false);
-    setFormData(prev => ({ ...prev, quantity: '', reason: '', referenceNo: '', networkFee: '', platform: allPlatforms[0], fromPlatform: 'FaucetPay', toPlatform: 'Binance' }));
+    setFormData(prev => ({ 
+      ...prev, quantity: '', reason: '', referenceNo: '', networkFee: '', platform: allPlatforms[0], fromPlatform: 'FaucetPay', toPlatform: 'Binance',
+      destinationVaultName: existingVaultNames[0] || '' 
+    }));
     setIsCustomPlatform(false); setIsCustomFrom(false); setIsCustomTo(false); setIsModalOpen(true);
   };
 
@@ -870,16 +913,19 @@ const CryptoWallet = () => {
                         </div>
                         <div className="space-y-2">
                           <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Destination Vault</label>
-                          <select value={formData.destinationVault} onChange={(e) => setFormData({...formData, destinationVault: e.target.value})} className="w-full p-3 bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-700 rounded-xl font-bold dark:text-white outline-none cursor-pointer">
+                          <select value={formData.destinationVault} onChange={(e) => setFormData({...formData, destinationVault: e.target.value, destinationVaultName: existingVaultNames[0] || ''})} className="w-full p-3 bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-700 rounded-xl font-bold dark:text-white outline-none cursor-pointer">
                             {vaultDestinations.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
                           </select>
                         </div>
                       </div>
                       
                       {formData.destinationVault !== 'cashWallet' && (
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Account Name</label>
-                          <input type="text" required={isBridging && formData.destinationVault !== 'cashWallet'} value={formData.destinationVaultName} onChange={(e) => setFormData({...formData, destinationVaultName: e.target.value})} placeholder="e.g. SBI, PayPal" className="w-full p-3 bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-700 rounded-xl font-bold dark:text-white outline-none" />
+                        <div className="space-y-2 animate-in fade-in">
+                          <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Account / Wallet Name</label>
+                          <input type="text" list="crypto-fiat-vaults" required={isBridging && formData.destinationVault !== 'cashWallet'} value={formData.destinationVaultName} onChange={(e) => setFormData({...formData, destinationVaultName: e.target.value})} placeholder="e.g. SBI, PayPal" className="w-full p-3 bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-700 rounded-xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50" />
+                          <datalist id="crypto-fiat-vaults">
+                             {existingVaultNames.map(b => <option key={b} value={b} />)}
+                          </datalist>
                         </div>
                       )}
 

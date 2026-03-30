@@ -10,7 +10,7 @@ import {
   HiOutlineSparkles, HiOutlineChevronDown, HiOutlineClock,
   HiOutlineTrendingUp, HiOutlineTrendingDown, HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable
 } from 'react-icons/hi';
-import { FaBitcoin, FaGift, FaWallet, FaMedal, FaTrophy } from 'react-icons/fa';
+import { FaBitcoin, FaGift, FaWallet, FaMedal, FaTrophy, FaBuilding } from 'react-icons/fa';
 
 const microEarnPlatforms = [
   "CoinPayU", "FaucetPay", "Cointiply", "FreeBitcoin", "FireFaucet",
@@ -444,6 +444,7 @@ const MicroEarn = () => {
       title: `Platform Yield: ${formData.platform}`,
       category: "Crypto APR / Yield",
       vault: 'crypto',
+      subWallet: formData.destinationWallet, // 🚀 Fixed: SubWallet syncs to Income Tracker
       cryptoPlatform: formData.destinationWallet,
       asset: formData.coin,
       amount: rQty,
@@ -833,11 +834,11 @@ const MicroEarn = () => {
 
               <div className="grid grid-cols-2 gap-5 p-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Total Withdrawn</label>
+                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Total Withdrawn</label>
                   <input type="number" step="any" required value={formData.withdrawnAmount} onChange={(e) => setFormData({...formData, withdrawnAmount: e.target.value})} placeholder="e.g. 0.05" className="w-full p-3 bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800 rounded-xl font-bold dark:text-white outline-none" />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest ml-1">Net Received (In Wallet)</label>
+                  <label className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest ml-1">Net Received (In Wallet)</label>
                   <input type="number" step="any" required value={formData.receivedAmount} onChange={(e) => setFormData({...formData, receivedAmount: e.target.value})} placeholder="Actual amount" className="w-full p-3 bg-white dark:bg-slate-900 border border-emerald-400 dark:border-emerald-500 shadow-inner rounded-xl font-black text-emerald-600 dark:text-emerald-400 outline-none focus:ring-2 focus:ring-emerald-500/50" />
                 </div>
                 <div className="col-span-2 text-[10px] font-black text-rose-500 text-right uppercase tracking-widest">
@@ -882,7 +883,7 @@ const MicroEarn = () => {
 
       {deleteContext && (
         <div className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 pt-[100px] md:pt-[120px] animate-in fade-in">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl p-8 border border-rose-100 dark:border-rose-900/50 relative overflow-hidden">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl p-8 border border-rose-100 dark:border-rose-900/50 relative overflow-hidden max-h-[calc(100dvh-6rem)] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95">
             <div className="absolute top-0 left-0 w-full h-2 bg-rose-500"></div>
             <div className="flex flex-col items-center text-center mb-6">
               <div className="w-16 h-16 bg-rose-100 text-rose-600 dark:bg-rose-500/20 rounded-full flex items-center justify-center text-3xl mb-4"><HiOutlineLockClosed /></div>

@@ -119,6 +119,9 @@ const SwapAndBridge = () => {
     linkedId: ''
   });
 
+  const [isCustomFrom, setIsCustomFrom] = useState(false);
+  const [isCustomTo, setIsCustomTo] = useState(false);
+
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, "users", user.uid, "swapBridgeLogs"), orderBy("timestamp", "desc"));
@@ -225,11 +228,14 @@ const SwapAndBridge = () => {
           // Binance Fallback
           if (!priceUsd) {
             try {
-              const bSym = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
-              const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
-              if (bRes.ok) {
-                 const bData = await bRes.json();
-                 priceUsd = searchId === 'tether' ? 1.00 : parseFloat(bData.price);
+              const binanceSafeCoins = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC'];
+              if (binanceSafeCoins.includes(upperSym)) {
+                 const bSym = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
+                 const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
+                 if (bRes.ok) {
+                    const bData = await bRes.json();
+                    priceUsd = searchId === 'tether' ? 1.00 : parseFloat(bData.price);
+                 }
               }
             } catch(e) {}
           }
@@ -405,7 +411,7 @@ const SwapAndBridge = () => {
       };
 
       cryptoWalletSyncData.push({
-        type: 'transfer', coin: formData.bridgeCoin, quantity: sQty, fromPlatform: formData.fromPlatform, toPlatform: formData.toPlatform, networkFee: feeCoins,
+        type: 'transfer', coin: formData.bridgeCoin, quantity: sQty, fromPlatform: formData.fromPlatform, toPlatform: formData.toPlatform, networkFee: Math.max(0, feeCoins), // Prevent negative fees
         reason: `Bridge Transfer`, referenceNo: uniqueId, date: formData.date, timestamp, linkedRecordId: uniqueId
       });
 
@@ -495,7 +501,9 @@ const SwapAndBridge = () => {
     t.fromCoin?.toLowerCase().includes(searchTerm.toLowerCase()) || 
     t.toCoin?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     t.bridgeCoin?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    t.platform?.toLowerCase().includes(searchTerm.toLowerCase())
+    t.platform?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    t.fromPlatform?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    t.toPlatform?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -533,7 +541,7 @@ const SwapAndBridge = () => {
             </div>
           </div>
 
-          <button onClick={() => setIsModalOpen(true)} className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 md:px-7 py-3 md:py-3.5 rounded-2xl font-black text-xs md:text-sm transition-all active:scale-95 shadow-lg shadow-blue-500/25 whitespace-nowrap">
+          <button onClick={() => openModal('transfer')} className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 md:px-7 py-3 md:py-3.5 rounded-2xl font-black text-xs md:text-sm transition-all active:scale-95 shadow-lg shadow-blue-500/25 whitespace-nowrap">
             <HiOutlinePlus size={20} className="hidden sm:inline" /> 
             <span className="hidden sm:inline">Log Swap / Transfer</span>
             <span className="sm:hidden">Add</span>
@@ -556,6 +564,13 @@ const SwapAndBridge = () => {
           <h2 className="text-5xl font-black text-rose-600 dark:text-rose-400 tracking-tighter relative z-10">
             -{currencySymbol}{analytics.totalFeesLost.toLocaleString(undefined, {minimumFractionDigits: 2})}
           </h2>
+        </div>
+      </div>
+
+      <div className="flex gap-4 bg-white dark:bg-slate-900 p-2 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800 mt-8">
+        <div className="relative flex-1">
+          <HiOutlineSearch className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 text-xl" />
+          <input type="text" placeholder="Search by coin or platform..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-14 pr-4 py-4 bg-transparent font-bold text-slate-700 dark:text-white outline-none" />
         </div>
       </div>
 
@@ -692,25 +707,34 @@ const SwapAndBridge = () => {
                 <div className="space-y-6 animate-in fade-in">
                   <div className="space-y-2">
                     <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Platform (Where did you swap?)</label>
-                    <select value={formData.platform} onChange={(e) => setFormData({...formData, platform: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer">
-                      {allPlatforms.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
+                    <div className="relative">
+                      <select value={formData.platform} onChange={(e) => setFormData({...formData, platform: e.target.value})} className="w-full pl-4 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer appearance-none">
+                        {allPlatforms.map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                      <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">You Gave (Asset)</label>
-                      <select value={formData.fromCoin} onChange={(e) => setFormData({...formData, fromCoin: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl font-black dark:text-white outline-none">
-                        {cryptoSymbols.map(c => <option key={`f-${c}`} value={c}>{c}</option>)}
-                      </select>
+                      <div className="relative">
+                        <select value={formData.fromCoin} onChange={(e) => setFormData({...formData, fromCoin: e.target.value})} className="w-full pl-4 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl font-black dark:text-white outline-none appearance-none">
+                          {cryptoSymbols.map(c => <option key={`f-${c}`} value={c}>{c}</option>)}
+                        </select>
+                        <HiOutlineChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                      </div>
                       <input type="number" step="any" required value={formData.fromAmount} onChange={(e) => setFormData({...formData, fromAmount: e.target.value})} placeholder="Amount Given" className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl font-bold dark:text-white outline-none" />
                     </div>
 
                     <div className="space-y-2">
                       <label className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest ml-1">You Received</label>
-                      <select value={formData.toCoin} onChange={(e) => setFormData({...formData, toCoin: e.target.value})} className="w-full p-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 rounded-xl font-black text-emerald-600 dark:text-emerald-400 outline-none">
-                        {cryptoSymbols.concat(['USDT']).map(c => <option key={`t-${c}`} value={c}>{c}</option>)}
-                      </select>
+                      <div className="relative">
+                        <select value={formData.toCoin} onChange={(e) => setFormData({...formData, toCoin: e.target.value})} className="w-full pl-4 pr-10 py-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 rounded-xl font-black text-emerald-600 dark:text-emerald-400 outline-none appearance-none">
+                          {cryptoSymbols.concat(['USDT']).map(c => <option key={`t-${c}`} value={c}>{c}</option>)}
+                        </select>
+                        <HiOutlineChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 pointer-events-none" />
+                      </div>
                       <input type="number" step="any" required value={formData.toAmount} onChange={(e) => setFormData({...formData, toAmount: e.target.value})} placeholder="Amount Received" className="w-full p-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 rounded-xl font-bold text-emerald-600 dark:text-emerald-400 outline-none" />
                     </div>
                   </div>
@@ -737,9 +761,12 @@ const SwapAndBridge = () => {
                   <div className="space-y-2">
                     <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Asset to Transfer</label>
                     <div className="flex gap-3">
-                      <select value={formData.bridgeCoin} onChange={(e) => setFormData({...formData, bridgeCoin: e.target.value})} className="w-1/3 p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl font-black dark:text-white outline-none">
-                        {cryptoSymbols.map(c => <option key={`b-${c}`} value={c}>{c}</option>)}
-                      </select>
+                      <div className="w-1/3 relative">
+                         <select value={formData.bridgeCoin} onChange={(e) => setFormData({...formData, bridgeCoin: e.target.value})} className="w-full pl-4 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl font-black dark:text-white outline-none appearance-none">
+                           {cryptoSymbols.map(c => <option key={`b-${c}`} value={c}>{c}</option>)}
+                         </select>
+                         <HiOutlineChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                      </div>
                       <div className="flex-1 text-right pt-2 px-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                         Moving crypto burns gas fees. Track exactly how much network fee you paid.
                       </div>
@@ -749,17 +776,23 @@ const SwapAndBridge = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">From Wallet</label>
-                      <select value={formData.fromPlatform} onChange={(e) => setFormData({...formData, fromPlatform: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl font-bold dark:text-white outline-none">
-                        {allPlatforms.map(p => <option key={`bf-${p}`} value={p}>{p}</option>)}
-                      </select>
+                      <div className="relative">
+                         <select value={formData.fromPlatform} onChange={(e) => setFormData({...formData, fromPlatform: e.target.value})} className="w-full pl-4 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl font-bold dark:text-white outline-none appearance-none">
+                           {allPlatforms.map(p => <option key={`bf-${p}`} value={p}>{p}</option>)}
+                         </select>
+                         <HiOutlineChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                      </div>
                       <input type="number" step="any" required value={formData.bridgeSentAmount} onChange={(e) => setFormData({...formData, bridgeSentAmount: e.target.value})} placeholder="Amount Sent" className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl font-bold dark:text-white outline-none" />
                     </div>
 
                     <div className="space-y-2">
                       <label className="text-[11px] font-black text-purple-600 dark:text-purple-400 uppercase tracking-widest ml-1">To Destination</label>
-                      <select value={formData.toPlatform} onChange={(e) => setFormData({...formData, toPlatform: e.target.value})} className="w-full p-4 bg-purple-50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-800/50 rounded-xl font-bold dark:text-white outline-none">
-                        {allPlatforms.map(p => <option key={`bt-${p}`} value={p}>{p}</option>)}
-                      </select>
+                      <div className="relative">
+                         <select value={formData.toPlatform} onChange={(e) => setFormData({...formData, toPlatform: e.target.value})} className="w-full pl-4 pr-10 py-4 bg-purple-50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-800/50 rounded-xl font-bold dark:text-white outline-none appearance-none">
+                           {allPlatforms.map(p => <option key={`bt-${p}`} value={p}>{p}</option>)}
+                         </select>
+                         <HiOutlineChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-purple-500 pointer-events-none" />
+                      </div>
                       <input type="number" step="any" required value={formData.bridgeReceivedAmount} onChange={(e) => setFormData({...formData, bridgeReceivedAmount: e.target.value})} placeholder="Amount Received" className="w-full p-4 bg-purple-50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-800/50 rounded-xl font-bold text-purple-600 dark:text-purple-400 outline-none" />
                     </div>
                   </div>
@@ -785,7 +818,7 @@ const SwapAndBridge = () => {
 
               {/* 🚀 GLOBAL DATE FOR INPUT */}
               <div className="space-y-2">
-                <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1 flex justify-between">
+                <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex justify-between ml-1">
                   <span>Date</span>
                   <span className="text-blue-500">{formatGlobalDate ? formatGlobalDate(formData.date, 'short') : ''}</span>
                 </label>

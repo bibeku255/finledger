@@ -176,7 +176,7 @@ const HoldAndSwap = () => {
             if (gtRes.ok) {
                const gtJson = await gtRes.json();
                geckoTerminalData[customCoin.id] = {
-                  usd: parseFloat(gtJson.data.attributes.price_usd)
+                 usd: parseFloat(gtJson.data.attributes.price_usd)
                };
             }
          } catch (error) { console.warn(`GeckoTerminal failed for ${customCoin.symbol}`); }
@@ -492,15 +492,15 @@ const HoldAndSwap = () => {
 
       {/* DASHBOARD STATS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm">
+        <div className="p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] shadow-sm">
           <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Target Value</p>
           <p className="text-3xl font-black dark:text-white">{currencySymbol}{totalInvested.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
         </div>
-        <div className="p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm relative">
+        <div className="p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] shadow-sm relative">
           <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1">Current Live Value</p>
           <p className="text-3xl font-black dark:text-white">{currencySymbol}{totalCurrent.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
         </div>
-        <div className={`p-6 border rounded-3xl shadow-lg relative overflow-hidden ${totalProfit >= 0 ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-50 dark:bg-rose-500/10 border-rose-500/30'}`}>
+        <div className={`p-6 border rounded-[2rem] shadow-sm relative overflow-hidden ${totalProfit >= 0 ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/30' : 'bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/30'}`}>
           <div className="absolute -right-6 -top-6 opacity-10"><HiOutlineSparkles size={100} /></div>
           <p className="text-[11px] font-black uppercase tracking-widest mb-1 opacity-70">Unrealized P/L</p>
           <div className="flex items-end gap-3">
@@ -518,7 +518,7 @@ const HoldAndSwap = () => {
       {/* TABLE DATA */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] overflow-hidden shadow-sm">
         <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/20">
-          <h2 className="text-lg font-black dark:text-white flex items-center gap-2">
+          <h2 className="text-xl font-black dark:text-white flex items-center gap-2">
             <FaExchangeAlt className="text-blue-500" /> Watchlist Signals
           </h2>
           <button onClick={fetchTablePrices} className="text-[10px] font-black text-slate-500 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg hover:text-blue-500 flex items-center gap-1 transition-colors">
@@ -540,7 +540,7 @@ const HoldAndSwap = () => {
         ) : (
           <div className="overflow-x-auto custom-scrollbar">
             <table className="w-full text-left border-collapse min-w-[900px]">
-              <thead className="bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+              <thead className="bg-slate-50/50 dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 text-[10px] font-black text-slate-400 uppercase tracking-widest">
                 <tr>
                   <th className="p-4 pl-6">Asset & Wallet</th>
                   <th className="p-4">Holdings & Target</th>
@@ -705,7 +705,7 @@ const HoldAndSwap = () => {
               {pinError && <p className="text-xs font-bold text-rose-500 text-center animate-bounce">{pinError}</p>}
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setDeleteContext(null)} className="flex-1 p-4 rounded-2xl font-black bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors hover:bg-slate-200 dark:hover:bg-slate-700">Cancel</button>
-                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-2xl font-black text-white bg-rose-500 hover:bg-rose-600 transition-colors disabled:opacity-50">Verify & Delete</button>
+                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-2xl font-black text-white bg-rose-500 hover:bg-rose-600 disabled:opacity-50">Verify & Delete</button>
               </div>
             </form>
           </div>
