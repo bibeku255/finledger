@@ -126,15 +126,27 @@ const Dashboard = () => {
     }
   }, []);
   
-  // 1️⃣ Vaults & Cashflow Sync
+  // 1️⃣ Vaults & Cashflow Sync (🚀 UPGRADED TO MATCH VAULT LEDGER MATH)
   useEffect(() => {
     if (!user) return;
 
     const calcVaultBalance = (snapshot) => {
       return snapshot.docs.reduce((acc, doc) => {
         const data = doc.data();
-        const amt = Number(data.finalBaseAmount) || 0;
-        return acc + (data.type === 'in' ? amt : -amt);
+        const finalAmount = Number(data.finalBaseAmount || data.amount || 0);
+        
+        // Accurate fee calculation matching vault ledgers
+        let feeAmount = 0;
+        if (data.fee && data.feeExchangeRate) {
+            feeAmount = Number(data.fee) * Number(data.feeExchangeRate);
+        } else if (data.fee && data.exchangeRate) { 
+            feeAmount = Number(data.fee) * Number(data.exchangeRate);
+        } else if (data.fee) {
+            feeAmount = Number(data.fee);
+        }
+
+        const netChange = data.type === 'in' ? finalAmount : -(finalAmount + feeAmount);
+        return acc + netChange;
       }, 0);
     };
 

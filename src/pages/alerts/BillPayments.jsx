@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth';
+// 🚀 ADDED getDocs, query for fetching existing banks
 import { collection, addDoc, doc, deleteDoc, updateDoc, onSnapshot, query, orderBy, where, getDocs, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 
@@ -50,8 +51,27 @@ const BillPayments = () => {
 
   const [payData, setPayData] = useState({
     sourceVault: 'bank',
+    subWallet: '', // 🚀 NEW: For exact Bank/Online Wallet Name
     date: todayDate
   });
+
+  // 🚀 FETCH EXISTING BANKS/WALLETS FOR AUTO-SUGGEST
+  const [existingVaultNames, setExistingVaultNames] = useState([]);
+  useEffect(() => {
+     if(!user) return;
+     const fetchVaults = async () => {
+        const qBank = query(collection(db, "users", user.uid, "bankWallet"));
+        const snapBank = await getDocs(qBank);
+        const qOnline = query(collection(db, "users", user.uid, "onlineWallet"));
+        const snapOnline = await getDocs(qOnline);
+        
+        const names = new Set();
+        snapBank.docs.forEach(d => { if(d.data().bankName) names.add(d.data().bankName) });
+        snapOnline.docs.forEach(d => { if(d.data().walletName) names.add(d.data().walletName) });
+        setExistingVaultNames(Array.from(names));
+     };
+     fetchVaults();
+  }, [user]);
 
   // 📥 Fetch Bills
   useEffect(() => {
@@ -114,6 +134,12 @@ const BillPayments = () => {
   const handlePayBill = async (e) => {
     e.preventDefault();
     if (!user || !activeBill) return;
+
+    // 🚀 Validation for SubWallet
+    if ((payData.sourceVault === 'bank' || payData.sourceVault === 'online') && !payData.subWallet.trim()) {
+        return alert("Please specify the Bank or Wallet name to deduct from.");
+    }
+
     setIsProcessing(true);
 
     const timestamp = new Date(payData.date).getTime();
@@ -126,8 +152,19 @@ const BillPayments = () => {
                               payData.sourceVault === 'online' ? 'onlineWallet' : 'cryptoWalletLogs';
       
       const vaultRecord = payData.sourceVault === 'crypto' 
-        ? { type: 'out', coin: baseCurrency, quantity: activeBill.amount, platform: 'Binance', reason: `Bill Paid: ${activeBill.title}`, referenceNo: payId, date: payData.date, timestamp, linkedExpenseId: payId, billId: activeBill.id }
-        : { title: `Bill Paid: ${activeBill.title}`, type: 'out', date: payData.date, timestamp, currency: baseCurrency, foreignAmount: activeBill.amount, exchangeRate: 1, finalBaseAmount: activeBill.amount, fee: 0, linkedExpenseId: payId, walletName: activeBill.category, transferType: 'Bill Payment', billId: activeBill.id };
+        ? { 
+            type: 'out', coin: baseCurrency, quantity: activeBill.amount, platform: 'Binance', 
+            reason: `Bill Paid: ${activeBill.title}`, referenceNo: payId, date: payData.date, 
+            timestamp, linkedExpenseId: payId, billId: activeBill.id 
+          }
+        : { 
+            title: `Bill Paid: ${activeBill.title}`, type: 'out', date: payData.date, timestamp, 
+            currency: baseCurrency, foreignAmount: activeBill.amount, exchangeRate: 1, 
+            finalBaseAmount: activeBill.amount, fee: 0, linkedExpenseId: payId, 
+            walletName: payData.subWallet.trim() || 'Default Wallet', // 🚀 Accurate sync
+            bankName: payData.subWallet.trim() || 'Default Bank',     // 🚀 Accurate sync
+            transferType: 'Bill Payment', billId: activeBill.id 
+          };
       
       await addDoc(collection(db, "users", user.uid, vaultCollection), vaultRecord);
 
@@ -136,6 +173,7 @@ const BillPayments = () => {
         title: activeBill.title,
         category: activeBill.category || "Bills & Utilities",
         vault: payData.sourceVault,
+        subWallet: payData.sourceVault === 'bank' || payData.sourceVault === 'online' ? payData.subWallet.trim() : '', // 🚀 Match Deducted Vault
         asset: baseCurrency,
         amount: activeBill.amount,
         exchangeRate: 1,
@@ -261,7 +299,7 @@ const BillPayments = () => {
           <div className="relative z-10">
             <p className="text-xs font-black text-blue-400 uppercase tracking-widest mb-1">Total Upcoming (Unpaid)</p>
             <h2 className="text-4xl font-black text-white tracking-tighter">
-              <span className="text-blue-500 mr-2">{currencySymbol}</span>{totalUpcoming.toLocaleString()}
+              <span className="text-blue-500 mr-2">{currencySymbol}</span>{totalUpcoming.toLocaleString(undefined, {minimumFractionDigits: 2})}
             </h2>
           </div>
         </div>
@@ -270,7 +308,7 @@ const BillPayments = () => {
           <div className="relative z-10">
             <p className="text-xs font-black text-rose-500 uppercase tracking-widest mb-1">Total Overdue Alerts</p>
             <h2 className="text-4xl font-black text-rose-600 dark:text-rose-400 tracking-tighter">
-              <span className="text-rose-400 mr-2">{currencySymbol}</span>{totalOverdue.toLocaleString()}
+              <span className="text-rose-400 mr-2">{currencySymbol}</span>{totalOverdue.toLocaleString(undefined, {minimumFractionDigits: 2})}
             </h2>
           </div>
         </div>
@@ -312,7 +350,7 @@ const BillPayments = () => {
 
                 <div className="mt-auto space-y-4">
                   <div className="flex justify-between items-end">
-                    <span className="text-3xl font-black tracking-tighter dark:text-white">{currencySymbol}{Number(bill.amount).toLocaleString()}</span>
+                    <span className="text-3xl font-black tracking-tighter dark:text-white">{currencySymbol}{Number(bill.amount).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
                     {/* 🚀 GLOBAL DATE FOR DUE DATE IN BILL CARD */}
                     <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1">
                       <HiOutlineClock/> Due: {formatGlobalDate ? formatGlobalDate(bill.dueDate, 'short') : bill.dueDate}
@@ -320,7 +358,7 @@ const BillPayments = () => {
                   </div>
 
                   {!bill.isPaid && (
-                    <button onClick={() => { setActiveBill(bill); setIsPayModalOpen(true); }} className="w-full py-3.5 bg-blue-50 hover:bg-blue-600 dark:bg-blue-500/10 text-blue-600 hover:text-white dark:text-blue-400 rounded-xl font-black text-sm transition-all active:scale-95 flex justify-center items-center gap-2 border border-blue-100 dark:border-blue-500/20">
+                    <button onClick={() => { setActiveBill(bill); setPayData(prev => ({...prev, sourceVault: 'bank', subWallet: existingVaultNames[0] || ''})); setIsPayModalOpen(true); }} className="w-full py-3.5 bg-blue-50 hover:bg-blue-600 dark:bg-blue-500/10 text-blue-600 hover:text-white dark:text-blue-400 rounded-xl font-black text-sm transition-all active:scale-95 flex justify-center items-center gap-2 border border-blue-100 dark:border-blue-500/20">
                       <HiOutlineCheckCircle size={20}/> Mark as Paid
                     </button>
                   )}
@@ -383,27 +421,35 @@ const BillPayments = () => {
               <button onClick={() => setIsPayModalOpen(false)} className="p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors"><HiOutlineX size={20}/></button>
             </div>
             
-            <form onSubmit={handlePayBill} className="p-6 space-y-6">
+            <form onSubmit={handlePayBill} className="p-6 space-y-6 overflow-y-auto custom-scrollbar max-h-[80vh]">
               
               <div className="text-center bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-100 dark:border-slate-700">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Paying for</p>
                 <p className="text-xl font-black dark:text-white">{activeBill.title}</p>
-                <p className="text-2xl font-black text-emerald-500 mt-1">{currencySymbol}{Number(activeBill.amount).toLocaleString()}</p>
+                <p className="text-2xl font-black text-emerald-500 mt-1">{currencySymbol}{Number(activeBill.amount).toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
               </div>
 
               <div className="space-y-2">
                 <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Pay From Vault</label>
                 <div className="grid grid-cols-2 gap-2 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700">
                   {['bank', 'cash', 'online', 'crypto'].map(v => (
-                    <button key={v} type="button" onClick={() => setPayData({...payData, sourceVault: v})} className={`py-3 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex justify-center items-center gap-2 ${payData.sourceVault === v ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}>
+                    <button key={v} type="button" onClick={() => setPayData({...payData, sourceVault: v, subWallet: ''})} className={`py-3 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex justify-center items-center gap-2 ${payData.sourceVault === v ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}>
                       {getVaultIcon(v)} {v}
                     </button>
                   ))}
                 </div>
-                <p className="text-[9px] font-bold text-slate-400 text-center mt-2 px-4">
-                  Payment will be auto-deducted from this vault and logged as an Expense.
-                </p>
               </div>
+
+              {/* 🚀 SUB-WALLET NAME SELECTOR */}
+              {(payData.sourceVault === 'bank' || payData.sourceVault === 'online') && (
+                <div className="space-y-2 animate-in fade-in">
+                  <label className="text-[11px] font-black text-blue-500 uppercase tracking-widest ml-1">{payData.sourceVault === 'bank' ? 'Bank Name' : 'Wallet Name'}</label>
+                  <input type="text" list="pay-vaults" required value={payData.subWallet} onChange={(e) => setPayData({...payData, subWallet: e.target.value})} placeholder={payData.sourceVault === 'bank' ? "e.g. HDFC, SBI" : "e.g. Paytm, PayPal"} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50" />
+                  <datalist id="pay-vaults">
+                     {existingVaultNames.map(b => <option key={b} value={b} />)}
+                  </datalist>
+                </div>
+              )}
 
               {/* 🚀 GLOBAL DATE APPLIED FOR PAYMENT DATE */}
               <div className="space-y-2">
@@ -412,6 +458,11 @@ const BillPayments = () => {
                   <span className="text-emerald-500">{formatGlobalDate ? formatGlobalDate(payData.date, 'short') : ''}</span>
                 </label>
                 <input type="date" required value={payData.date} onChange={(e) => setPayData({...payData, date: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50" />
+              </div>
+
+              <div className="text-[9px] font-bold text-slate-400 text-center px-4 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 p-2 rounded-xl border border-blue-100 dark:border-blue-500/20 flex items-center gap-2">
+                 <HiOutlineInformationCircle size={16} className="shrink-0" />
+                 Payment will be auto-deducted from your {payData.sourceVault} vault and logged as an Expense.
               </div>
 
               <button type="submit" disabled={isProcessing} className="w-full p-4 rounded-2xl font-black text-white text-lg transition-all active:scale-95 bg-emerald-500 hover:bg-emerald-600 shadow-xl shadow-emerald-500/20 disabled:opacity-70 flex justify-center items-center">
@@ -424,8 +475,8 @@ const BillPayments = () => {
 
       {/* 🔐 SECURE DELETE BILL MODAL */}
       {deleteContext && (
-        <div className="fixed inset-0 z-[600] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] shadow-2xl p-8 border border-slate-200 dark:border-slate-800 relative overflow-hidden">
+        <div className="fixed inset-0 z-[600] bg-slate-950/90 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl p-8 border border-slate-200 dark:border-slate-800 relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-2 bg-rose-500"></div>
             
             <div className="flex flex-col items-center text-center mb-6">
