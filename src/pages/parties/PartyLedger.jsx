@@ -161,7 +161,8 @@ const PartyLedger = () => {
           const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${formData.currency}USDT`);
           if (bRes.ok) {
             const bData = await bRes.json();
-            setFormData(prev => ({ ...prev, exchangeRate: (parseFloat(bData.price) * usdToBase).toFixed(4) }));
+            const finalRate = parseFloat(bData.price) * usdToBase;
+            setFormData(prev => ({ ...prev, exchangeRate: finalRate.toFixed(4) }));
           } else {
             alert(`Live rate for ${formData.currency} is not available on Binance. Please enter manually.`);
           }
@@ -213,18 +214,31 @@ const PartyLedger = () => {
       let newNetBalance = party.netBalance + balanceAdjustment;
       let newStatus = newNetBalance === 0 ? 'settled' : 'active';
       
+      // 🚀 RESTORE ORIGINAL STATUS IF WE ARE UNDOING A WRITEOFF/SETTLE
+      if (entry.type === 'settled' || entry.type === 'writeoff') {
+          newStatus = 'active'; // The balance remains the same, but status revives
+      }
+
       await setDoc(doc(db, "users", user.uid, "parties", party.id), { 
         netBalance: newNetBalance,
         status: newStatus 
       }, { merge: true });
 
+      // 1. Delete Ledger Entry
       await deleteDoc(doc(db, "users", user.uid, "parties", party.id, "ledger", entry.id));
       
+      // 2. Cascade Delete connected logs
       if (entry.linkId) {
         const collectionsToCheck = ['bankWallet', 'cashWallet', 'onlineWallet', 'cryptoWalletLogs', 'expenseLogs', 'incomeLogs'];
         for (const colName of collectionsToCheck) {
-          const q = query(collection(db, "users", user.uid, colName), where("linkId", "==", entry.linkId));
-          const snap = await getDocs(q);
+          // Check standard links
+          let q = query(collection(db, "users", user.uid, colName), where("linkId", "==", entry.linkId));
+          let snap = await getDocs(q);
+          snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, colName, d.id)));
+
+          // Check if it was an expense tracker generated Khata Split
+          q = query(collection(db, "users", user.uid, colName), where("linkedExpenseId", "==", entry.linkId));
+          snap = await getDocs(q);
           snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, colName, d.id)));
         }
       }
@@ -458,11 +472,12 @@ const PartyLedger = () => {
     try {
       if (type === 'settle') {
         await addDoc(collection(db, "users", user.uid, "parties", party.id, "ledger"), {
-          type: 'settled', amount: 0, baseAmount: 0, note: 'Account Settled / Adjusted', date: formattedDate, timestamp
+          type: 'settled', amount: 0, baseAmount: 0, note: 'Account Settled / Adjusted', date: formattedDate, timestamp, linkId: `SETTLE_${timestamp}`
         });
         await setDoc(doc(db, "users", user.uid, "parties", party.id), { netBalance: 0, status: 'settled' }, { merge: true });
 
       } else if (type === 'writeoff') {
+        const linkId = `WRITEOFF_${timestamp}`;
         if (party.netBalance > 0) {
           await addDoc(collection(db, "users", user.uid, "expenseLogs"), {
             title: `Bad Debt Write-off: ${party.name}`,
@@ -475,11 +490,12 @@ const PartyLedger = () => {
             timestamp,
             vault: 'cash',
             subWallet: '',
-            isSplit: false
+            isSplit: false,
+            linkId: linkId
           });
         }
         await addDoc(collection(db, "users", user.uid, "parties", party.id, "ledger"), {
-          type: 'writeoff', amount: 0, baseAmount: 0, note: 'Marked as Bad Debt / Forgiven', date: formattedDate, timestamp
+          type: 'writeoff', amount: 0, baseAmount: 0, note: 'Marked as Bad Debt / Forgiven', date: formattedDate, timestamp, linkId: linkId
         });
         await setDoc(doc(db, "users", user.uid, "parties", party.id), { netBalance: 0, status: 'bad_debt' }, { merge: true });
       }

@@ -20,6 +20,7 @@ import {
 import { FaUserCircle, FaPhoneAlt, FaUniversity } from 'react-icons/fa'; 
 
 const fiatCurrencies = ["USD", "EUR", "GBP", "AUD", "CAD", "SGD", "AED", "SAR", "JPY", "CNY", "INR", "NPR", "PKR", "BDT"];
+const BINANCE_SAFE_COINS = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC', 'BCH', 'ADA', 'XMR', 'XLM', 'DAI', 'ZEC', 'SHIB', 'SUI', 'TON', 'DOT', 'PEPE', 'NEAR', 'POL', 'ATOM', 'ARB', 'BONK', 'CAKE', 'XTZ', 'FLOKI', 'OP', 'TWT', 'BAT', 'DGB', 'KAVA', 'AVAX', 'MEME', 'DASH'];
 
 const hashPIN = async (pinCode) => {
   const encoder = new TextEncoder();
@@ -126,14 +127,26 @@ const PartyDirectory = () => {
         if (formData.currency === 'USDT' || formData.currency === 'USDC') {
           setFormData(prev => ({ ...prev, exchangeRate: usdToBase.toFixed(4) }));
         } else {
-          const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${formData.currency}USDT`);
-          if (bRes.ok) {
-            const bData = await bRes.json();
-            const finalRate = parseFloat(bData.price) * usdToBase;
-            setFormData(prev => ({ ...prev, exchangeRate: finalRate.toFixed(4) }));
-          } else {
-            alert(`Live rate for ${formData.currency} is not available on Binance. Please enter manually.`);
-          }
+           if(BINANCE_SAFE_COINS.includes(formData.currency.toUpperCase())) {
+              const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${formData.currency.toUpperCase()}USDT`);
+              if (bRes.ok) {
+                const bData = await bRes.json();
+                const finalRate = parseFloat(bData.price) * usdToBase;
+                setFormData(prev => ({ ...prev, exchangeRate: finalRate.toFixed(4) }));
+              }
+           } else {
+              // Quick fallback using CoinGecko if Binance is not safe
+              const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${formData.currency.toLowerCase()}&vs_currencies=usd`);
+              if(cgRes.ok) {
+                 const cgData = await cgRes.json();
+                 if(cgData[formData.currency.toLowerCase()]?.usd) {
+                    const finalRate = parseFloat(cgData[formData.currency.toLowerCase()].usd) * usdToBase;
+                    setFormData(prev => ({ ...prev, exchangeRate: finalRate.toFixed(4) }));
+                 }
+              } else {
+                 alert(`Live rate for ${formData.currency} is not available. Please enter manually.`);
+              }
+           }
         }
       }
     } catch (error) {
@@ -195,15 +208,17 @@ const PartyDirectory = () => {
         const docRef = await addDoc(collection(db, "users", user.uid, "parties"), newParty);
         
         if (startingBalanceBase !== 0) {
-          await addDoc(collection(db, "users", user.uid, "parties", docRef.id, "ledger"), {
-            type: 'opening_balance',
+          await addDoc(collection(db, "users", user.uid, "smartKhata"), {
+            partyName: formData.name.trim(),
+            type: startingBalanceBase > 0 ? 'gave' : 'got', // Matches Smart Khata Ledger format
             amount: parseFloat(formData.initialAmount),
             currency: formData.currency,
             exchangeRate: formData.exchangeRate,
-            baseAmount: startingBalanceBase,
+            baseAmount: Math.abs(startingBalanceBase),
             date: new Date().toISOString().split('T')[0],
             timestamp: new Date().getTime(),
-            note: formData.accountType === 'loan' ? 'Initial Loan Principal' : 'Initial Account Balance'
+            reason: formData.accountType === 'loan' ? 'Initial Loan Principal' : 'Opening Account Balance',
+            partyId: docRef.id // Link to specific party
           });
         }
       }
@@ -260,6 +275,12 @@ const PartyDirectory = () => {
       }
 
       await deleteDoc(doc(db, "users", user.uid, "parties", deleteContext.id));
+      
+      // Cleanup related khata logs
+      const q = query(collection(db, "users", user.uid, "smartKhata"), where("partyId", "==", deleteContext.id));
+      const snap = await getDocs(q);
+      snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, "smartKhata", d.id)));
+
       setDeleteContext(null); 
     } catch (error) {
       console.error("Delete failed", error);

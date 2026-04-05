@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 // 🚀 FIXED: Changed updateDoc to setDoc for safety
-import { collection, addDoc, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDoc, getDocs, where } from 'firebase/firestore';
+import { collection, addDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc, getDocs, where } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 
 // 🚀 IMPORTED REPORT UTILS
@@ -35,10 +35,15 @@ const vaultDestinations = [
   { id: 'cashWallet', name: '💵 Physical Cash' }
 ];
 
+// 🚀 SAFE COINS LIST FOR BINANCE FALLBACK (PREVENTS CORS/404)
+const BINANCE_SAFE_COINS = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC', 'BCH', 'ADA', 'XMR', 'XLM', 'DAI', 'ZEC', 'SHIB', 'SUI', 'TON', 'DOT', 'PEPE', 'NEAR', 'POL', 'ATOM', 'ARB', 'BONK', 'CAKE', 'XTZ', 'FLOKI', 'OP', 'TWT', 'BAT', 'DGB', 'KAVA', 'AVAX', 'MEME', 'DASH'];
+
 // 🚀 1. STRICT LOGO RENDERER (Synced with CryptoManager)
 const LogoRenderer = ({ symbol, logoUrl, bg, color }) => {
   const [hasError, setHasError] = useState(false);
   const symbolUpper = symbol?.toUpperCase();
+
+  useEffect(() => { setHasError(false); }, [logoUrl]);
 
   if (!logoUrl || hasError) {
     return (
@@ -246,7 +251,8 @@ const CryptoWallet = () => {
       try {
         const fiatRes = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
         const fiatData = await fiatRes.json();
-        setFiatRate(fiatData.rates[baseCurrency] || 1);
+        const userBaseRate = fiatData.rates[baseCurrency] || 1;
+        setFiatRate(userBaseRate);
 
         const coinsToFetch = Array.from(new Set([...Object.keys(holdings), ...cryptoSymbols, 'USDT']));
         
@@ -270,10 +276,12 @@ const CryptoWallet = () => {
           // Fetch Normal Coins (CoinGecko)
           if (normalCoins.length > 0) {
              const ids = normalCoins.join(',');
-             const cgRes = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&sparkline=false`);
-             if (cgRes.ok) {
-                 cgJson = await cgRes.json();
-             }
+             try {
+                const cgRes = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&sparkline=false`);
+                if (cgRes.ok) {
+                    cgJson = await cgRes.json();
+                }
+             } catch(e) { console.warn("CoinGecko API Limit Reached"); }
           }
 
           // Fetch Custom Contract Coins (GeckoTerminal)
@@ -292,8 +300,10 @@ const CryptoWallet = () => {
 
           // Combine results into priceMap
           const priceMap = {};
-          coinsToFetch.forEach(async (sym) => {
-            const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase()) || {};
+          
+          await Promise.all(coinsToFetch.map(async (sym) => {
+            const upperSym = sym.toUpperCase();
+            const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || {};
             const searchId = dbCoin.id || sym.toLowerCase();
             
             let liveData = null;
@@ -303,26 +313,28 @@ const CryptoWallet = () => {
                 liveData = cgJson.length > 0 ? cgJson.find(c => c.id === searchId) : null;
             }
             
-            // Fallback Binance
+            // Fallback Binance (Safe coins only)
             if(!liveData || !liveData.current_price) {
                try {
-                 const bSym = searchId === 'tether' ? 'BTCUSDT' : `${sym.toUpperCase()}USDT`;
-                 const bRes = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${bSym}`);
-                 if (bRes.ok) {
-                   const bData = await bRes.json();
-                   liveData = {
-                     current_price: searchId === 'tether' ? 1.00 : parseFloat(bData.lastPrice),
-                     price_change_percentage_24h: searchId === 'tether' ? 0.01 : parseFloat(bData.priceChangePercent)
-                   };
+                 if(BINANCE_SAFE_COINS.includes(upperSym)) {
+                    const bSym = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
+                    const bRes = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${bSym}`);
+                    if (bRes.ok) {
+                      const bData = await bRes.json();
+                      liveData = {
+                        current_price: searchId === 'tether' ? 1.00 : parseFloat(bData.lastPrice),
+                        price_change_percentage_24h: searchId === 'tether' ? 0.01 : parseFloat(bData.priceChangePercent)
+                      };
+                    }
                  }
                } catch(e) {}
             }
 
-            priceMap[sym.toUpperCase()] = {
+            priceMap[upperSym] = {
               priceUSD: liveData?.current_price || dbCoin.fallbackPrice || 0,
               change: liveData?.price_change_percentage_24h || 0
             };
-          });
+          }));
           
           setLivePrices(priceMap);
         }
