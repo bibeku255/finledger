@@ -13,7 +13,7 @@ import {
   HiOutlineLockClosed, HiOutlineExclamationCircle, HiOutlineArrowDown, HiOutlineArrowUp,
   HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable
 } from 'react-icons/hi';
-import { FaExchangeAlt, FaBuilding, FaWallet, FaRandom, FaBitcoin, FaUniversity } from 'react-icons/fa';
+import { FaExchangeAlt, FaBuilding, FaWallet, FaRandom, FaBitcoin, FaUniversity, FaUserFriends, FaMoneyBillWave } from 'react-icons/fa';
 
 // 🚀 SECURE SHA-256 HASHING ALGORITHM
 const hashPIN = async (pinCode) => {
@@ -120,10 +120,10 @@ const HistoryLogs = () => {
 
   const getVaultIcon = (v) => {
     if (!v) return <FaWallet />;
-    if (v.toLowerCase() === 'bank') return <FaUniversity />;
-    if (v.toLowerCase() === 'cash') return <FaMoneyBillWave />;
-    if (v.toLowerCase() === 'crypto') return <FaBitcoin />;
-    if (v.toLowerCase() === 'online') return <FaWallet />;
+    if (v.toLowerCase() === 'bank') return <FaUniversity className="text-blue-500" />;
+    if (v.toLowerCase() === 'cash') return <FaMoneyBillWave className="text-emerald-500" />;
+    if (v.toLowerCase() === 'crypto') return <FaBitcoin className="text-orange-500" />;
+    if (v.toLowerCase() === 'online') return <FaWallet className="text-purple-500" />;
     return <FaWallet />;
   };
 
@@ -155,10 +155,11 @@ const HistoryLogs = () => {
       } 
       else if (rec.logType === 'expense') {
         typeLabel = '[EXPENSE]';
-        detailsLabel = `${(rec.title || 'N/A').replace(/(\r\n|\n|\r)/gm, " ")} (${rec.category})`;
+        const isShared = rec.khataDetails && rec.khataDetails.length > 0;
+        detailsLabel = `${(rec.title || 'N/A').replace(/(\r\n|\n|\r)/gm, " ")} (${rec.category}) ${isShared ? '[Shared]' : ''}`;
         vaultImpactLabel = rec.isSplit ? 'Split Payment' : `From ${rec.vault} Vault ${rec.subWallet ? `(${rec.subWallet})` : ''}`;
-        amountLabel = rec.isSplit ? 'Multi-Asset' : `-${Number(rec.amount || 0).toLocaleString()} ${rec.asset || rec.currency}`;
-        baseValueLabel = `-${currencySymbol}${Math.abs(rec.finalBaseAmount || 0).toFixed(2)}`;
+        amountLabel = rec.isSplit ? 'Multi-Asset' : `-${Number(rec.totalPaidFromVault || rec.amount || 0).toLocaleString()} ${rec.asset || rec.currency}`;
+        baseValueLabel = `-${currencySymbol}${Math.abs(rec.finalBaseAmount || 0).toFixed(2)}`; // Net Base Amount (Your Expense)
       } 
       else if (rec.logType === 'shift') {
         typeLabel = '[SHIFT]';
@@ -197,7 +198,7 @@ const HistoryLogs = () => {
     }
   };
 
-  // 🚀 3. THE CLEAN DELETE ENGINE
+  // 🚀 3. THE CLEAN DELETE ENGINE WITH KHATA SYNC REVERSAL
   const initiateDelete = (rec) => {
     setDeleteContext(rec);
     setPinInput('');
@@ -223,7 +224,7 @@ const HistoryLogs = () => {
       }
 
       const rec = deleteContext;
-      const allVaults = ['cashWallet', 'bankWallet', 'onlineWallet', 'cryptoWalletLogs', 'expenseLogs', 'incomeLogs']; 
+      const allVaults = ['cashWallet', 'bankWallet', 'onlineWallet', 'cryptoWalletLogs', 'expenseLogs', 'incomeLogs', 'smartKhata']; 
 
       if (rec.logType === 'income') {
         await deleteDoc(doc(db, "users", user.uid, "incomeLogs", rec.id));
@@ -243,6 +244,26 @@ const HistoryLogs = () => {
             const snap = await getDocs(q);
             snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, v, d.id)));
           }
+          
+          // 🚀 SAFE REVERSAL FOR PARTY LEDGER
+          const partiesSnap = await getDocs(collection(db, "users", user.uid, "parties"));
+          for (const pDoc of partiesSnap.docs) {
+             const lQuery = query(collection(db, "users", user.uid, "parties", pDoc.id, "ledger"), where("linkId", "==", rec.linkedExpenseId));
+             const lSnap = await getDocs(lQuery);
+             
+             lSnap.forEach(async (ld) => {
+                 const lData = ld.data();
+                 const currentPartySnap = await getDoc(doc(db, "users", user.uid, "parties", pDoc.id));
+                 if (currentPartySnap.exists()) {
+                     const newBal = currentPartySnap.data().netBalance - lData.baseAmount;
+                     await updateDoc(doc(db, "users", user.uid, "parties", pDoc.id), {
+                         netBalance: newBal,
+                         status: newBal === 0 ? 'settled' : 'active'
+                     });
+                 }
+                 await deleteDoc(doc(db, "users", user.uid, "parties", pDoc.id, "ledger", ld.id));
+             });
+          }
         }
       } 
       else if (rec.logType === 'shift') {
@@ -253,8 +274,9 @@ const HistoryLogs = () => {
             const snapShift = await getDocs(qShift);
             snapShift.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, v, d.id)));
 
-            if(v === 'expenseLogs'){
-               const qExp = query(collection(db, "users", user.uid, v), where("linkedExpenseId", "==", rec.shiftId));
+            if(v === 'expenseLogs' || v === 'incomeLogs'){
+               const field = v === 'expenseLogs' ? 'linkedExpenseId' : 'linkedIncomeId';
+               const qExp = query(collection(db, "users", user.uid, v), where(field, "==", rec.shiftId));
                const snapExp = await getDocs(qExp);
                snapExp.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, v, d.id)));
             }
@@ -389,8 +411,8 @@ const HistoryLogs = () => {
                       <th className="p-4 pl-6 w-12 text-center">Type</th>
                       <th className="p-4">Details & Category</th>
                       <th className="p-4">Vault Impact</th>
-                      <th className="p-4 text-right">Native Amount</th>
-                      <th className="p-4 pr-6 text-right">Base Value Impact</th>
+                      <th className="p-4 text-right">Native Amount / Bill Total</th>
+                      <th className="p-4 pr-6 text-right">Net Base Impact</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50 dark:divide-slate-800/50">
@@ -422,9 +444,16 @@ const HistoryLogs = () => {
                             ) : (
                                <div>
                                  <p className="font-black text-slate-800 dark:text-white text-sm mb-0.5 truncate max-w-[200px]">{rec.title}</p>
-                                 <span className={`inline-block px-2 py-0.5 text-[9px] font-black uppercase tracking-wider rounded ${style.bg} ${style.text}`}>
-                                   {rec.category}
-                                 </span>
+                                 <div className="flex gap-1 flex-wrap">
+                                     <span className={`inline-block px-2 py-0.5 text-[9px] font-black uppercase tracking-wider rounded ${style.bg} ${style.text}`}>
+                                       {rec.category}
+                                     </span>
+                                     {rec.logType === 'expense' && rec.khataDetails && rec.khataDetails.length > 0 && (
+                                         <span className="inline-block px-2 py-0.5 bg-blue-50 text-blue-600 dark:bg-blue-500/10 text-[9px] font-black uppercase tracking-wider rounded border border-blue-200 dark:border-blue-900/50 flex items-center gap-1">
+                                            <FaUserFriends/> Shared
+                                         </span>
+                                     )}
+                                 </div>
                                  <p className="text-[9px] font-bold text-slate-400 mt-1">
                                    {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date}
                                  </p>
@@ -489,13 +518,16 @@ const HistoryLogs = () => {
                                    </div>
                                  ) : (
                                    <>
-                                     <span className="font-bold text-slate-700 dark:text-slate-300">
-                                       {Number(rec.amount).toLocaleString()} <span className="text-[10px] text-slate-400 uppercase">{rec.currency || rec.asset}</span>
+                                     <span className={`font-bold ${rec.logType === 'expense' && rec.khataDetails && rec.khataDetails.length > 0 ? 'text-slate-500 line-through' : 'text-slate-700 dark:text-slate-300'}`}>
+                                       {Number(rec.totalPaidFromVault || rec.amount || 0).toLocaleString()} <span className="text-[10px] text-slate-400 uppercase">{rec.currency || rec.asset}</span>
                                      </span>
                                      {(rec.currency || rec.asset) !== baseCurrency && (
                                        <p className="text-[9px] text-slate-400 font-bold mt-0.5">@ {rec.exchangeRate} rate</p>
                                      )}
                                    </>
+                                 )}
+                                 {rec.logType === 'expense' && rec.khataDetails && rec.khataDetails.length > 0 && (
+                                     <p className="text-[9px] font-black text-blue-500 uppercase mt-0.5">- Friends Share</p>
                                  )}
                                </div>
                              )}
@@ -508,9 +540,14 @@ const HistoryLogs = () => {
                                 ↔ {currencySymbol}{(Number(rec.grossAmount) * Number(rec.fromExchangeRate)).toLocaleString(undefined, {minimumFractionDigits: 2})}
                               </p>
                             ) : (
-                              <p className={`text-lg font-black tracking-tight ${style.text}`}>
-                                {rec.logType === 'income' ? '+' : '-'}{currencySymbol}{Number(rec.finalBaseAmount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
-                              </p>
+                              <div className="flex flex-col items-end">
+                                 <p className={`text-lg font-black tracking-tight ${style.text}`}>
+                                   {rec.logType === 'income' ? '+' : '-'}{currencySymbol}{Number(rec.finalBaseAmount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                 </p>
+                                 {rec.logType === 'expense' && rec.khataDetails && rec.khataDetails.length > 0 && (
+                                     <p className="text-[9px] font-black text-slate-400 mt-0.5 uppercase tracking-widest text-right">Net Personal Expense</p>
+                                 )}
+                              </div>
                             )}
 
                             {/* THE SECURE DELETE BUTTON */}
@@ -553,7 +590,7 @@ const HistoryLogs = () => {
               <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-xl">
                 <p className="text-xs font-black text-amber-700 dark:text-amber-400 flex items-start gap-1 text-left">
                   <HiOutlineExclamationCircle size={16} className="shrink-0" />
-                  WARNING: This will silently wipe all associated records from Cash, Bank, Online, and Crypto vaults to keep your total net worth 100% accurate.
+                  WARNING: This will silently wipe all associated records from Cash, Bank, Online, Crypto vaults, and Smart Khata to keep your total net worth 100% accurate.
                 </p>
               </div>
             </div>
