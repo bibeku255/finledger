@@ -20,11 +20,14 @@ const cryptoPlatformsList = [
   "Binance", "CoinDCX", "WazirX", "ZebPay", "Mudrex", "SunCrypto",
   "Coinbase", "Bybit", "KuCoin", "OKX", "Kraken", "Mexc", "Gate.io",
   "FaucetPay", "Trust Wallet", "MetaMask", "Phantom", "NC Wallet", "Payeer",
-  "Ledger (Hardware)", "Trezor (Hardware)", 
+  "Hardware Wallet (Ledger/Trezor)", 
   "CoinPayU", "Cointiply", "FreeBitcoin", "FireFaucet", "PipeFlare", 
   "GlobalHive", "AdBTC", "Viefaucet", "DutchyCorp", "LarvelFaucet", 
   "Coinpot", "RollerCoin", "Other Wallet/Site"
 ];
+
+// 🚀 BINANCE SAFE COINS TO PREVENT CORS/404 ERRORS
+const BINANCE_SAFE_COINS = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC', 'BCH', 'ADA', 'XMR', 'XLM', 'DAI', 'ZEC', 'SHIB', 'SUI', 'TON', 'DOT', 'PEPE', 'NEAR', 'POL', 'ATOM', 'ARB', 'BONK', 'CAKE', 'XTZ', 'FLOKI', 'OP', 'TWT', 'BAT', 'DGB', 'KAVA', 'AVAX', 'MEME', 'DASH'];
 
 const incomeCategories = [
   "Salary & Wages", "Freelancing & Contracts", "Business Sales", 
@@ -41,7 +44,7 @@ const hashPIN = async (pinCode) => {
 
 const IncomeStreams = () => {
   // 🚀 ENGINE CONNECTED: Global Date Formatter
-  const { user, baseCurrency = 'INR', selectedCryptos = [], formatGlobalDate } = useAuth();
+  const { user, baseCurrency = 'INR', selectedCryptos = [], selectedFiats = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
 
   const [incomes, setIncomes] = useState([]);
@@ -63,13 +66,17 @@ const IncomeStreams = () => {
 
   const todayDate = new Date().toISOString().split('T')[0];
 
+  const cryptoSymbols = useMemo(() => {
+    return selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
+  }, [selectedCryptos]);
+
   const [formData, setFormData] = useState({
     title: '', category: incomeCategories[0], vault: 'bank', 
-    subWallet: '', // 🚀 Added SubWallet tracking for Banks/Online Wallets
+    subWallet: '', 
     cryptoPlatform: 'Binance', asset: baseCurrency, 
     amount: '', exchangeRate: 1, date: todayDate, linkedIncomeId: '',
     isCustomSingle: false,
-    isSynced: false // 🚀 Check if entry is auto-synced
+    isSynced: false 
   });
 
   useEffect(() => {
@@ -120,14 +127,7 @@ const IncomeStreams = () => {
   
   const existingBanks = useMemo(() => Array.from(new Set(bankWalletLogs)), [bankWalletLogs]);
 
-  const activeAssetList = useMemo(() => {
-    if (formData.vault === 'crypto') {
-        return selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
-    }
-    return fiatCurrencies;
-  }, [formData.vault, selectedCryptos]);
-
-  // 🚀 UPDATED HYBRID LIVE RATE FETCHER
+  // 🚀 UPDATED HYBRID LIVE RATE FETCHER (WITH CORS FIX)
   const fetchLiveRate = async () => {
     if (formData.asset === baseCurrency) return;
     setIsFetchingRate(true);
@@ -141,7 +141,8 @@ const IncomeStreams = () => {
         const data = await res.json();
         if (data.rates[baseCurrency]) setFormData(prev => ({ ...prev, exchangeRate: data.rates[baseCurrency].toFixed(4) }));
       } else {
-        const coinObj = fullDatabase.find(c => c.symbol === formData.asset.toUpperCase()) || {};
+        const upperSym = formData.asset.toUpperCase();
+        const coinObj = fullDatabase.find(c => c.symbol === upperSym) || {};
         const searchId = coinObj.id || formData.asset.toLowerCase();
         let priceUsd = null;
 
@@ -163,9 +164,9 @@ const IncomeStreams = () => {
            } catch(e) {}
         }
 
-        if (!priceUsd) {
+        if (!priceUsd && BINANCE_SAFE_COINS.includes(upperSym)) {
             try {
-                const binanceSymbol = searchId === 'tether' ? 'BTCUSDT' : `${formData.asset.toUpperCase()}USDT`;
+                const binanceSymbol = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
                 const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`);
                 if (bRes.ok) {
                     const bData = await bRes.json();
@@ -566,15 +567,19 @@ const IncomeStreams = () => {
         ))}
       </div>
 
-      {/* MODAL */}
+      {/* 🚀 MODAL ENGINE (RE-ALIGNED FOR PROPER SIZING & SELECTION) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[500] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden border dark:border-slate-800 animate-in zoom-in-95">
-            <div className="px-8 py-5 flex justify-between items-center bg-emerald-500 text-white font-black">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden border dark:border-slate-800 animate-in zoom-in-95 flex flex-col max-h-[90dvh]">
+            
+            {/* Header */}
+            <div className="px-8 py-5 flex justify-between items-center bg-emerald-500 text-white font-black shrink-0">
               <h3 className="text-xl">{editingId ? 'EDIT INCOME ENTRY' : 'LOG INCOME'}</h3>
-              <button onClick={closeModal}><HiOutlineX size={24}/></button>
+              <button type="button" onClick={closeModal} className="p-2 hover:bg-white/20 rounded-full transition-colors"><HiOutlineX size={24}/></button>
             </div>
-            <form onSubmit={handleSaveEntry} className="p-8 space-y-6 max-h-[80vh] overflow-y-auto custom-scrollbar">
+
+            {/* Scrollable Form Body */}
+            <form onSubmit={handleSaveEntry} className="p-8 space-y-6 overflow-y-auto custom-scrollbar">
               
               {/* 🚀 WARNING FOR AUTO-SYNCED ENTRIES */}
               {formData.isSynced && (
@@ -584,29 +589,50 @@ const IncomeStreams = () => {
                  </div>
               )}
 
-              <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Title</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Title / Source Name</label>
                   <input disabled={formData.isSynced} type="text" required value={formData.title} onChange={(e)=>setFormData({...formData, title:e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-60"/>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Category</label>
-                  <select disabled={formData.isSynced} value={formData.category} onChange={(e)=>setFormData({...formData, category:e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer appearance-none disabled:opacity-60">
-                    {incomeCategories.map(c=><option key={c} value={c}>{c}</option>)}
-                  </select>
+                  <div className="relative">
+                    <select disabled={formData.isSynced} value={formData.category} onChange={(e)=>setFormData({...formData, category:e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer appearance-none disabled:opacity-60">
+                      {incomeCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
+                  </div>
                 </div>
               </div>
 
+              {/* 🚀 VAULT LOGIC ENGINE - FIXED FOR CRYPTO SELECTION */}
               <div className="p-5 bg-emerald-50/30 dark:bg-emerald-500/5 rounded-3xl border border-emerald-100 dark:border-emerald-500/10 space-y-6">
+                 
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Vault</label>
-                      <select value={formData.vault} onChange={(e)=>setFormData({...formData, vault:e.target.value, asset: e.target.value === 'crypto' ? activeAssetList[0] : baseCurrency, subWallet: ''})} className="w-full p-4 bg-white dark:bg-slate-900 border dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer">
-                        {['bank','online','cash','crypto'].map(v=><option key={v} value={v}>{v.toUpperCase()}</option>)}
-                      </select>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Vault / Storage</label>
+                      <div className="relative">
+                        <select value={formData.vault} onChange={(e) => {
+                            const v = e.target.value;
+                            const cList = cryptoSymbols.length > 0 ? cryptoSymbols : ['BTC'];
+                            setFormData({
+                                ...formData, 
+                                vault: v, 
+                                asset: v === 'crypto' ? cList[0] : baseCurrency, 
+                                subWallet: '',
+                                exchangeRate: 1
+                            });
+                        }} className="w-full p-4 bg-white dark:bg-slate-900 border dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer appearance-none">
+                          <option value="bank">Bank Account</option>
+                          <option value="online">Online E-Wallet</option>
+                          <option value="cash">Physical Cash</option>
+                          <option value="crypto" className="font-black text-emerald-500">Crypto Engine</option>
+                        </select>
+                        <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
+                      </div>
                     </div>
 
-                    {/* 🚀 ADDED SUB-WALLET INPUT */}
+                    {/* FIAT SUB-WALLET */}
                     {(formData.vault === 'bank' || formData.vault === 'online') && (
                       <div className="space-y-2 animate-in fade-in">
                         <label className="text-[11px] font-black text-blue-500 uppercase tracking-widest ml-1">{formData.vault === 'bank' ? 'Bank Name' : 'Wallet Name'}</label>
@@ -617,7 +643,8 @@ const IncomeStreams = () => {
                       </div>
                     )}
 
-                    {formData.vault === 'crypto' ? (
+                    {/* CRYPTO PLATFORM */}
+                    {formData.vault === 'crypto' && (
                       <div className="space-y-2 animate-in fade-in">
                         <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Platform</label>
                         {formData.isCustomSingle ? (
@@ -626,32 +653,65 @@ const IncomeStreams = () => {
                             <button type="button" onClick={()=>{setFormData({...formData, isCustomSingle: false, cryptoPlatform: cryptoPlatformsList[12]});}} className="px-4 bg-slate-100 dark:bg-slate-800 rounded-2xl text-slate-500"><HiOutlineX size={20}/></button>
                           </div>
                         ) : (
-                          <select value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} onChange={(e) => { if(e.target.value === 'CUSTOM'){ setFormData({...formData, isCustomSingle: true, cryptoPlatform: ''}); } else { setFormData({...formData, cryptoPlatform: e.target.value}); } }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer">
-                            {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
-                            <option value="CUSTOM" className="font-black text-orange-500">✨ + Custom</option>
-                          </select>
+                          <div className="relative">
+                            <select value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} onChange={(e) => { if(e.target.value === 'CUSTOM'){ setFormData({...formData, isCustomSingle: true, cryptoPlatform: ''}); } else { setFormData({...formData, cryptoPlatform: e.target.value}); } }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer appearance-none">
+                              {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
+                              <option value="CUSTOM" className="font-black text-orange-500">✨ Custom Platform</option>
+                            </select>
+                            <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
+                          </div>
                         )}
                       </div>
-                    ) : (
+                    )}
+
+                    {/* FIAT CURRENCY */}
+                    {formData.vault !== 'crypto' && (
                       <div className="space-y-2">
                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Asset Currency</label>
-                        <select disabled={formData.isSynced} value={formData.asset} onChange={(e)=>setFormData({...formData, asset:e.target.value})} className="w-full p-4 bg-white dark:bg-slate-900 border dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer disabled:opacity-60">
-                          {activeAssetList.map(a=><option key={a} value={a}>{a}</option>)}
-                        </select>
+                        <div className="relative">
+                          <select disabled={formData.isSynced} value={formData.asset} onChange={(e)=>setFormData({...formData, asset:e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})} className="w-full p-4 bg-white dark:bg-slate-900 border dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer appearance-none disabled:opacity-60">
+                            <option value={baseCurrency}>{baseCurrency} (Base)</option>
+                            {selectedFiats.filter(c => c !== baseCurrency).map(a => <option key={a} value={a}>{a}</option>)}
+                          </select>
+                          <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
+                        </div>
                       </div>
                     )}
                  </div>
+
+                 {/* 🚀 CRYPTO COIN SELECTION FIX */}
+                 {formData.vault === 'crypto' && (
+                    <div className="space-y-2 animate-in fade-in">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Crypto Asset</label>
+                      <div className="relative">
+                        <select disabled={formData.isSynced} value={formData.asset} onChange={(e)=>setFormData({...formData, asset:e.target.value, exchangeRate: 1})} className="w-full p-4 bg-white dark:bg-slate-900 border dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer appearance-none disabled:opacity-60">
+                          {cryptoSymbols.map(a=><option key={a} value={a}>{a}</option>)}
+                        </select>
+                        <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
+                      </div>
+                    </div>
+                 )}
               </div>
 
+              {/* AMOUNT ENTRY */}
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Amount</label>
-                <input disabled={formData.isSynced} type="number" step="any" required value={formData.amount} onChange={(e)=>setFormData({...formData, amount:e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 rounded-2xl font-black text-2xl text-emerald-600 outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-60"/>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Quantity Received</label>
+                <div className="relative">
+                  <input disabled={formData.isSynced} type="number" step="any" required value={formData.amount} onChange={(e)=>setFormData({...formData, amount:e.target.value})} placeholder="0.00" className="w-full p-4 bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 rounded-2xl font-black text-2xl text-emerald-600 outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-60 text-center tracking-widest"/>
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-slate-400">{formData.asset}</span>
+                </div>
               </div>
 
+              {/* RATE SYNCING */}
               {isForeign && (
                 <div className={`p-4 bg-blue-50 dark:bg-blue-500/5 rounded-2xl border dark:border-blue-500/10 flex items-center justify-between ${formData.isSynced ? 'opacity-60' : ''}`}>
-                   <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">1 {formData.asset} = <span className="text-blue-500 text-sm ml-2">{formData.exchangeRate} {baseCurrency}</span></div>
-                   <button type="button" onClick={fetchLiveRate} disabled={isFetchingRate || formData.isSynced} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-50">{isFetchingRate ? 'FETCHING...' : 'GET LIVE RATE'}</button>
+                   <div className="flex items-center gap-2">
+                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Rate:</span>
+                     <input disabled={formData.isSynced} type="number" step="any" required value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} placeholder={`in ${baseCurrency}`} className="w-24 p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg font-bold dark:text-white outline-none focus:border-blue-400 text-xs" />
+                   </div>
+                   <button type="button" onClick={fetchLiveRate} disabled={isFetchingRate || formData.isSynced} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center gap-1 transition-colors">
+                     <HiOutlineRefresh className={isFetchingRate ? 'animate-spin' : ''} /> {isFetchingRate ? 'FETCHING' : 'LIVE RATE'}
+                   </button>
                 </div>
               )}
 
@@ -659,19 +719,25 @@ const IncomeStreams = () => {
               <div className="flex justify-between items-center p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700">
                  <div className="flex flex-col">
                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Date</label>
-                   <input disabled={formData.isSynced} type="date" required value={formData.date} onChange={(e)=>setFormData({...formData, date:e.target.value})} className="bg-transparent font-black dark:text-white outline-none cursor-pointer disabled:opacity-60"/>
-                   <span className="text-[10px] font-bold text-emerald-500 mt-1 ml-1">{formatGlobalDate ? formatGlobalDate(formData.date, 'full') : ''}</span>
+                   <input disabled={formData.isSynced} type="date" required value={formData.date} onChange={(e)=>setFormData({...formData, date:e.target.value})} className="bg-transparent font-black dark:text-white outline-none cursor-pointer disabled:opacity-60 pl-1"/>
+                   <span className="text-[10px] font-bold text-emerald-500 mt-1 ml-1">{formatGlobalDate ? formatGlobalDate(formData.date, 'short') : ''}</span>
                  </div>
-                 <div className="text-right">
-                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Final addition</p>
+                 <div className="w-px h-10 bg-slate-200 dark:bg-slate-700"></div>
+                 <div className="text-right pl-2">
+                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Final Fiat Impact</p>
                    <p className="text-2xl font-black text-emerald-500 tracking-tight">{currencySymbol}{finalBaseAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
                  </div>
               </div>
 
-              <button type="submit" disabled={isSaving} className="w-full p-5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-[2rem] font-black text-lg shadow-xl shadow-emerald-500/20 active:scale-95 transition-all">
-                {isSaving ? 'SYNCING...' : 'CONFIRM LOG'}
-              </button>
+              {/* SUBMIT BUTTON */}
+              <div className="pt-2">
+                <button type="submit" disabled={isSaving} className="w-full p-5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-[2rem] font-black text-lg shadow-xl shadow-emerald-500/20 active:scale-95 transition-all flex justify-center items-center gap-2">
+                  {isSaving ? <HiOutlineRefresh className="animate-spin text-2xl" /> : null}
+                  {isSaving ? 'SYNCING...' : (editingId ? 'UPDATE RECORD' : 'CONFIRM INCOME')}
+                </button>
+              </div>
             </form>
+
           </div>
         </div>
       )}
