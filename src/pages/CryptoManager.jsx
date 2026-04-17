@@ -134,7 +134,7 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, confirm
 };
 
 // ============================================
-// 🚀 UTILITY FUNCTIONS (Preserved)
+// 🚀 UTILITY FUNCTIONS
 // ============================================
 
 const sanitizeInput = (input) => {
@@ -305,14 +305,17 @@ const getExplorerUrl = (network, address) => {
 
 const LogoRenderer = ({ symbol, customLogo, bg, color }) => {
   const [hasError, setHasError] = useState(false);
-  const [imgSrc, setImgSrc] = useState(customLogo);
+  // ⚡ FIXED: Properly managing imgSrc to avoid loops and ensure user URL passes through
+  const [imgSrc, setImgSrc] = useState(customLogo || '');
   const [isLoaded, setIsLoaded] = useState(false);
   const symbolUpper = (symbol || '').toUpperCase();
 
   useEffect(() => {
-    setImgSrc(customLogo);
-    setHasError(false);
-    setIsLoaded(false);
+    if (customLogo) {
+      setImgSrc(customLogo);
+      setHasError(false);
+      setIsLoaded(false);
+    }
   }, [customLogo]);
 
   if (!imgSrc || hasError) {
@@ -331,12 +334,13 @@ const LogoRenderer = ({ symbol, customLogo, bg, color }) => {
       <img 
         src={imgSrc} 
         alt={symbolUpper} 
-        className={`w-full h-full object-contain rounded-full relative z-10 bg-white dark:bg-slate-800 border-2 border-white/20 dark:border-slate-700 shadow-md p-[2px] transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
+        className={`w-full h-full object-contain rounded-full relative z-10 bg-transparent border-2 border-white/20 dark:border-slate-700 shadow-md p-[2px] transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
         loading="lazy" 
         onLoad={() => setIsLoaded(true)}
         onError={() => {
-          if (imgSrc === customLogo) setImgSrc(generateSolanaLogoUrl(null, symbolUpper));
-          else setHasError(true);
+          // If custom logo fails, use ui-avatars generation
+          setImgSrc(generateSolanaLogoUrl(null, symbolUpper));
+          setHasError(true);
         }} 
       />
     </div>
@@ -379,7 +383,7 @@ const RateLimitBanner = ({ onDismiss }) => {
           <HiOutlineExclamation className="text-amber-600 dark:text-amber-400 w-5 h-5" />
         </div>
         <div className="flex-1">
-          <p className="text-sm font-black text-amber-800 dark:text-amber-200">API Rate Limit</p>
+          <p className="text-sm font-bold text-amber-800 dark:text-amber-200">API Rate Limit</p>
           <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">Using cached data. Retrying silently...</p>
         </div>
         <button onClick={onDismiss} className="text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 p-1">
@@ -457,13 +461,8 @@ const CryptoManagerContent = () => {
     apiId: '', network: 'solana', contractAddress: '', symbol: '', name: '', fallbackPrice: '', logoUrl: ''
   });
 
-  // Premium: Confirmation modal state
   const [confirmModal, setConfirmModal] = useState({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: () => {},
-    type: 'warning'
+    isOpen: false, title: '', message: '', onConfirm: () => {}, type: 'warning'
   });
 
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -472,7 +471,6 @@ const CryptoManagerContent = () => {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -884,7 +882,6 @@ const CryptoManagerContent = () => {
             <div className="w-14 h-14 bg-gradient-to-br from-blue-500/20 to-cyan-500/20 text-blue-400 rounded-2xl flex items-center justify-center mb-4 ring-1 ring-blue-500/30 shadow-[inset_0_0_20px_rgba(59,130,246,0.2)] transition-all hover:scale-105 duration-300">
               <FaBitcoin size={32} />
             </div>
-            {/* 🚀 FIXED: Removed bg-clip-text which was breaking on mobile browsers */}
             <h1 className="text-4xl font-black text-white tracking-tight mb-2">Portfolio Manager</h1>
             <p className="text-sm font-semibold text-slate-400 max-w-xl leading-relaxed">
               Build your personalized crypto portfolio. Track your preferred assets across Vaults, Income Streams, and AI Strategies.
@@ -1131,10 +1128,11 @@ const CryptoManagerContent = () => {
                         ))}
                       </select>
                       
+                      {/* Network hint */}
                       {newCoin.network === 'solana' && (
                         <div className="flex items-center gap-2 text-[10px] font-medium text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 p-2 rounded-lg">
                           <HiOutlineSun size={14} />
-                          <span>Solana uses mint addresses (base58, 32-44 chars)</span>
+                          <span>Solana uses mint addresses (base58 format, 32-44 chars)</span>
                         </div>
                       )}
                       
@@ -1161,6 +1159,7 @@ const CryptoManagerContent = () => {
                         </button>
                       </div>
                       
+                      {/* Explorer link */}
                       {newCoin.contractAddress && isValidAddress(newCoin.contractAddress, newCoin.network) && (
                         <a
                           href={getExplorerUrl(newCoin.network, newCoin.contractAddress)}
@@ -1173,6 +1172,7 @@ const CryptoManagerContent = () => {
                         </a>
                       )}
                       
+                      {/* Solana alternative sources */}
                       {newCoin.network === 'solana' && newCoin.contractAddress && !isFetchingData && !fetchSuccess && (
                         <div className="pt-2 border-t border-blue-200 dark:border-blue-700/50 mt-2">
                           <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mb-2">Token not found? Try alternative sources:</p>
@@ -1223,6 +1223,7 @@ const CryptoManagerContent = () => {
                     </div>
                   )}
                   
+                  {/* Status display */}
                   {fetchStatus && (
                     <p className={`text-xs font-medium flex items-center gap-1 mt-2 ${
                       fetchSuccess ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'
@@ -1233,6 +1234,7 @@ const CryptoManagerContent = () => {
                     </p>
                   )}
                   
+                  {/* Error display */}
                   {fetchError && (
                     <p className="text-xs font-medium text-amber-600 dark:text-amber-400 flex items-start gap-1 mt-2">
                       <HiOutlineExclamation className="flex-shrink-0 mt-0.5" size={14} /> 
