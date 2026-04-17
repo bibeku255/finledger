@@ -150,7 +150,7 @@ const isSafeUrl = (url) => {
   } catch { return false; }
 };
 
-// ⚡ ULTRA PRO FIX: ID Normalization Helper
+// ⚡ PRO FIX: Robust ID Normalization
 const normalizeId = (id) => String(id || '').toLowerCase().trim();
 
 let jupiterTokenMap = null;
@@ -303,7 +303,7 @@ const getExplorerUrl = (network, address) => {
 };
 
 // ============================================
-// 🚀 PREMIUM COMPONENTS
+// 🚀 COMPONENTS
 // ============================================
 
 const LogoRenderer = ({ symbol, customLogo, bg, color }) => {
@@ -490,10 +490,10 @@ const CryptoManagerContent = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAddModalOpen]);
 
-  // ⚡ ULTRA PRO FIX: Normalize Initial Selection & Filter Duplicates
+  // ⚡ PRO FIX: Normalize Initial Selection & Filter Duplicates Properly
   useEffect(() => {
     if (selectedCryptos && selectedCryptos.length > 0) {
-      const identifiers = selectedCryptos.map(c => typeof c === 'string' ? normalizeId(c) : normalizeId(c.id));
+      const identifiers = selectedCryptos.map(c => typeof c === 'string' ? normalizeId(c) : normalizeId(c.id || c.symbol));
       setActiveCoins(Array.from(new Set(identifiers.filter(Boolean))));
     } else {
       setActiveCoins([]);
@@ -536,7 +536,7 @@ const CryptoManagerContent = () => {
     return () => { isMounted = false; };
   }, []);
 
-  // ⚡ ULTRA PRO FIX: Inject missing "Ghost Coins" from selection into fullDatabase
+  // ⚡ ULTRA PRO FIX: Inject missing "Ghost Coins" from selection into fullDatabase to fix the 32 vs 30 issue
   const fullDatabase = useMemo(() => {
     const coinMap = new Map();
     
@@ -559,16 +559,27 @@ const CryptoManagerContent = () => {
       });
     });
 
-    // Inject active ghost coins missing from DB
+    // Inject active ghost coins missing from DB (Solves 32 vs 30 issue)
     selectedCryptos.forEach(c => {
-      if (typeof c === 'object' && c.id) {
-        const normalizedId = normalizeId(c.id);
-        if (!coinMap.has(normalizedId)) {
-          coinMap.set(normalizedId, {
-            id: normalizedId, symbol: (c.symbol || '').toUpperCase(), name: c.name || c.symbol, logo: c.logo || null, fallbackPrice: c.fallbackPrice || 0,
-            bg: c.bg || 'bg-slate-800', color: c.color || 'text-white', network: c.network || null, contractAddress: c.contractAddress || null
-          });
-        }
+      const isString = typeof c === 'string';
+      const symbol = (isString ? c : c.symbol || '').toUpperCase();
+      const rawId = isString ? c : (c.id || symbol);
+      
+      if (!rawId) return;
+      
+      const normalizedId = normalizeId(rawId);
+      if (!coinMap.has(normalizedId)) {
+        coinMap.set(normalizedId, {
+          id: normalizedId, 
+          symbol: symbol, 
+          name: isString ? symbol : (c.name || symbol), 
+          logo: isString ? null : c.logo, 
+          fallbackPrice: isString ? 0 : (c.fallbackPrice || 0),
+          bg: isString ? 'bg-slate-800' : (c.bg || 'bg-slate-800'), 
+          color: isString ? 'text-white' : (c.color || 'text-white'), 
+          network: isString ? null : c.network, 
+          contractAddress: isString ? null : c.contractAddress
+        });
       }
     });
 
@@ -664,12 +675,12 @@ const CryptoManagerContent = () => {
         if (!searchId) { setFetchError("Enter CoinGecko ID"); setIsFetchingData(false); setFetchStatus(''); return; }
 
         if (searchId === 'rox' || searchId === 'robox') {
-          setNewCoin(prev => ({...prev, symbol: 'ROX', name: 'Robox', fallbackPrice: 0, logoUrl: null, apiId: 'robox-solana'}));
+          setNewCoin(prev => ({...prev, symbol: 'ROX', name: 'Robox (NC Wallet)', fallbackPrice: 1.00, logoUrl: 'https://assets.geckoterminal.com/vdl79ryhkyksbnrtp11hqrpuwmyu', apiId: 'rox'}));
           setFetchError(null); setFetchSuccess(true); setFetchStatus('✓ Verified Asset'); setIsFetchingData(false); return;
         }
         
         if (searchId === 'ctc' || searchId === 'cryptotab') {
-          setNewCoin(prev => ({...prev, symbol: 'CTC', name: 'CryptoTab Coin', fallbackPrice: 1.00, logoUrl: 'https://assets.coingecko.com/coins/images/11105/large/Creditcoin_logo.png', apiId: 'cryptotab-coin'}));
+          setNewCoin(prev => ({...prev, symbol: 'CTC', name: 'CryptoTab Coin', fallbackPrice: 1.00, logoUrl: 'https://assets.coingecko.com/coins/images/11105/large/Creditcoin_logo.png', apiId: 'ctc'}));
           setFetchError(null); setFetchSuccess(true); setFetchStatus('✓ Verified Asset'); setIsFetchingData(false); return;
         }
         
@@ -702,7 +713,7 @@ const CryptoManagerContent = () => {
         if (!address || !currentNetwork) { setFetchError("Enter Network and Address"); setIsFetchingData(false); setFetchStatus(''); return; }
 
         if (currentNetwork === 'solana' && address.startsWith('Rox')) {
-          setNewCoin(prev => ({...prev, symbol: 'ROX', name: 'Robox', fallbackPrice: 0, logoUrl: null, apiId: 'robox-solana'}));
+          setNewCoin(prev => ({...prev, symbol: 'ROX', name: 'Robox (NC Wallet)', fallbackPrice: 1.00, logoUrl: 'https://assets.geckoterminal.com/vdl79ryhkyksbnrtp11hqrpuwmyu', apiId: 'rox'}));
           setFetchError(null); setFetchSuccess(true); setFetchStatus('✓ Verified Asset'); setIsFetchingData(false); return;
         }
         
