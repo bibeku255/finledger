@@ -150,6 +150,9 @@ const isSafeUrl = (url) => {
   } catch { return false; }
 };
 
+// ⚡ ULTRA PRO FIX: ID Normalization Helper (Ensures consistent matching)
+const normalizeId = (id) => String(id || '').toLowerCase().trim();
+
 let jupiterTokenMap = null;
 
 const getCache = (key) => {
@@ -305,7 +308,6 @@ const getExplorerUrl = (network, address) => {
 
 const LogoRenderer = ({ symbol, customLogo, bg, color }) => {
   const [hasError, setHasError] = useState(false);
-  // ⚡ FIXED: Properly managing imgSrc to avoid loops and ensure user URL passes through
   const [imgSrc, setImgSrc] = useState(customLogo || '');
   const [isLoaded, setIsLoaded] = useState(false);
   const symbolUpper = (symbol || '').toUpperCase();
@@ -338,7 +340,6 @@ const LogoRenderer = ({ symbol, customLogo, bg, color }) => {
         loading="lazy" 
         onLoad={() => setIsLoaded(true)}
         onError={() => {
-          // If custom logo fails, use ui-avatars generation
           setImgSrc(generateSolanaLogoUrl(null, symbolUpper));
           setHasError(true);
         }} 
@@ -441,7 +442,7 @@ const CryptoManagerContent = () => {
   const [activeCoins, setActiveCoins] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true); // Start true to prevent flash
 
   const [top250Coins, setTop250Coins] = useState([]);
   const [customUserCoins, setCustomUserCoins] = useState([]);
@@ -471,6 +472,7 @@ const CryptoManagerContent = () => {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -489,38 +491,51 @@ const CryptoManagerContent = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAddModalOpen]);
 
+  // ⚡ ULTRA PRO FIX: Normalize Initial Selection
   useEffect(() => {
     if (selectedCryptos && selectedCryptos.length > 0) {
-      const identifiers = selectedCryptos.map(c => typeof c === 'string' ? c.toLowerCase() : c.id);
+      const identifiers = selectedCryptos.map(c => typeof c === 'string' ? normalizeId(c) : normalizeId(c.id));
       setActiveCoins(identifiers.filter(Boolean));
     } else {
       setActiveCoins([]);
     }
   }, [selectedCryptos]);
 
+  // ⚡ ULTRA PRO FIX: Memory Leak Prevention & Loading State
   useEffect(() => {
     let isMounted = true;
     const fetchUserData = async () => {
-      if (!user) { if (isMounted) setIsLoading(false); return; }
+      if (!user) { 
+        if (isMounted) setIsLoading(false); 
+        return; 
+      }
       try {
         const userSnap = await getDoc(doc(db, "users", user.uid));
         if (userSnap.exists() && isMounted) {
           const data = userSnap.data();
-          if (data.hiddenTokens) setHiddenTokens(data.hiddenTokens);
-          if (data.customCoins) setCustomUserCoins(data.customCoins);
+          setHiddenTokens(data.hiddenTokens || []);
+          setCustomUserCoins(data.customCoins || []);
         }
-      } catch (err) { console.error(err); } finally { if (isMounted) setIsLoading(false); }
+      } catch (err) { 
+        console.error(err); 
+      } finally { 
+        if (isMounted) setIsLoading(false); 
+      }
     };
     fetchUserData();
     return () => { isMounted = false; };
   }, [user]);
 
+  // ⚡ ULTRA PRO FIX: Top 250 Fetch Loading Safety
   useEffect(() => {
     let isMounted = true;
     const fetchTop250 = async () => {
       try {
         const cachedData = getCache('finledger_top_coins');
-        if (cachedData) { if (isMounted) setTop250Coins(cachedData); return; }
+        if (cachedData) { 
+          if (isMounted) setTop250Coins(cachedData); 
+          return; // Skip fetch if cached
+        }
 
         const res = await fetchWithRetry(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=false`);
         if (res && res.ok) {
@@ -528,25 +543,31 @@ const CryptoManagerContent = () => {
           if (isMounted) setTop250Coins(data);
           setCache('finledger_top_coins', data, 60);
         }
-      } catch (err) { console.error(err); }
+      } catch (err) { 
+        console.error(err); 
+      }
     };
     fetchTop250();
     return () => { isMounted = false; };
   }, []);
 
+  // ⚡ ULTRA PRO FIX: Defensive ID mapping
   const fullDatabase = useMemo(() => {
     const coinMap = new Map();
+    
     top250Coins.forEach(c => {
-      coinMap.set(c.id, {
-        id: c.id, symbol: c.symbol.toUpperCase(), name: c.name, logo: c.image, fallbackPrice: c.current_price,
+      if (!c?.id) return;
+      const normalizedId = normalizeId(c.id);
+      coinMap.set(normalizedId, {
+        id: normalizedId, symbol: c.symbol.toUpperCase(), name: c.name, logo: c.image, fallbackPrice: c.current_price,
         bg: 'bg-gradient-to-br from-slate-700 to-slate-800', color: 'text-white', network: null, contractAddress: null
       });
     });
 
     customUserCoins.forEach(c => {
-      const key = c.id || (c.contractAddress ? `${c.network}-${c.contractAddress}` : c.symbol.toUpperCase());
-      coinMap.set(key, { 
-        id: c.id || `custom-${c.symbol.toLowerCase()}-${c.contractAddress?.slice(0,6) || 'tkn'}`, 
+      const normalizedId = normalizeId(c.id || c.symbol);
+      coinMap.set(normalizedId, { 
+        id: normalizedId, 
         symbol: c.symbol.toUpperCase(), name: c.name || c.symbol, logo: c.logo || null, fallbackPrice: c.fallbackPrice || 0,
         bg: c.bg || 'bg-gradient-to-br from-purple-500/20 to-pink-500/20', color: c.color || 'text-purple-500', 
         network: c.network || null, contractAddress: c.contractAddress || null
@@ -556,53 +577,72 @@ const CryptoManagerContent = () => {
     return Array.from(coinMap.values());
   }, [top250Coins, customUserCoins]);
 
-  const coinLookupMap = useMemo(() => {
-    const map = new Map();
-    fullDatabase.forEach(c => map.set(c.id, c));
-    return map;
-  }, [fullDatabase]);
-
+  // ⚡ ULTRA PRO FIX: O(1) Sets and Single-Pass Filtering
   const { displaySelected, displayAvailable } = useMemo(() => {
-    let baseList = fullDatabase.filter(c => !hiddenTokens.includes(String(c.id)));
+    const activeSet = new Set(activeCoins);
+    const hiddenSet = new Set(hiddenTokens.map(normalizeId));
     const query = debouncedSearch.toLowerCase();
     
-    if (query) {
-      baseList = baseList.filter(c => c.name.toLowerCase().includes(query) || c.symbol.toLowerCase().includes(query));
+    const selected = [];
+    const available = [];
+
+    // Single pass through the entire database
+    for (const coin of fullDatabase) {
+      if (hiddenSet.has(coin.id)) continue;
+
+      if (query && !coin.name.toLowerCase().includes(query) && !coin.symbol.toLowerCase().includes(query)) {
+        continue;
+      }
+
+      if (activeSet.has(coin.id)) {
+        selected.push(coin);
+      } else {
+        available.push(coin);
+      }
     }
 
-    return {
-      displaySelected: baseList.filter(c => activeCoins.includes(c.id)),
-      displayAvailable: baseList.filter(c => !activeCoins.includes(c.id))
-    };
+    return { displaySelected: selected, displayAvailable: available };
   }, [fullDatabase, debouncedSearch, hiddenTokens, activeCoins]);
 
   const currentListToDisplay = activeTab === 'selected' ? displaySelected : displayAvailable;
 
   const toggleCoin = (identifier) => {
+    const normId = normalizeId(identifier);
     setActiveCoins((prev) => {
-      const newSelection = prev.includes(identifier) ? prev.filter(c => c !== identifier) : [...prev, identifier];
-      const coin = coinLookupMap.get(identifier);
-      if (coin && !prev.includes(identifier)) {
-        addToast(`Added ${coin.symbol} to portfolio`, 'success', 2000);
+      if (prev.includes(normId)) {
+        return prev.filter(c => c !== normId);
+      } else {
+        // Prevent spam toasts
+        const coin = fullDatabase.find(c => c.id === normId);
+        if (coin) addToast(`Added ${coin.symbol} to portfolio`, 'success', 2000);
+        return [...prev, normId];
       }
-      return newSelection;
     });
   };
 
   const handleSave = async () => {
     setIsSaving(true);
     const enrichedSelection = activeCoins.map(identifier => {
-      const coinData = coinLookupMap.get(identifier) || {};
+      const normId = normalizeId(identifier);
+      const coinData = fullDatabase.find(c => c.id === normId) || {};
       return {
-        symbol: coinData.symbol || identifier.toUpperCase(), id: coinData.id || identifier.toLowerCase(),
-        name: coinData.name || coinData.symbol || identifier, logo: coinData.logo || null, fallbackPrice: coinData.fallbackPrice || 0,
-        bg: coinData.bg || 'bg-slate-800', color: coinData.color || 'text-white', network: coinData.network || null, contractAddress: coinData.contractAddress || null
+        symbol: coinData.symbol || identifier.toUpperCase(), 
+        id: normId,
+        name: coinData.name || coinData.symbol || identifier, 
+        logo: coinData.logo || null, 
+        fallbackPrice: coinData.fallbackPrice || 0,
+        bg: coinData.bg || 'bg-slate-800', 
+        color: coinData.color || 'text-white', 
+        network: coinData.network || null, 
+        contractAddress: coinData.contractAddress || null
       };
     });
 
     if (updateSelectedCryptos) await updateSelectedCryptos(enrichedSelection);
     addToast(`Portfolio synced with ${activeCoins.length} asset${activeCoins.length !== 1 ? 's' : ''}`, 'success');
-    setTimeout(() => { setIsSaving(false); navigate('/dashboard'); }, 500);
+    // ⚡ UX FIX: No artificial delay
+    setIsSaving(false);
+    navigate('/dashboard');
   };
 
   const handleEditClick = (e, coin) => {
@@ -778,11 +818,9 @@ const CryptoManagerContent = () => {
 
     let finalNetwork = null;
     let finalContract = null;
-    let finalApiId = newCoin.apiId || `cg-${safeSymbol.toLowerCase()}`;
+    let finalApiId = newCoin.apiId ? sanitizeInput(newCoin.apiId).toLowerCase() : `cg-${safeSymbol.toLowerCase()}`;
 
-    if (fetchMode === 'id') {
-      finalApiId = sanitizeInput(newCoin.apiId).toLowerCase() || finalApiId;
-    } else if (fetchMode === 'contract') {
+    if (fetchMode === 'contract') {
       const rawContract = sanitizeInput(newCoin.contractAddress);
       if (rawContract) {
         if (!isValidAddress(rawContract, newCoin.network)) {
@@ -790,14 +828,16 @@ const CryptoManagerContent = () => {
           return;
         }
         finalContract = rawContract; finalNetwork = newCoin.network;
-        finalApiId = `${finalNetwork}-${finalContract}`;
+        finalApiId = normalizeId(`${finalNetwork}-${finalContract}`);
       }
     }
+
+    finalApiId = normalizeId(finalApiId);
 
     const newCoinObj = { id: finalApiId, symbol: safeSymbol, name: safeName, fallbackPrice: fallbackVal, logo: safeLogoUrl !== '' ? safeLogoUrl : null, color: 'text-purple-500', bg: 'bg-gradient-to-br from-purple-500/20 to-pink-500/20', network: finalNetwork, contractAddress: finalContract, fetchMode: fetchMode };
 
     try {
-      const updated = customUserCoins.filter(c => c.id !== finalApiId);
+      const updated = customUserCoins.filter(c => normalizeId(c.id) !== finalApiId);
       updated.push(newCoinObj);
       await setDoc(doc(db, "users", user.uid), { customCoins: updated }, { merge: true });
       setCustomUserCoins(updated);
@@ -819,17 +859,18 @@ const CryptoManagerContent = () => {
       type: 'danger',
       onConfirm: async () => {
         try {
-          const isCustom = customUserCoins.find(c => c.id === coin.id);
+          const normId = normalizeId(coin.id);
+          const isCustom = customUserCoins.find(c => normalizeId(c.id) === normId);
           if (isCustom) {
-            const remainingCustoms = customUserCoins.filter(c => c.id !== coin.id);
+            const remainingCustoms = customUserCoins.filter(c => normalizeId(c.id) !== normId);
             await setDoc(doc(db, "users", user.uid), { customCoins: remainingCustoms }, { merge: true });
             setCustomUserCoins(remainingCustoms);
           } else {
-            const newHidden = Array.from(new Set([...hiddenTokens, String(coin.id)]));
+            const newHidden = Array.from(new Set([...hiddenTokens.map(normalizeId), normId]));
             await setDoc(doc(db, "users", user.uid), { hiddenTokens: newHidden }, { merge: true });
             setHiddenTokens(newHidden);
           }
-          setActiveCoins(prev => prev.filter(identifier => identifier !== coin.id));
+          setActiveCoins(prev => prev.filter(identifier => identifier !== normId));
           addToast(`${coin.symbol} removed from portfolio`, 'info');
         } catch (error) {
           addToast("Failed to remove token", 'error');
