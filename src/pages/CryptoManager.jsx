@@ -150,7 +150,7 @@ const isSafeUrl = (url) => {
   } catch { return false; }
 };
 
-// ⚡ ULTRA PRO FIX: ID Normalization Helper (Ensures consistent matching)
+// ⚡ ULTRA PRO FIX: ID Normalization Helper
 const normalizeId = (id) => String(id || '').toLowerCase().trim();
 
 let jupiterTokenMap = null;
@@ -442,7 +442,7 @@ const CryptoManagerContent = () => {
   const [activeCoins, setActiveCoins] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [isLoading, setIsLoading] = useState(true); // Start true to prevent flash
+  const [isLoading, setIsLoading] = useState(true);
 
   const [top250Coins, setTop250Coins] = useState([]);
   const [customUserCoins, setCustomUserCoins] = useState([]);
@@ -472,7 +472,6 @@ const CryptoManagerContent = () => {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -491,51 +490,39 @@ const CryptoManagerContent = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAddModalOpen]);
 
-  // ⚡ ULTRA PRO FIX: Normalize Initial Selection
+  // ⚡ ULTRA PRO FIX: Normalize Initial Selection & Filter Duplicates
   useEffect(() => {
     if (selectedCryptos && selectedCryptos.length > 0) {
       const identifiers = selectedCryptos.map(c => typeof c === 'string' ? normalizeId(c) : normalizeId(c.id));
-      setActiveCoins(identifiers.filter(Boolean));
+      setActiveCoins(Array.from(new Set(identifiers.filter(Boolean))));
     } else {
       setActiveCoins([]);
     }
   }, [selectedCryptos]);
 
-  // ⚡ ULTRA PRO FIX: Memory Leak Prevention & Loading State
   useEffect(() => {
     let isMounted = true;
     const fetchUserData = async () => {
-      if (!user) { 
-        if (isMounted) setIsLoading(false); 
-        return; 
-      }
+      if (!user) { if (isMounted) setIsLoading(false); return; }
       try {
         const userSnap = await getDoc(doc(db, "users", user.uid));
         if (userSnap.exists() && isMounted) {
           const data = userSnap.data();
-          setHiddenTokens(data.hiddenTokens || []);
-          setCustomUserCoins(data.customCoins || []);
+          if (data.hiddenTokens) setHiddenTokens(data.hiddenTokens);
+          if (data.customCoins) setCustomUserCoins(data.customCoins);
         }
-      } catch (err) { 
-        console.error(err); 
-      } finally { 
-        if (isMounted) setIsLoading(false); 
-      }
+      } catch (err) { console.error(err); } finally { if (isMounted) setIsLoading(false); }
     };
     fetchUserData();
     return () => { isMounted = false; };
   }, [user]);
 
-  // ⚡ ULTRA PRO FIX: Top 250 Fetch Loading Safety
   useEffect(() => {
     let isMounted = true;
     const fetchTop250 = async () => {
       try {
         const cachedData = getCache('finledger_top_coins');
-        if (cachedData) { 
-          if (isMounted) setTop250Coins(cachedData); 
-          return; // Skip fetch if cached
-        }
+        if (cachedData) { if (isMounted) setTop250Coins(cachedData); return; }
 
         const res = await fetchWithRetry(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=false`);
         if (res && res.ok) {
@@ -543,15 +530,13 @@ const CryptoManagerContent = () => {
           if (isMounted) setTop250Coins(data);
           setCache('finledger_top_coins', data, 60);
         }
-      } catch (err) { 
-        console.error(err); 
-      }
+      } catch (err) { console.error(err); }
     };
     fetchTop250();
     return () => { isMounted = false; };
   }, []);
 
-  // ⚡ ULTRA PRO FIX: Defensive ID mapping
+  // ⚡ ULTRA PRO FIX: Inject missing "Ghost Coins" from selection into fullDatabase
   const fullDatabase = useMemo(() => {
     const coinMap = new Map();
     
@@ -574,10 +559,28 @@ const CryptoManagerContent = () => {
       });
     });
 
-    return Array.from(coinMap.values());
-  }, [top250Coins, customUserCoins]);
+    // Inject active ghost coins missing from DB
+    selectedCryptos.forEach(c => {
+      if (typeof c === 'object' && c.id) {
+        const normalizedId = normalizeId(c.id);
+        if (!coinMap.has(normalizedId)) {
+          coinMap.set(normalizedId, {
+            id: normalizedId, symbol: (c.symbol || '').toUpperCase(), name: c.name || c.symbol, logo: c.logo || null, fallbackPrice: c.fallbackPrice || 0,
+            bg: c.bg || 'bg-slate-800', color: c.color || 'text-white', network: c.network || null, contractAddress: c.contractAddress || null
+          });
+        }
+      }
+    });
 
-  // ⚡ ULTRA PRO FIX: O(1) Sets and Single-Pass Filtering
+    return Array.from(coinMap.values());
+  }, [top250Coins, customUserCoins, selectedCryptos]);
+
+  const coinLookupMap = useMemo(() => {
+    const map = new Map();
+    fullDatabase.forEach(c => map.set(c.id, c));
+    return map;
+  }, [fullDatabase]);
+
   const { displaySelected, displayAvailable } = useMemo(() => {
     const activeSet = new Set(activeCoins);
     const hiddenSet = new Set(hiddenTokens.map(normalizeId));
@@ -586,7 +589,6 @@ const CryptoManagerContent = () => {
     const selected = [];
     const available = [];
 
-    // Single pass through the entire database
     for (const coin of fullDatabase) {
       if (hiddenSet.has(coin.id)) continue;
 
@@ -609,14 +611,13 @@ const CryptoManagerContent = () => {
   const toggleCoin = (identifier) => {
     const normId = normalizeId(identifier);
     setActiveCoins((prev) => {
-      if (prev.includes(normId)) {
-        return prev.filter(c => c !== normId);
-      } else {
-        // Prevent spam toasts
-        const coin = fullDatabase.find(c => c.id === normId);
-        if (coin) addToast(`Added ${coin.symbol} to portfolio`, 'success', 2000);
-        return [...prev, normId];
+      const isRemoving = prev.includes(normId);
+      const newSelection = isRemoving ? prev.filter(c => c !== normId) : [...prev, normId];
+      const coin = coinLookupMap.get(normId);
+      if (coin && !isRemoving) {
+        addToast(`Added ${coin.symbol} to portfolio`, 'success', 2000);
       }
+      return newSelection;
     });
   };
 
@@ -624,25 +625,18 @@ const CryptoManagerContent = () => {
     setIsSaving(true);
     const enrichedSelection = activeCoins.map(identifier => {
       const normId = normalizeId(identifier);
-      const coinData = fullDatabase.find(c => c.id === normId) || {};
+      const coinData = coinLookupMap.get(normId) || {};
       return {
-        symbol: coinData.symbol || identifier.toUpperCase(), 
-        id: normId,
-        name: coinData.name || coinData.symbol || identifier, 
-        logo: coinData.logo || null, 
-        fallbackPrice: coinData.fallbackPrice || 0,
-        bg: coinData.bg || 'bg-slate-800', 
-        color: coinData.color || 'text-white', 
-        network: coinData.network || null, 
-        contractAddress: coinData.contractAddress || null
+        symbol: coinData.symbol || identifier.toUpperCase(), id: normId,
+        name: coinData.name || coinData.symbol || identifier, logo: coinData.logo || null, fallbackPrice: coinData.fallbackPrice || 0,
+        bg: coinData.bg || 'bg-slate-800', color: coinData.color || 'text-white', network: coinData.network || null, contractAddress: coinData.contractAddress || null
       };
     });
 
     if (updateSelectedCryptos) await updateSelectedCryptos(enrichedSelection);
     addToast(`Portfolio synced with ${activeCoins.length} asset${activeCoins.length !== 1 ? 's' : ''}`, 'success');
-    // ⚡ UX FIX: No artificial delay
-    setIsSaving(false);
-    navigate('/dashboard');
+    setIsSaving(false); 
+    navigate('/dashboard'); 
   };
 
   const handleEditClick = (e, coin) => {
@@ -1072,7 +1066,7 @@ const CryptoManagerContent = () => {
                         <HiOutlinePencil size={14} />
                       </button>
                     </Tooltip>
-                    <Tooltip text="Remove Token" shortcut="⌫">
+                    <Tooltip text="Hide/Delete Token" shortcut="⌫">
                       <button 
                         onClick={(e) => { e.stopPropagation(); handleDeleteToken(coin); }} 
                         className="w-8 h-8 bg-white/90 dark:bg-slate-700/90 backdrop-blur-sm border border-slate-200 dark:border-slate-600 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/50 rounded-full shadow-sm flex items-center justify-center transition-all active:scale-90 focus:outline-none focus:ring-2 focus:ring-rose-500/50"
