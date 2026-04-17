@@ -430,9 +430,9 @@ const NewsTicker = () => {
   if (selectedCryptos.length === 0 && selectedFiats.length === 0) return null;
 
   return (
-    <div className="w-full bg-gradient-to-b from-slate-950 to-slate-900 border-b border-slate-800/50 select-none overflow-hidden sticky top-0 z-[60] shadow-xl shadow-black/20">
+    // ⚡ PRO FIX: Changed z-[60] to z-30 to prevent overlapping with sidebars/modals
+    <div className="w-full bg-gradient-to-b from-slate-950 to-slate-900 border-b border-slate-800/50 select-none overflow-hidden sticky top-0 z-30 shadow-xl shadow-black/20">
       
-      {/* 🚀 CSS Animation via Tailwind utilities extension */}
       <style>{`
         @keyframes ticker-slide {
           0% { transform: translateX(0); }
