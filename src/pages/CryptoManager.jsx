@@ -97,7 +97,7 @@ const getFallbackLogo = (symbol, network, address) => {
   const trustWalletUrl = getTrustWalletLogo(network, address);
   if (trustWalletUrl) return trustWalletUrl;
   if (network === 'solana' && address) return generateSolanaLogoUrl(address, symbol);
-  return `https://ui-avatars.com/api/?name=${symbol}&background=3B82F6&color=fff&bold=true&size=64`;
+  return `https://ui-avatars.com/api/?name=${symbol || 'TKN'}&background=3B82F6&color=fff&bold=true&size=64`;
 };
 
 const isValidAddress = (address, network) => {
@@ -168,7 +168,7 @@ const SkeletonCard = () => (
 const Tooltip = ({ children, text }) => (
   <div className="relative group/tooltip">
     {children}
-    <span className="absolute left-full ml-2 px-2 py-1 bg-slate-800 text-white text-[10px] font-bold rounded-md whitespace-nowrap opacity-0 group-hover/tooltip:opacity-100 transition-opacity pointer-events-none z-30 shadow-lg">
+    <span className="absolute left-full ml-2 px-2 py-1 bg-slate-800 dark:bg-slate-700 text-white text-[10px] font-bold rounded-md whitespace-nowrap opacity-0 group-hover/tooltip:opacity-100 transition-opacity pointer-events-none z-30 shadow-lg">
       {text}
     </span>
   </div>
@@ -205,37 +205,11 @@ const NetworkBadge = ({ network }) => {
 };
 
 // ============================================
-// 🚀 CONSTANTS & DATA
+// 🚀 CONSTANTS & DATA (CLEAN SLATE)
 // ============================================
 
-const defaultCryptoDatabase = [
-  { id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png', color: 'text-orange-500', bg: 'bg-orange-500/10' },
-  { id: 'ethereum', symbol: 'ETH', name: 'Ethereum', logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png', color: 'text-blue-500', bg: 'bg-blue-500/10' },
-  { id: 'tether', symbol: 'USDT', name: 'Tether', logo: 'https://assets.coingecko.com/coins/images/325/large/Tether.png', color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-  { id: 'binancecoin', symbol: 'BNB', name: 'BNB', logo: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png', color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
-  { id: 'solana', symbol: 'SOL', name: 'Solana', logo: 'https://assets.coingecko.com/coins/images/4128/large/solana.png', color: 'text-purple-500', bg: 'bg-purple-500/10' },
-  { id: 'usd-coin', symbol: 'USDC', name: 'USDC', logo: 'https://assets.coingecko.com/coins/images/6319/large/usdc.png', color: 'text-blue-400', bg: 'bg-blue-400/10' },
-  { id: 'ripple', symbol: 'XRP', name: 'XRP', logo: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png', color: 'text-slate-800 dark:text-white', bg: 'bg-slate-500/10' },
-  { id: 'dogecoin', symbol: 'DOGE', name: 'Dogecoin', logo: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png', color: 'text-yellow-600', bg: 'bg-yellow-600/10' },
-  { id: 'the-open-network', symbol: 'TON', name: 'Toncoin', logo: 'https://assets.coingecko.com/coins/images/17980/large/ton_symbol.png', color: 'text-blue-500', bg: 'bg-blue-500/10' },
-  { id: 'cardano', symbol: 'ADA', name: 'Cardano', logo: 'https://assets.coingecko.com/coins/images/975/large/cardano.png', color: 'text-blue-600', bg: 'bg-blue-600/10' },
-  { id: 'avalanche-2', symbol: 'AVAX', name: 'Avalanche', logo: 'https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite_Trans.png', color: 'text-red-500', bg: 'bg-red-500/10' },
-  { id: 'shiba-inu', symbol: 'SHIB', name: 'Shiba Inu', logo: 'https://assets.coingecko.com/coins/images/11939/large/shiba.png', color: 'text-orange-600', bg: 'bg-orange-600/10' },
-  { id: 'polkadot', symbol: 'DOT', name: 'Polkadot', logo: 'https://assets.coingecko.com/coins/images/12171/large/polkadot.png', color: 'text-pink-600', bg: 'bg-pink-600/10' },
-  { id: 'tron', symbol: 'TRX', name: 'TRON', logo: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png', color: 'text-red-600', bg: 'bg-red-600/10' },
-  { id: 'chainlink', symbol: 'LINK', name: 'Chainlink', logo: 'https://assets.coingecko.com/coins/images/877/large/chainlink-new-logo.png', color: 'text-blue-600', bg: 'bg-blue-600/10' },
-  { id: 'matic-network', symbol: 'MATIC', name: 'Polygon', logo: 'https://assets.coingecko.com/coins/images/4713/large/matic-token-icon.png', color: 'text-purple-600', bg: 'bg-purple-600/10' },
-  { id: 'litecoin', symbol: 'LTC', name: 'Litecoin', logo: 'https://assets.coingecko.com/coins/images/2/large/litecoin.png', color: 'text-slate-500', bg: 'bg-slate-500/10' },
-  { id: 'bitcoin-cash', symbol: 'BCH', name: 'Bitcoin Cash', logo: 'https://assets.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png', color: 'text-green-500', bg: 'bg-green-500/10' },
-  { id: 'uniswap', symbol: 'UNI', name: 'Uniswap', logo: 'https://assets.coingecko.com/coins/images/12504/large/uniswap-uni.png', color: 'text-pink-500', bg: 'bg-pink-500/10' },
-  { id: 'cosmos', symbol: 'ATOM', name: 'Cosmos', logo: 'https://assets.coingecko.com/coins/images/1481/large/cosmos_hub.png', color: 'text-slate-800 dark:text-white', bg: 'bg-slate-800/10' },
-  { id: 'monero', symbol: 'XMR', name: 'Monero', logo: 'https://assets.coingecko.com/coins/images/69/large/monero_logo.png', color: 'text-orange-500', bg: 'bg-orange-500/10' },
-  { id: 'ethereum-classic', symbol: 'ETC', name: 'Ethereum Classic', logo: 'https://assets.coingecko.com/coins/images/453/large/ethereum-classic-logo.png', color: 'text-emerald-600', bg: 'bg-emerald-600/10' },
-  { id: 'tether', symbol: 'CTC', name: 'CryptoTab Coin', logo: 'https://assets.coingecko.com/coins/images/11105/large/Creditcoin_logo.png', fallbackPrice: 1.00, color: 'text-cyan-500', bg: 'bg-cyan-500/10' },
-  { id: 'tether', symbol: 'ROX', name: 'Robox (Pegged)', logo: 'https://assets.geckoterminal.com/vdl79ryhkyksbnrtp11hqrpuwmyu', fallbackPrice: 1.00, color: 'text-orange-500', bg: 'bg-orange-500/10' },
-  { id: 'feyorra', symbol: 'FEY', name: 'Feyorra', logo: 'https://assets.coingecko.com/coins/images/13600/large/feyorra.png', fallbackPrice: 0.0091, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-  { id: 'taraxa', symbol: 'TARA', name: 'Taraxa', logo: 'https://assets.coingecko.com/coins/images/14409/large/taraxa.png', fallbackPrice: 0.0045, color: 'text-indigo-500', bg: 'bg-indigo-500/10' }
-];
+// 🔥 Default list is empty so the grid stays clean
+const defaultCryptoDatabase = [];
 
 const SUPPORTED_NETWORKS = [
   { id: 'eth', name: 'Ethereum' },
@@ -276,7 +250,7 @@ const CryptoManager = () => {
 
   const [newCoin, setNewCoin] = useState({
     apiId: '',
-    network: 'solana', // Changed default to solana for ROX user
+    network: 'solana',
     contractAddress: '',
     symbol: '',
     name: '',
@@ -299,44 +273,7 @@ const CryptoManager = () => {
     }
   }, [selectedCryptos]);
 
-  useEffect(() => {
-    const fetchTop250 = async () => {
-      try {
-        const cachedData = localStorage.getItem('finledger_top_coins');
-        const cacheTimestamp = localStorage.getItem('finledger_top_coins_timestamp');
-        
-        if (cachedData && cacheTimestamp && (Date.now() - parseInt(cacheTimestamp)) < 43200000) {
-          setTop250Coins(JSON.parse(cachedData));
-          setIsLoading(false);
-          return;
-        }
-
-        const res = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=false`);
-        
-        if (res.status === 429) {
-          setShowRateLimitBanner(true);
-          if (cachedData) setTop250Coins(JSON.parse(cachedData));
-          return;
-        }
-        
-        if (res.ok) {
-          const data = await res.json();
-          setTop250Coins(data);
-          localStorage.setItem('finledger_top_coins', JSON.stringify(data));
-          localStorage.setItem('finledger_top_coins_timestamp', Date.now().toString());
-        } else if (cachedData) {
-          setTop250Coins(JSON.parse(cachedData));
-        }
-      } catch (err) {
-        const cachedData = localStorage.getItem('finledger_top_coins');
-        if (cachedData) setTop250Coins(JSON.parse(cachedData));
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchTop250();
-  }, []);
-
+  // Load User Data First
   useEffect(() => {
     const fetchUserData = async () => {
       if (!user) return;
@@ -349,44 +286,58 @@ const CryptoManager = () => {
         }
       } catch (err) {
         console.error("Failed to fetch user crypto data:", err);
+      } finally {
+        setIsLoading(false); // Stop loading once user data is checked
       }
     };
     fetchUserData();
   }, [user]);
 
+  // Fetch Top 250 silently in the background just for API lookup, NOT for grid display
+  useEffect(() => {
+    const fetchTop250 = async () => {
+      try {
+        const cachedData = localStorage.getItem('finledger_top_coins');
+        const cacheTimestamp = localStorage.getItem('finledger_top_coins_timestamp');
+        
+        if (cachedData && cacheTimestamp && (Date.now() - parseInt(cacheTimestamp)) < 43200000) {
+          setTop250Coins(JSON.parse(cachedData));
+          return;
+        }
+
+        const res = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=false`);
+        if (res.ok) {
+          const data = await res.json();
+          setTop250Coins(data);
+          localStorage.setItem('finledger_top_coins', JSON.stringify(data));
+          localStorage.setItem('finledger_top_coins_timestamp', Date.now().toString());
+        }
+      } catch (err) {}
+    };
+    fetchTop250();
+  }, []);
+
+  // 🚀 FIXED: Only render Custom User Coins + Actively Selected Coins (Clean Slate)
   const fullDatabase = useMemo(() => {
     const coinMap = new Map();
 
-    top250Coins.forEach(c => {
-      coinMap.set(c.symbol.toUpperCase(), {
-        id: c.id, symbol: c.symbol.toUpperCase(), name: c.name,
-        logo: c.image, fallbackPrice: c.current_price,
-        bg: 'bg-slate-800', color: 'text-white'
-      });
-    });
-
-    defaultCryptoDatabase.forEach(c => {
-      const existing = coinMap.get(c.symbol.toUpperCase());
+    // Only add custom user coins to the map to keep the grid clean
+    customUserCoins.forEach(c => {
       coinMap.set(c.symbol.toUpperCase(), { 
-        ...c, 
-        fallbackPrice: existing?.fallbackPrice || c.fallbackPrice,
+        id: c.id || `custom-${c.symbol.toLowerCase()}-${Date.now()}`,
+        symbol: c.symbol.toUpperCase(),
+        name: c.name || c.symbol,
+        logo: c.logo || null,
+        fallbackPrice: c.fallbackPrice || 0,
+        bg: c.bg || 'bg-purple-500/10',
+        color: c.color || 'text-purple-500',
         network: c.network || null,
         contractAddress: c.contractAddress || null
       });
     });
 
-    customUserCoins.forEach(c => {
-      const existing = coinMap.get(c.symbol.toUpperCase());
-      if (existing) {
-        coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c, fallbackPrice: c.fallbackPrice || existing.fallbackPrice });
-      } else {
-        coinMap.set(c.symbol.toUpperCase(), c);
-      }
-    });
-
-    hiddenTokens.forEach(sym => { coinMap.delete(sym.toUpperCase()); });
     return Array.from(coinMap.values());
-  }, [top250Coins, customUserCoins, hiddenTokens]);
+  }, [customUserCoins]);
 
   const filteredCoins = useMemo(() => {
     return fullDatabase.filter(c => 
@@ -440,7 +391,6 @@ const CryptoManager = () => {
     setIsAddModalOpen(true);
   };
 
-  // 🚀 THE MAGIC: SMART FETCHING ENGINE (WITH NC WALLET INTERCEPTOR)
   const handleAutoFetchDetails = async () => {
     setIsFetchingData(true);
     setFetchError(null);
@@ -457,39 +407,6 @@ const CryptoManager = () => {
           return; 
         }
 
-        // 🚀 SMART INTERCEPT: NC WALLET TOKENS BY ID
-        if (searchId === 'rox' || searchId === 'robox') {
-          setNewCoin(prev => ({
-            ...prev,
-            symbol: 'ROX',
-            name: 'Robox (NC Wallet)',
-            fallbackPrice: 1.00,
-            logoUrl: 'https://assets.geckoterminal.com/vdl79ryhkyksbnrtp11hqrpuwmyu',
-            apiId: 'tether' // Peg to Tether pricing internally
-          }));
-          setFetchError(null);
-          setFetchSuccess(true);
-          setFetchStatus('✓ Verified NC Wallet Asset');
-          setIsFetchingData(false);
-          return;
-        }
-        
-        if (searchId === 'ctc' || searchId === 'cryptotab') {
-          setNewCoin(prev => ({
-            ...prev,
-            symbol: 'CTC',
-            name: 'CryptoTab Coin',
-            fallbackPrice: 1.00,
-            logoUrl: 'https://assets.coingecko.com/coins/images/11105/large/Creditcoin_logo.png',
-            apiId: 'tether'
-          }));
-          setFetchError(null);
-          setFetchSuccess(true);
-          setFetchStatus('✓ Verified NC Wallet Asset');
-          setIsFetchingData(false);
-          return;
-        }
-        
         setFetchStatus('Fetching from CoinGecko...');
         const res = await fetch(`https://api.coingecko.com/api/v3/coins/${searchId}`);
         
@@ -527,24 +444,6 @@ const CryptoManager = () => {
           return; 
         }
 
-        // 🚀 SMART INTERCEPT: NC WALLET TOKENS BY CONTRACT
-        if (network === 'solana' && address.startsWith('Rox')) {
-          setNewCoin(prev => ({
-            ...prev,
-            symbol: 'ROX',
-            name: 'Robox (NC Wallet)',
-            fallbackPrice: 1.00,
-            logoUrl: 'https://assets.geckoterminal.com/vdl79ryhkyksbnrtp11hqrpuwmyu',
-            apiId: 'tether' // Peg to Tether pricing internally
-          }));
-          setFetchError(null);
-          setFetchSuccess(true);
-          setFetchStatus('✓ Verified NC Wallet Asset');
-          setIsFetchingData(false);
-          return;
-        }
-        
-        // Validate address
         if (!isValidAddress(address, network)) {
           setFetchError(network === 'solana' 
             ? "Invalid Solana mint address (base58 format, 32-44 chars)" 
@@ -554,9 +453,6 @@ const CryptoManager = () => {
           return;
         }
         
-        // ============================================
-        // SOLANA-SPECIFIC HANDLING
-        // ============================================
         if (network === 'solana') {
           setFetchStatus('Searching Solana token registries...');
           const solanaMetadata = await fetchSolanaTokenMetadata(address);
@@ -577,10 +473,8 @@ const CryptoManager = () => {
             setFetchSuccess(true);
             setFetchStatus(`✓ Found in ${solanaMetadata.source}`);
           } else {
-            // Token NOT found - smart fallback
             const existingSymbol = newCoin.symbol || '';
             const existingName = newCoin.name || '';
-            
             const friendlyName = existingName || `Token ${address.substring(0, 4)}...${address.substring(address.length - 4)}`;
             const friendlySymbol = existingSymbol || 'TOKEN';
             const generatedLogo = generateSolanaLogoUrl(address, friendlySymbol);
@@ -614,9 +508,6 @@ const CryptoManager = () => {
           return;
         }
         
-        // ============================================
-        // EVM CHAIN HANDLING
-        // ============================================
         setFetchStatus('Fetching from GeckoTerminal...');
         const fallbackLogo = getFallbackLogo(newCoin.symbol || 'TOKEN', network, address);
 
@@ -698,44 +589,65 @@ const CryptoManager = () => {
   const handleAddCustomCoin = async (e) => {
     e.preventDefault();
     if (!user) return;
+
     const safeSymbol = (newCoin.symbol || '').toUpperCase().trim();
     if (!safeSymbol) return alert("Symbol is required!");
 
-    const safeApiId = (newCoin.apiId || '').trim().toLowerCase();
-    const safeName = (newCoin.name || '').trim();
+    const safeName = (newCoin.name || '').trim() || `${safeSymbol} Token`;
     const safeLogoUrl = (newCoin.logoUrl || '').trim();
-    const safeContract = (newCoin.contractAddress || '').trim();
+    const fallbackVal = parseFloat(newCoin.fallbackPrice) || 0;
 
-    if (fetchMode === 'contract' && safeContract && !isValidAddress(safeContract, newCoin.network)) {
-      alert(newCoin.network === 'solana' 
-        ? "Invalid Solana mint address format" 
-        : "Invalid contract address format");
-      return;
+    let finalNetwork = null;
+    let finalContract = null;
+    let finalApiId = `${safeSymbol.toLowerCase()}-${Date.now()}`;
+
+    if (fetchMode === 'id') {
+      finalApiId = (newCoin.apiId || '').trim().toLowerCase() || finalApiId;
+    } else if (fetchMode === 'contract') {
+      const rawContract = (newCoin.contractAddress || '').trim();
+      if (rawContract) {
+        if (!isValidAddress(rawContract, newCoin.network)) {
+          alert(newCoin.network === 'solana' 
+            ? "Invalid Solana mint address format" 
+            : "Invalid contract address format");
+          return;
+        }
+        finalContract = rawContract;
+        finalNetwork = newCoin.network;
+        finalApiId = `${finalNetwork}-${finalContract.substring(0, 8)}-${Date.now()}`;
+      }
     }
 
     const newCoinObj = {
-      // Priority: Hardcoded API ID for Pegs -> Generated API ID -> Formatted Name
-      id: ['ROX', 'CTC'].includes(safeSymbol) ? 'tether' : (safeApiId || `${newCoin.network}-${safeContract.substring(0, 8)}` || safeName.toLowerCase().replace(/\s+/g, '-')),
+      id: finalApiId,
       symbol: safeSymbol,
       name: safeName,
-      fallbackPrice: parseFloat(newCoin.fallbackPrice) || 0,
+      fallbackPrice: fallbackVal,
       logo: safeLogoUrl !== '' ? safeLogoUrl : null,
       color: 'text-purple-500', 
       bg: 'bg-purple-500/10',
-      network: fetchMode === 'contract' ? newCoin.network : null,
-      contractAddress: fetchMode === 'contract' ? safeContract : null,
+      network: finalNetwork,
+      contractAddress: finalContract,
       fetchMode: fetchMode
     };
 
     try {
       const updated = customUserCoins.filter(c => c.symbol.toUpperCase() !== safeSymbol);
       updated.push(newCoinObj);
+      
       await setDoc(doc(db, "users", user.uid), { customCoins: updated }, { merge: true });
+      
       setCustomUserCoins(updated);
-      if (!activeCoins.includes(safeSymbol)) setActiveCoins(prev => [...prev, safeSymbol]);
+      
+      if (!activeCoins.includes(safeSymbol)) {
+        setActiveCoins(prev => [...prev, safeSymbol]);
+      }
+      
       setIsAddModalOpen(false);
+      setSearchQuery(''); 
     } catch (e) {
-      alert("Save failed.");
+      console.error(e);
+      alert("Failed to save custom token to portfolio.");
     }
   };
 
@@ -798,7 +710,7 @@ const CryptoManager = () => {
           </div>
           <h1 className="text-4xl font-black text-white tracking-tight mb-2">Portfolio Manager</h1>
           <p className="text-sm font-semibold text-slate-400 max-w-xl leading-relaxed">
-            Select the digital assets you want to track across your Vaults, Income Streams, and AI Strategy.
+            Build your personalized crypto portfolio. Track your preferred assets across Vaults, Income Streams, and AI Strategies.
           </p>
         </div>
         <button 
@@ -813,18 +725,18 @@ const CryptoManager = () => {
       {/* Search */}
       <div className="sticky top-[72px] md:top-4 z-40">
         <div className="relative shadow-xl shadow-slate-200/20 dark:shadow-none rounded-[2rem]">
-          <HiOutlineSearch className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={22} />
+          <HiOutlineSearch className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" size={22} />
           <input 
             type="text" 
-            placeholder="Search 250+ Tokens..." 
+            placeholder="Search your tokens..." 
             value={searchQuery} 
             onChange={(e) => setSearchQuery(e.target.value)} 
-            className="w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200 dark:border-slate-800 rounded-[2rem] py-5 pl-16 pr-16 text-sm font-bold outline-none dark:text-white focus:ring-4 focus:ring-blue-500/20 transition-all placeholder:font-medium"
+            className="w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200 dark:border-slate-800 rounded-[2rem] py-5 pl-16 pr-16 text-sm font-bold outline-none text-slate-900 dark:text-white focus:ring-4 focus:ring-blue-500/20 transition-all placeholder:font-medium placeholder:text-slate-400 dark:placeholder:text-slate-500"
           />
           {searchQuery && (
             <button 
               onClick={handleClearSearch}
-              className="absolute right-12 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors p-1"
+              className="absolute right-12 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors p-1"
               aria-label="Clear search"
             >
               <HiOutlineXCircle size={20} />
@@ -841,11 +753,11 @@ const CryptoManager = () => {
         ) : filteredCoins.length === 0 ? (
           <div className="col-span-full flex flex-col items-center justify-center py-16 px-4">
             <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-6">
-              <HiOutlineCube className="w-12 h-12 text-slate-400" />
+              <HiOutlineCube className="w-12 h-12 text-slate-400 dark:text-slate-500" />
             </div>
             <h3 className="text-xl font-black text-slate-700 dark:text-slate-300 mb-2">No tokens found</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400 text-center max-w-sm">
-              {searchQuery ? `No results for "${searchQuery}". Try a different search term.` : "No tokens available. Try adding a custom token."}
+              {searchQuery ? `No results for "${searchQuery}".` : "Your portfolio is empty. Click 'Custom Token' to start building."}
             </p>
           </div>
         ) : (
@@ -853,7 +765,7 @@ const CryptoManager = () => {
             const isSelected = activeCoins.includes(coin.symbol.toUpperCase());
             return (
               <div 
-                key={`${coin.symbol}-${coin.id}`}
+                key={coin.id || coin.symbol}
                 onClick={() => toggleCoin(coin.symbol)} 
                 role="button" 
                 tabIndex={0}
@@ -902,7 +814,7 @@ const CryptoManager = () => {
                 <h3 className={`font-black text-base tracking-tight mb-1 ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-slate-800 dark:text-white'}`}>
                   {coin.symbol}
                 </h3>
-                <p className="text-[10px] font-bold text-slate-400 truncate w-full text-center px-2">{coin.name}</p>
+                <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 truncate w-full text-center px-2">{coin.name}</p>
                 
                 {coin.network && <NetworkBadge network={coin.network} />}
               </div>
@@ -939,7 +851,7 @@ const CryptoManager = () => {
                   className={`flex-1 py-2.5 text-xs font-black uppercase tracking-widest rounded-lg transition-all duration-200 ${
                     fetchMode === 'contract' 
                       ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-md' 
-                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
                   }`}
                 >
                   By Contract
@@ -950,7 +862,7 @@ const CryptoManager = () => {
                   className={`flex-1 py-2.5 text-xs font-black uppercase tracking-widest rounded-lg transition-all duration-200 ${
                     fetchMode === 'id' 
                       ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-md' 
-                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
                   }`}
                 >
                   By CG ID
@@ -1093,46 +1005,46 @@ const CryptoManager = () => {
               {/* Manual Entry Fields */}
               <div className="grid grid-cols-2 gap-5">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Symbol *</label>
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Symbol *</label>
                   <input 
                     type="text" 
                     required 
                     value={newCoin.symbol} 
                     onChange={(e) => setNewCoin({...newCoin, symbol: e.target.value.toUpperCase()})} 
                     disabled={modalTitle.includes("Edit")} 
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl font-black dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50 disabled:bg-slate-100 dark:disabled:bg-slate-800/50 transition-shadow"
+                    className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50 disabled:bg-slate-100 dark:disabled:bg-slate-800/50 transition-shadow"
                     placeholder="BTC"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Fallback Price ($)</label>
+                  <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Price ($)</label>
                   <input 
                     type="number" 
                     step="any" 
                     min="0"
                     value={newCoin.fallbackPrice} 
                     onChange={(e) => setNewCoin({...newCoin, fallbackPrice: e.target.value})} 
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-shadow"
+                    className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-shadow"
                     placeholder="0.00"
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Full Name *</label>
+                <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Full Name *</label>
                 <input 
                   type="text" 
                   required 
                   value={newCoin.name} 
                   onChange={(e) => setNewCoin({...newCoin, name: e.target.value})} 
-                  className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-shadow"
+                  className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-shadow"
                   placeholder="Bitcoin"
                 />
               </div>
 
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-1">
-                  <HiOutlinePhotograph /> Token Logo URL
+                <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-1">
+                  <HiOutlinePhotograph /> Logo URL
                 </label>
                 <div className="relative flex items-center gap-3">
                   <input 
@@ -1140,9 +1052,9 @@ const CryptoManager = () => {
                     value={newCoin.logoUrl} 
                     onChange={(e) => setNewCoin({...newCoin, logoUrl: e.target.value})} 
                     placeholder="https://example.com/logo.png" 
-                    className="flex-1 w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 text-xs transition-shadow" 
+                    className="flex-1 w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 text-xs transition-shadow" 
                   />
-                  {newCoin.logoUrl && (
+                  {newCoin.logoUrl ? (
                     <div className="w-14 h-14 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex-shrink-0 flex items-center justify-center overflow-hidden p-1 shadow-sm">
                       <img 
                         src={newCoin.logoUrl} 
@@ -1151,8 +1063,7 @@ const CryptoManager = () => {
                         onError={(e) => e.target.style.display = 'none'} 
                       />
                     </div>
-                  )}
-                  {!newCoin.logoUrl && newCoin.symbol && (
+                  ) : newCoin.symbol && (
                     <div className="w-14 h-14 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex-shrink-0 flex items-center justify-center overflow-hidden p-1 shadow-sm">
                       <LogoRenderer 
                         symbol={newCoin.symbol} 
@@ -1163,8 +1074,8 @@ const CryptoManager = () => {
                     </div>
                   )}
                 </div>
-                <p className="text-[9px] font-bold text-slate-400 pl-1 mt-1">
-                  Direct image URL. Leave empty for auto-generated avatar.
+                <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 pl-1 mt-1">
+                  Leave empty for auto-generated avatar.
                 </p>
               </div>
 
@@ -1189,7 +1100,7 @@ const CryptoManager = () => {
           }`}
         >
           {isSaving ? (
-            <><HiOutlineRefresh className="animate-spin" size={20}/> SYNCING PORTFOLIO...</>
+            <><HiOutlineRefresh className="animate-spin" size={20}/> SYNCING...</>
           ) : (
             <><HiOutlineCheckCircle size={20}/> SAVE {activeCoins.length} ASSET{activeCoins.length !== 1 ? 'S' : ''}</>
           )}

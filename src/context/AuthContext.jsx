@@ -16,13 +16,8 @@ const CURRENCY_CACHE_KEY = "finledger_base_currency";
 const CRYPTO_CACHE_KEY = "finledger_selected_cryptos"; 
 const FIAT_CACHE_KEY = "finledger_selected_fiats";
 
-// 🚀 DEFAULT FALLBACK DATABASE (Saves app from crashing if local storage is empty)
-const defaultCryptoObjects = [
-  { symbol: 'BTC', id: 'bitcoin', name: 'Bitcoin', fallbackPrice: 65000, logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
-  { symbol: 'ETH', id: 'ethereum', name: 'Ethereum', fallbackPrice: 3500, logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
-  { symbol: 'USDT', id: 'tether', name: 'Tether', fallbackPrice: 1.00, logo: 'https://assets.coingecko.com/coins/images/325/large/Tether.png' },
-  { symbol: 'CTC', id: 'tether', name: 'CryptoTab Coin', fallbackPrice: 1.00, logo: 'https://assets.coingecko.com/coins/images/11105/large/Creditcoin_logo.png' }
-];
+// 🚀 DEFAULT FALLBACK DATABASE (Completely Empty for Clean Slate)
+const defaultCryptoObjects = [];
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);        
@@ -31,20 +26,20 @@ export const AuthProvider = ({ children }) => {
 
   const [baseCurrency, setBaseCurrency] = useState(localStorage.getItem(CURRENCY_CACHE_KEY) || 'USD');
 
-  // 🧠 SMART STATE: Parses objects and migrates old data strings to objects
+  // 🧠 SMART STATE: Parses objects and starts with an empty slate for new users
   const [selectedCryptos, setSelectedCryptos] = useState(() => {
     try {
       const cached = localStorage.getItem(CRYPTO_CACHE_KEY);
       if (cached) {
         const parsed = JSON.parse(cached);
-        // Migration: If array contains strings (Old format), use default objects
+        // Migration: If array contains strings (Old format), clear it to prevent bugs
         if (typeof parsed[0] === 'string') {
-           return defaultCryptoObjects.filter(c => parsed.includes(c.symbol));
+           return []; 
         }
         return parsed;
       }
-      return defaultCryptoObjects;
-    } catch (e) { return defaultCryptoObjects; }
+      return []; // Start clean for new users
+    } catch (e) { return []; }
   });
 
   const [selectedFiats, setSelectedFiats] = useState(() => {
@@ -77,15 +72,17 @@ export const AuthProvider = ({ children }) => {
                 // Ensure CTC/ROX are always linked to Tether ID for safety
                 const safeCryptos = profile.preferences.selectedCryptos.map(c => {
                   if (typeof c === 'string') {
-                     // Auto-migrate old strings
-                     const fallback = defaultCryptoObjects.find(d => d.symbol === c);
-                     return fallback || { symbol: c, id: c.toLowerCase(), name: c, fallbackPrice: 0 };
+                     // Auto-migrate old strings (now returns basic object since default is empty)
+                     return { symbol: c, id: c.toLowerCase(), name: c, fallbackPrice: 0 };
                   }
                   if (['CTC', 'ROX'].includes(c.symbol)) c.id = 'tether';
                   return c;
                 });
                 setSelectedCryptos(safeCryptos);
                 localStorage.setItem(CRYPTO_CACHE_KEY, JSON.stringify(safeCryptos));
+              } else {
+                 setSelectedCryptos([]); // Ensure empty if not in DB
+                 localStorage.setItem(CRYPTO_CACHE_KEY, JSON.stringify([]));
               }
               
               if (profile?.preferences?.selectedFiats) {
