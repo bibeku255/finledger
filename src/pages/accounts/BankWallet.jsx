@@ -3,18 +3,20 @@ import { useAuth } from '../../hooks/useAuth';
 import { collection, addDoc, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
+
+// 🚀 FIXED: Removed 'HiOutlineBuildingOffice' and 'HiOutlineCreditCard' to prevent Vite crash
 import { 
   HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
   HiOutlineLibrary, HiOutlineSearch, HiOutlineRefresh,
   HiOutlineLockClosed, HiOutlineExclamationCircle,
   HiOutlineTrendingUp, HiOutlineTrendingDown,
   HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable,
-  HiOutlineChevronRight, HiOutlineCalendar, HiOutlineShieldCheck,
-  HiOutlineBuildingOffice, HiOutlineCreditCard, HiOutlineBanknotes
+  HiOutlineChevronRight, HiOutlineCalendar, HiOutlineShieldCheck
 } from 'react-icons/hi';
+
 import { 
   FaGlobe, FaUniversity, FaShieldAlt, FaExchangeAlt, 
-  FaArrowDown, FaArrowUp, FaGem, FaChartLine, FaPiggyBank 
+  FaArrowDown, FaArrowUp, FaPiggyBank 
 } from 'react-icons/fa';
 
 const bankTransferTypes = ["UPI", "IMPS", "NEFT / RTGS", "Wire Transfer / SWIFT", "Cheque", "Direct Deposit"];
@@ -109,11 +111,9 @@ const BankBadge = ({ bank, currency, amount }) => (
 );
 
 const BankWallet = () => {
-  // 🚀 FETCHING BASE CURRENCY AND WATCHLIST FROM CONTEXT
   const { user, baseCurrency = 'INR', selectedFiats = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
 
-  // 🚀 DYNAMIC CURRENCY LIST: Merges Base Currency and Watchlist beautifully
   const availableCurrencies = useMemo(() => {
     return Array.from(new Set([baseCurrency, ...selectedFiats]));
   }, [baseCurrency, selectedFiats]);
@@ -121,12 +121,16 @@ const BankWallet = () => {
   const [transactions, setTransactions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [isFetchingRate, setIsFetchingRate] = useState(false);
+  
   const [tickerData, setTickerData] = useState([]);
+
   const [deleteContext, setDeleteContext] = useState(null); 
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
@@ -144,15 +148,13 @@ const BankWallet = () => {
       try {
         const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${baseCurrency}`);
         const data = await res.json();
-        const targetFiats = ['USD', 'EUR', 'GBP', 'AUD', 'CAD', 'SGD', 'AED', 'JPY', 'CNY'];
+        const targetFiats = ['USD', 'EUR', 'GBP', 'AUD', 'CAD', 'SGD', 'AED'];
+        
         const formattedFiat = targetFiats.map(fiat => {
           const rate = data.rates[fiat];
-          return rate ? { 
-            symbol: fiat, 
-            price: (1 / rate).toFixed(4), 
-            change: (Math.random() * 0.8 - 0.4).toFixed(2) 
-          } : null;
+          return rate ? { symbol: fiat, price: (1 / rate).toFixed(2), change: (Math.random() * 0.5 - 0.25).toFixed(2) } : null;
         }).filter(Boolean);
+        
         setTickerData(formattedFiat);
       } catch (error) {
         console.error("Ticker fetch failed:", error);
@@ -182,38 +184,64 @@ const BankWallet = () => {
 
   const subWalletBalances = useMemo(() => {
     const balances = {};
+    
     transactions.forEach(t => {
       const curr = t.currency || baseCurrency;
       const originalBankName = t.bankName?.trim() ? t.bankName.trim() : 'Main Vault';
       const key = `${originalBankName.toUpperCase()}_${curr.toUpperCase()}`;
+      
       if (!balances[key]) balances[key] = { bank: originalBankName, currency: curr, value: 0 };
+      
       const amt = Number(t.foreignAmount || t.amount || 0); 
-      if (t.type === 'in') balances[key].value += amt;
-      else balances[key].value -= amt;
+      
+      if (t.type === 'in') {
+        balances[key].value += amt;
+      } else {
+        balances[key].value -= amt;
+      }
     });
-    return Object.values(balances).filter(b => Math.abs(b.value) > 0.01).sort((a, b) => b.value - a.value);
+
+    return Object.values(balances)
+      .filter(b => Math.abs(b.value) > 0.01)
+      .sort((a, b) => b.value - a.value);
   }, [transactions, baseCurrency]);
 
   const processedLedger = useMemo(() => {
     const sorted = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
     let runningBalance = 0;
     const grouped = {};
+
     sorted.forEach(t => {
       const dateObj = new Date(t.date || new Date());
       const monthName = formatGlobalDate ? formatGlobalDate(dateObj, 'monthYear') : dateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
       const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
+
       if (!grouped[monthKey]) {
         grouped[monthKey] = { monthName, openingBalance: runningBalance, records: [], closingBalance: 0 };
       }
+
       let finalAmount = Number(t.finalBaseAmount || t.amount || 0);
       let feeAmount = 0;
-      if (t.fee && t.feeExchangeRate) feeAmount = Number(t.fee) * Number(t.feeExchangeRate);
-      else if (t.fee) feeAmount = Number(t.fee);
-      let netChange = t.type === 'in' ? finalAmount : -(finalAmount + feeAmount);
+      
+      if (t.fee && t.feeExchangeRate) {
+          feeAmount = Number(t.fee) * Number(t.feeExchangeRate);
+      } else if (t.fee) {
+          feeAmount = Number(t.fee);
+      }
+
+      let netChange = 0;
+      if (t.type === 'in') {
+         netChange = finalAmount; 
+      } else {
+         netChange = -(finalAmount + feeAmount); 
+      }
+
       runningBalance += netChange;
+
       grouped[monthKey].records.push({ ...t, netChange, finalAmount, feeAmount });
       grouped[monthKey].closingBalance = runningBalance;
     });
+
     return Object.keys(grouped).sort().reverse().map(key => {
       const monthData = grouped[key];
       const filteredRecords = monthData.records.filter(r => {
@@ -222,9 +250,9 @@ const BankWallet = () => {
         const refMatch = r.referenceNo ? r.referenceNo.toLowerCase().includes(searchTerm.toLowerCase()) : false;
         const typeMatch = filterType === 'all' || r.type === filterType || (filterType === 'p2p' && r.isP2P);
         return (titleMatch || bankMatch || refMatch) && typeMatch;
-      }).reverse();
+      }).reverse(); 
       return { ...monthData, records: filteredRecords };
-    }).filter(m => m.records.length > 0);
+    }).filter(m => m.records.length > 0 || searchTerm === ''); 
   }, [transactions, searchTerm, filterType, formatGlobalDate]);
 
   const totalBalance = processedLedger.length > 0 ? processedLedger[0].closingBalance : 0;
@@ -233,28 +261,39 @@ const BankWallet = () => {
 
   const handleDownloadReport = (format) => {
     if (transactions.length === 0) return alert("No bank records found to download.");
+
     const reportData = transactions.map(rec => {
       const isIncome = rec.type === 'in';
       const cleanNote = (rec.title || 'N/A').replace(/(\r\n|\n|\r)/gm, " ");
       const finalAmt = Number(rec.finalBaseAmount || rec.amount || 0);
+      
       return {
         date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rec.date,
-        type: isIncome ? 'Deposit (+)' : 'Withdrawal (-)',
+        type: isIncome ? 'Deposit (+)' : 'Withdrawal/Expense (-)',
         bankName: rec.bankName || 'N/A',
         reference: rec.referenceNo || 'N/A',
         amount: `${isIncome ? '+' : '-'}${currencySymbol}${Math.abs(finalAmt).toFixed(2)}`,
         notes: cleanNote
       };
     });
+
     const columns = [
-      { header: 'Date', key: 'date' }, { header: 'Type', key: 'type' },
-      { header: 'Bank', key: 'bankName' }, { header: 'Reference', key: 'reference' },
-      { header: 'Amount', key: 'amount' }, { header: 'Description', key: 'notes' }
+      { header: 'Date', key: 'date' },
+      { header: 'Type', key: 'type' },
+      { header: 'Bank / Method', key: 'bankName' },
+      { header: 'Ref / UTR', key: 'reference' },
+      { header: 'Amount', key: 'amount' },
+      { header: 'Description', key: 'notes' }
     ];
+
     const fileName = `Bank_Vault_Ledger`;
     const reportTitle = `Bank Vault - Complete Ledger`;
-    if (format === 'pdf') downloadPDFReport(reportData, columns, fileName, reportTitle);
-    else downloadExcelReport(reportData, columns, fileName);
+
+    if (format === 'pdf') {
+      downloadPDFReport(reportData, columns, fileName, reportTitle);
+    } else {
+      downloadExcelReport(reportData, columns, fileName);
+    }
   };
 
   const fetchLiveRate = async () => {
@@ -281,7 +320,9 @@ const BankWallet = () => {
     e.preventDefault();
     if (!user) return alert("Please login first!");
     if (!formData.bankName.trim()) return alert("Please provide a Bank Name (e.g. SBI)");
+    
     setIsSaving(true);
+
     try {
       if (editingId) {
         if (formData.isSynced) {
@@ -290,21 +331,34 @@ const BankWallet = () => {
           }, { merge: true });
         } else {
           const recordData = {
-            title: formData.title, bankName: formData.bankName.trim(), transferType: formData.transferType,
-            referenceNo: formData.referenceNo || '', isP2P: formData.isP2P || false, date: formData.date,
-            currency: formData.currency, foreignAmount: parseFloat(formData.foreignAmount) || 0,
-            exchangeRate: isForeign ? parseFloat(formData.exchangeRate) : 1, fee: feeDeduction, 
+            title: formData.title,
+            bankName: formData.bankName.trim(),
+            transferType: formData.transferType,
+            referenceNo: formData.referenceNo || '',
+            isP2P: formData.isP2P || false,
+            date: formData.date,
+            currency: formData.currency,
+            foreignAmount: parseFloat(formData.foreignAmount) || 0,
+            exchangeRate: isForeign ? parseFloat(formData.exchangeRate) : 1,
+            fee: feeDeduction, 
             finalBaseAmount: calculatedFinalAmount
           };
           await setDoc(doc(db, "users", user.uid, "bankWallet", editingId), recordData, { merge: true });
         }
       } else {
         const recordData = {
-          title: formData.title, bankName: formData.bankName.trim(), transferType: formData.transferType,
-          referenceNo: formData.referenceNo || '', isP2P: formData.isP2P || false, type: 'in', date: formData.date,
-          timestamp: new Date(formData.date).getTime(), currency: formData.currency,
+          title: formData.title,
+          bankName: formData.bankName.trim(),
+          transferType: formData.transferType,
+          referenceNo: formData.referenceNo || '',
+          isP2P: formData.isP2P || false,
+          type: 'in', 
+          date: formData.date,
+          timestamp: new Date(formData.date).getTime(),
+          currency: formData.currency,
           foreignAmount: parseFloat(formData.foreignAmount) || 0,
-          exchangeRate: isForeign ? parseFloat(formData.exchangeRate) : 1, fee: feeDeduction, 
+          exchangeRate: isForeign ? parseFloat(formData.exchangeRate) : 1,
+          fee: feeDeduction, 
           finalBaseAmount: calculatedFinalAmount
         };
         await addDoc(collection(db, "users", user.uid, "bankWallet"), recordData);
@@ -319,36 +373,57 @@ const BankWallet = () => {
 
   const handleEdit = (rec) => {
     const isSyncedEntry = !!(rec.linkedExpenseId || rec.linkedIncomeId || rec.shiftId || rec.linkedPartyId);
+
     setFormData({
-      title: rec.title || '', bankName: rec.bankName || '', transferType: rec.transferType || 'UPI',
-      referenceNo: rec.referenceNo || '', isP2P: rec.isP2P || false,
-      foreignAmount: rec.foreignAmount || rec.amount || '', currency: rec.currency || baseCurrency,
-      exchangeRate: rec.exchangeRate || 1, fee: rec.fee || '', date: rec.date || todayDate,
+      title: rec.title || '',
+      bankName: rec.bankName || '',
+      transferType: rec.transferType || 'UPI',
+      referenceNo: rec.referenceNo || '',
+      isP2P: rec.isP2P || false,
+      foreignAmount: rec.foreignAmount || rec.amount || '', 
+      currency: rec.currency || baseCurrency,
+      exchangeRate: rec.exchangeRate || 1,
+      fee: rec.fee || '', 
+      date: rec.date || todayDate,
       isSynced: isSyncedEntry
     });
     setEditingId(rec.id);
     setIsModalOpen(true);
   };
 
-  const initiateDelete = (rec) => { setDeleteContext(rec); setPinInput(''); setPinError(''); };
+  const initiateDelete = (rec) => {
+    setDeleteContext(rec);
+    setPinInput('');
+    setPinError('');
+  };
 
   const executeSecureDelete = async (e) => {
     e.preventDefault();
-    if (!pinInput.trim()) { setPinError("Please enter your Security PIN."); return; }
-    setIsVerifying(true); setPinError('');
+    if (!pinInput.trim()) {
+      setPinError("Please enter your Security PIN.");
+      return;
+    }
+
+    setIsVerifying(true);
+    setPinError('');
+
     try {
       const userDoc = await getDoc(doc(db, "users", user.uid));
       const userData = userDoc.data();
       const hashedInput = await hashPIN(pinInput.trim());
-      const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin;
+      const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin; 
+
       if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) {
-        setPinError("Incorrect PIN. Deletion blocked!");
-        setIsVerifying(false); return;
+        setPinError("Incorrect PIN. Deletion blocked! 🛑");
+        setIsVerifying(false);
+        return;
       }
+
       await deleteDoc(doc(db, "users", user.uid, "bankWallet", deleteContext.id));
-      setDeleteContext(null);
+      setDeleteContext(null); 
     } catch (error) {
-      setPinError("System error during verification.");
+      console.error(error);
+      setPinError("System error during verification. Try again.");
     } finally {
       setIsVerifying(false);
     }
@@ -369,13 +444,13 @@ const BankWallet = () => {
         
         <style>{`
           @keyframes scrollTicker {
-            0% { transform: translateX(0); }
-            100% { transform: translateX(-50%); }
+            0% { transform: translateX(100%); }
+            100% { transform: translateX(-100%); }
           }
           .animate-ticker-scroll {
-            display: flex;
+            display: inline-flex;
             white-space: nowrap;
-            animation: scrollTicker 30s linear infinite;
+            animation: scrollTicker 25s linear infinite;
           }
           .animate-ticker-scroll:hover {
             animation-play-state: paused;
@@ -433,7 +508,8 @@ const BankWallet = () => {
           <StatCard title="Total Balance" value={`${currencySymbol}${totalBalance.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={FaPiggyBank} color="from-blue-600 to-indigo-600" trend={2.5} />
           <StatCard title="Total Deposits" value={`${currencySymbol}${totalInflows.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={HiOutlineTrendingUp} color="from-emerald-600 to-teal-600" />
           <StatCard title="Total Withdrawals" value={`${currencySymbol}${totalOutflows.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={HiOutlineTrendingDown} color="from-rose-600 to-pink-600" />
-          <StatCard title="Active Banks" value={existingBanks.length} icon={HiOutlineBuildingOffice} color="from-purple-600 to-violet-600" subtitle="Connected institutions" />
+          {/* 🚀 FIXED: Replaced missing icon with FaUniversity */}
+          <StatCard title="Active Banks" value={existingBanks.length} icon={FaUniversity} color="from-purple-600 to-violet-600" subtitle="Connected institutions" />
         </div>
 
         {/* Bank Holdings */}
@@ -533,7 +609,7 @@ const BankWallet = () => {
                                 <p className="font-black dark:text-white text-sm flex items-center gap-2">
                                   {rec.title}
                                   {rec.isP2P && (
-                                    <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[8px] font-black uppercase">P2P</span>
+                                    <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><FaShieldAlt size={8}/> P2P</span>
                                   )}
                                 </p>
                                 <p className="text-[10px] font-medium text-slate-500 mt-0.5">
@@ -544,7 +620,7 @@ const BankWallet = () => {
                                     {formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rec.date}
                                   </p>
                                   {rec.referenceNo && (
-                                    <span className="text-[9px] text-slate-400">Ref: {rec.referenceNo}</span>
+                                    <span className="text-[9px] text-slate-400">| Ref: {rec.referenceNo}</span>
                                   )}
                                 </div>
                               </div>
@@ -599,8 +675,8 @@ const BankWallet = () => {
       {/* Add/Edit Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
-            <div className="px-6 py-5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex justify-between items-center sticky top-0 z-10">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="px-6 py-5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex justify-between items-center shrink-0">
               <h3 className="text-xl font-black flex items-center gap-2">
                 <FaUniversity /> {editingId ? 'Edit Record' : 'Log Deposit'}
               </h3>
@@ -609,7 +685,7 @@ const BankWallet = () => {
               </button>
             </div>
             
-            <form onSubmit={handleSaveEntry} className="p-6 space-y-5">
+            <form onSubmit={handleSaveEntry} className="p-6 space-y-5 overflow-y-auto custom-scrollbar flex-1">
               {formData.isSynced && (
                 <div className="p-4 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-xl">
                   <p className="text-xs font-medium text-amber-700 dark:text-amber-400 flex items-start gap-2">
@@ -621,7 +697,7 @@ const BankWallet = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Bank Name</label>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Bank Name</label>
                   <input 
                     type="text" list="bank-names" required value={formData.bankName} 
                     onChange={(e) => setFormData({...formData, bankName: e.target.value})} 
@@ -633,7 +709,7 @@ const BankWallet = () => {
                   </datalist>
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Transfer Method</label>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Transfer Method</label>
                   <select 
                     disabled={formData.isSynced} value={formData.transferType} 
                     onChange={(e) => setFormData({...formData, transferType: e.target.value})}
@@ -645,7 +721,7 @@ const BankWallet = () => {
               </div>
 
               <div>
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Description</label>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Description</label>
                 <input 
                   disabled={formData.isSynced} type="text" required value={formData.title} 
                   onChange={(e) => setFormData({...formData, title: e.target.value})} 
@@ -654,14 +730,12 @@ const BankWallet = () => {
                 />
               </div>
 
-              <label className={`flex items-start gap-3 p-4 rounded-xl border-2 transition-all ${formData.isSynced ? 'opacity-60' : 'cursor-pointer'} ${formData.isP2P ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-400' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'}`}>
-                <input 
-                  disabled={formData.isSynced} type="checkbox" checked={formData.isP2P} 
-                  onChange={(e) => setFormData({...formData, isP2P: e.target.checked})} 
-                  className="sr-only" 
-                />
-                <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${formData.isP2P ? 'bg-amber-500 border-amber-500' : 'border-slate-300 dark:border-slate-600'}`}>
-                  {formData.isP2P && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+              <label className={`flex items-start gap-3 p-4 rounded-xl border-2 transition-all ${formData.isSynced ? 'opacity-60 pointer-events-none' : 'cursor-pointer'} ${formData.isP2P ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-400 dark:border-amber-500/50' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'}`}>
+                <div className="relative flex items-center justify-center mt-0.5">
+                  <input disabled={formData.isSynced} type="checkbox" checked={formData.isP2P} onChange={(e) => setFormData({...formData, isP2P: e.target.checked})} className="sr-only" />
+                  <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${formData.isP2P ? 'bg-amber-500 border-amber-500' : 'border-slate-300 dark:border-slate-600'}`}>
+                    {formData.isP2P && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                  </div>
                 </div>
                 <div>
                   <p className={`font-black text-sm ${formData.isP2P ? 'text-amber-700 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}`}>Tag as P2P / Crypto Origin</p>
@@ -671,23 +745,23 @@ const BankWallet = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Currency</label>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Currency</label>
                   <select 
                     disabled={formData.isSynced} value={formData.currency} 
                     onChange={(e) => setFormData({...formData, currency: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})}
                     className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-medium dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-60 cursor-pointer"
                   >
-                    {/* 🚀 DYNAMIC CURRENCY LIST: Only shows Base Currency and Watchlist Currencies */}
+                    {/* 🚀 DYNAMIC CURRENCY LIST: Merges Base + Watchlist */}
                     {availableCurrencies.map(c => <option key={c} value={c}>{c} {c === baseCurrency ? '(Base)' : ''}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Amount</label>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Amount</label>
                   <input 
                     disabled={formData.isSynced} type="number" step="any" required value={formData.foreignAmount} 
                     onChange={(e) => setFormData({...formData, foreignAmount: e.target.value})} 
                     placeholder="0.00"
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-medium dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-60"
+                    className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-medium dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-60 text-lg"
                   />
                 </div>
               </div>
@@ -717,7 +791,7 @@ const BankWallet = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Bank Fee</label>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Bank Fee</label>
                   <input 
                     disabled={formData.isSynced} type="number" step="any" value={formData.fee} 
                     onChange={(e) => setFormData({...formData, fee: e.target.value})} 
@@ -726,7 +800,7 @@ const BankWallet = () => {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Reference No.</label>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Reference No.</label>
                   <input 
                     disabled={formData.isSynced} type="text" value={formData.referenceNo} 
                     onChange={(e) => setFormData({...formData, referenceNo: e.target.value})} 
@@ -752,7 +826,10 @@ const BankWallet = () => {
               </div>
 
               <div>
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Date</label>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex justify-between">
+                  <span className="ml-1">Date</span>
+                  <span className="text-blue-500">{formatGlobalDate ? formatGlobalDate(formData.date, 'full') : ''}</span>
+                </label>
                 <input 
                   disabled={formData.isSynced} type="date" required value={formData.date} 
                   onChange={(e) => setFormData({...formData, date: e.target.value})}
@@ -760,17 +837,19 @@ const BankWallet = () => {
                 />
               </div>
 
-              <button 
-                type="submit" disabled={isSaving} 
-                className={`w-full p-4 rounded-xl font-black text-sm uppercase tracking-widest text-white transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${
-                  formData.isP2P 
-                    ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 shadow-lg shadow-amber-500/30' 
-                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-500/30'
-                }`}
-              >
-                {isSaving && <HiOutlineRefresh className="animate-spin" size={18} />}
-                {editingId ? 'Update Record' : 'Add to Ledger'}
-              </button>
+              <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-2">
+                <button 
+                  type="submit" disabled={isSaving} 
+                  className={`w-full p-4 rounded-xl font-black text-sm uppercase tracking-widest text-white transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${
+                    formData.isP2P 
+                      ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 shadow-lg shadow-amber-500/30' 
+                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-500/30'
+                  }`}
+                >
+                  {isSaving ? <HiOutlineRefresh className="animate-spin" size={18} /> : null}
+                  {isSaving ? 'Processing...' : (editingId ? 'Update Record' : 'Add to Ledger')}
+                </button>
+              </div>
             </form>
           </div>
         </div>
