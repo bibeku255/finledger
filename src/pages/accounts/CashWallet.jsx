@@ -18,8 +18,7 @@ import {
   FaGem, FaChartLine, FaPiggyBank, FaArrowUp, FaArrowDown
 } from 'react-icons/fa';
 
-const commonCurrencies = ["USD", "EUR", "GBP", "AUD", "CAD", "SGD", "AED", "SAR", "JPY", "CNY", "INR", "NPR", "PKR", "BDT"];
-
+// Mapping for Forex Flags
 const fiatFlagMap = {
   USD: 'us', INR: 'in', NPR: 'np', EUR: 'eu', GBP: 'gb', CAD: 'ca', AUD: 'au', 
   JPY: 'jp', AED: 'ae', SAR: 'sa', QAR: 'qa', KWD: 'kw', OMR: 'om', BHD: 'bh',
@@ -105,8 +104,14 @@ const CurrencyBadge = ({ currency, amount }) => (
 );
 
 const CashWallet = () => {
-  const { user, baseCurrency = 'INR', formatGlobalDate } = useAuth();
+  // 🚀 FETCHING BASE CURRENCY AND WATCHLIST FROM CONTEXT
+  const { user, baseCurrency = 'INR', selectedFiats = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
+
+  // 🚀 DYNAMIC CURRENCY LIST: Merges Base Currency and Watchlist beautifully
+  const availableCurrencies = useMemo(() => {
+    return Array.from(new Set([baseCurrency, ...selectedFiats]));
+  }, [baseCurrency, selectedFiats]);
 
   const [transactions, setTransactions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -323,7 +328,6 @@ const CashWallet = () => {
   const closeModal = () => { setIsModalOpen(false); setEditingId(null); };
 
   return (
-    // ⚡ Applied Global Fix: w-full h-auto pb-24 ensures natural scrolling!
     <div className="w-full h-auto pb-24">
       <div className="pt-8 md:pt-12 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 md:px-6">
         
@@ -366,17 +370,17 @@ const CashWallet = () => {
                 <span className="sm:hidden">Report</span>
               </button>
               <div className="absolute top-full right-0 md:left-0 md:right-auto mt-2 w-36 md:w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all flex flex-col p-1 z-50">
-                <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] md:text-xs font-bold rounded-lg text-left w-full">
-                  <HiOutlineDocumentText className="text-rose-500" size={16}/> As PDF
+                <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg">
+                  <HiOutlineDocumentText className="text-rose-400" size={16}/> PDF Document
                 </button>
-                <button onClick={() => handleDownloadReport('excel')} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] md:text-xs font-bold rounded-lg text-left w-full">
-                  <HiOutlineTable className="text-emerald-500" size={16}/> As Excel (CSV)
+                <button onClick={() => handleDownloadReport('excel')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg">
+                  <HiOutlineTable className="text-emerald-400" size={16}/> Excel (CSV)
                 </button>
               </div>
             </div>
 
-            <button onClick={openModal} className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-5 md:px-7 py-3 md:py-3.5 rounded-2xl font-black text-xs md:text-sm transition-all active:scale-95 shadow-lg shadow-emerald-500/30 whitespace-nowrap">
-              <HiOutlinePlus size={20} /> <span className="hidden sm:inline">Add to Vault</span> <span className="sm:hidden">Add</span>
+            <button onClick={openModal} className="flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-5 md:px-7 py-3 md:py-3.5 rounded-2xl font-black text-xs md:text-sm transition-all active:scale-95 shadow-lg shadow-emerald-500/30 whitespace-nowrap">
+              <HiOutlinePlus size={18} /> <span className="hidden sm:inline">Add to Vault</span> <span className="sm:hidden">Add</span>
             </button>
           </div>
         </div>
@@ -433,7 +437,7 @@ const CashWallet = () => {
           <div className="relative flex-1">
             <HiOutlineSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-xl" />
             <input 
-              type="text" placeholder="Search cash logs..."
+              type="text" placeholder="Search transactions..."
               value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-12 pr-4 py-3.5 bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 rounded-xl font-medium dark:text-white outline-none focus:border-emerald-500 transition-all"
             />
@@ -577,7 +581,7 @@ const CashWallet = () => {
               </button>
             </div>
             
-            <form onSubmit={handleSaveEntry} className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+            <form onSubmit={handleSaveEntry} className="p-6 space-y-5 max-h-[75vh] overflow-y-auto custom-scrollbar">
               <div>
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Description</label>
                 <input 
@@ -595,7 +599,8 @@ const CashWallet = () => {
                     onChange={(e) => setFormData({...formData, currency: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})}
                     className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-medium dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 cursor-pointer"
                   >
-                    {commonCurrencies.map(c => <option key={c} value={c}>{c} {c === baseCurrency ? '(Base)' : ''}</option>)}
+                    {/* 🚀 DYNAMIC CURRENCY LIST: Only shows Base Currency and Watchlist Currencies */}
+                    {availableCurrencies.map(c => <option key={c} value={c}>{c} {c === baseCurrency ? '(Base)' : ''}</option>)}
                   </select>
                 </div>
                 <div>
