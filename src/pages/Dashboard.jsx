@@ -7,20 +7,19 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 
 import { 
   HiOutlineTrendingUp, HiOutlineTrendingDown, HiOutlineLibrary,
-  HiOutlineGlobe, HiOutlinePlusCircle, HiOutlineReceiptTax, 
-  HiOutlineRefresh, HiOutlineChartPie, HiOutlineSparkles, HiOutlineCalculator,
-  HiOutlineCash, HiOutlineArrowUp, HiOutlineArrowDown, HiOutlineClock,
-  HiOutlineChevronRight, HiOutlineStar, HiOutlineFire, HiOutlineBell
+  HiOutlineGlobe, HiOutlinePlusCircle, 
+  HiOutlineRefresh, HiOutlineChartPie, 
+  HiOutlineArrowUp, HiOutlineArrowDown, HiOutlineClock,
+  HiOutlineChevronRight
 } from 'react-icons/hi';
 import { 
-  FaMoneyBillWave, FaUniversity, FaWallet, FaBolt, FaTrophy, 
+  FaWallet, FaBolt, FaTrophy, 
   FaPiggyBank, FaSun, FaMoon, FaCloudSun, FaGem, FaChartLine,
-  FaArrowUp, FaArrowDown, FaCircleDollarToSlot
+  FaArrowUp, FaArrowDown
 } from 'react-icons/fa';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1', '#ec4899', '#14b8a6', '#f97316', '#06b6d4'];
 
-// Premium Gradient Backgrounds
 const GRADIENTS = {
   income: 'from-emerald-500 to-teal-600',
   expense: 'from-rose-500 to-pink-600',
@@ -29,14 +28,12 @@ const GRADIENTS = {
   vault: 'from-purple-500 to-violet-600'
 };
 
-// Mapping for Forex Flags
 const fiatFlagMap = {
   USD: 'us', INR: 'in', NPR: 'np', EUR: 'eu', GBP: 'gb', CAD: 'ca', AUD: 'au', 
   JPY: 'jp', AED: 'ae', SAR: 'sa', QAR: 'qa', KWD: 'kw', OMR: 'om', BHD: 'bh',
   PKR: 'pk', BDT: 'bd', LKR: 'lk', MXN: 'mx'
 };
 
-// Verified IDs and Custom Logos
 const cryptoConfig = {
   BTC: { id: 'bitcoin' }, ETH: { id: 'ethereum' }, USDT: { id: 'tether' }, XRP: { id: 'ripple' },
   BNB: { id: 'binancecoin' }, USDC: { id: 'usd-coin' }, SOL: { id: 'solana' }, TRX: { id: 'tron' },
@@ -61,7 +58,6 @@ const cryptoConfig = {
   OP: { id: 'optimism', logo: 'https://s2.coinmarketcap.com/static/img/coins/64x64/11840.png' },
 };
 
-// 🚀 Premium Stat Card Component
 const StatCard = ({ title, value, icon: Icon, gradient, trend, trendValue, subtitle, onClick }) => (
   <div 
     onClick={onClick}
@@ -95,7 +91,6 @@ const StatCard = ({ title, value, icon: Icon, gradient, trend, trendValue, subti
   </div>
 );
 
-// 🚀 Premium Market Icon Component
 const MarketIcon = ({ symbol, apiImage, customLogo, type }) => {
   const [imgIndex, setImgIndex] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -147,7 +142,6 @@ const MarketIcon = ({ symbol, apiImage, customLogo, type }) => {
   );
 };
 
-// 🚀 Premium Market Card Component
 const MarketCard = ({ item, baseCurrency, currencySymbol }) => {
   const isPositive = item.change >= 0;
   
@@ -237,7 +231,6 @@ const Dashboard = () => {
     }
   }, []);
   
-  // Vaults & Cashflow Sync
   useEffect(() => {
     if (!user) return;
 
@@ -278,7 +271,6 @@ const Dashboard = () => {
     return () => { unsubBank(); unsubCash(); unsubOnline(); unsubIncome(); unsubExpense(); };
   }, [user]);
 
-  // Hybrid Live Market Data Engine
   useEffect(() => {
     const fetchMarketData = async () => {
       setIsMarketLoading(true);
@@ -428,7 +420,7 @@ const Dashboard = () => {
 
   if (isLoading) {
     return (
-      <div className="h-full min-h-screen flex items-center justify-center">
+      <div className="w-full flex items-center justify-center p-20">
         <div className="flex flex-col items-center gap-4">
            <div className="relative">
              <div className="absolute inset-0 bg-blue-500 rounded-full blur-xl opacity-30 animate-pulse" />
@@ -445,8 +437,11 @@ const Dashboard = () => {
   const formattedToday = formatGlobalDate ? formatGlobalDate(today, 'full') : today.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
   return (
-    <div className="h-full min-h-screen overflow-y-auto pb-24">
-      <div className="pt-20 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 md:px-6">
+    // ⚡ PRO FIX: Using standard block layout. No height constraints. Content will naturally flow.
+    <div className="w-full h-auto pb-10">
+      
+      {/* ⚡ PRO FIX: Removed negative margins and tricky paddings. Added clear gap. */}
+      <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
         
         {/* Premium Greeting Section */}
         <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50">
@@ -589,7 +584,7 @@ const Dashboard = () => {
         </div>
 
         {/* Live Market Portfolio */}
-        <div>
+        <div className="mt-2">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest flex items-center gap-2">
@@ -606,8 +601,8 @@ const Dashboard = () => {
           </div>
           
           {marketData.length === 0 && !isMarketLoading ? (
-            <div className="p-12 bg-slate-50 dark:bg-slate-900 border border-dashed border-slate-200 dark:border-slate-800 rounded-[2.5rem] text-center">
-              <div className="w-16 h-16 bg-slate-200 dark:bg-slate-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <div className="p-12 bg-white dark:bg-slate-900 border border-dashed border-slate-200 dark:border-slate-800 rounded-[2.5rem] text-center shadow-sm">
+              <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
                 <HiOutlineGlobe className="text-3xl text-slate-400" />
               </div>
               <p className="text-slate-600 dark:text-slate-300 font-bold text-sm">No assets selected</p>
@@ -626,7 +621,7 @@ const Dashboard = () => {
         </div>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pb-10">
           <button onClick={() => navigate('/dashboard/goals')} className="group relative overflow-hidden p-5 flex flex-col items-center justify-center gap-3 bg-gradient-to-br from-amber-50 to-yellow-50 dark:from-amber-500/5 dark:to-yellow-500/5 text-amber-600 dark:text-amber-400 rounded-[2rem] hover:shadow-xl transition-all font-black text-xs uppercase tracking-widest border border-amber-200 dark:border-amber-500/20 active:scale-95">
             <FaTrophy size={24} className="group-hover:scale-110 transition-transform" /> Savings Goals
           </button>

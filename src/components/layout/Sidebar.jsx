@@ -254,6 +254,7 @@ const Sidebar = ({ isOpen, onClose }) => {
         }
       });
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
   const toggleSubmenu = (name) => {
@@ -372,9 +373,9 @@ const Sidebar = ({ isOpen, onClose }) => {
 
   return (
     <>
-      {/* Premium Overlay */}
+      {/* Premium Overlay: Ensuring it doesn't block clicks when closed */}
       <motion.div 
-        className="absolute inset-0 bg-gradient-to-br from-slate-950/60 via-slate-900/50 to-slate-950/60 backdrop-blur-md z-[35] lg:hidden"
+        className={`fixed inset-0 bg-slate-950/60 backdrop-blur-md z-[35] lg:hidden ${isOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}
         initial={{ opacity: 0 }}
         animate={{ opacity: isOpen ? 1 : 0 }}
         exit={{ opacity: 0 }}
@@ -383,27 +384,26 @@ const Sidebar = ({ isOpen, onClose }) => {
         aria-label="Close sidebar overlay"
       />
 
-      {/* Premium Sidebar */}
+      {/* Premium Sidebar: Changed position and height constraints */}
       <motion.aside 
         ref={sidebarRef}
         className={`
-          absolute lg:relative left-0 top-0 h-full z-40 w-72 pb-4
+          absolute lg:relative left-0 top-0 z-40 w-72
+          h-[calc(100dvh-120px)] 
           bg-gradient-to-b from-white to-slate-50 dark:from-slate-950 dark:to-slate-900 
           border-r border-slate-200/50 dark:border-white/5
-          transition-transform duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]
           shadow-2xl shadow-black/5 dark:shadow-black/20
-          ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} 
           flex flex-col
         `}
         initial={false}
-        animate={{ x: isOpen ? 0 : '-100%' }}
+        animate={{ x: isOpen ? 0 : (window.innerWidth >= 1024 ? 0 : '-100%') }}
         transition={{ type: 'spring', damping: 25, stiffness: 200 }}
       >
         {/* Decorative Gradient Line */}
         <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 via-cyan-500 to-purple-500" />
         
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto px-3 py-4 custom-scrollbar scroll-smooth">
+        <div className="flex-1 overflow-y-auto px-3 py-4 custom-scrollbar scroll-smooth h-full">
           
           {/* Main Navigation */}
           <div className="mb-6">
@@ -473,7 +473,7 @@ const Sidebar = ({ isOpen, onClose }) => {
         </div>
 
         {/* Premium Footer */}
-        <div className="mx-4 mt-2 shrink-0">
+        <div className="mx-4 mb-4 shrink-0">
           <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700/50 shadow-lg">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.1),transparent_50%)]" />
             <div className="relative p-4">
