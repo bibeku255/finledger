@@ -373,23 +373,27 @@ const Sidebar = ({ isOpen, onClose }) => {
 
   return (
     <>
-      {/* Premium Overlay: Ensuring it doesn't block clicks when closed */}
-      <motion.div 
-        className={`fixed inset-0 bg-slate-950/60 backdrop-blur-md z-[35] lg:hidden ${isOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: isOpen ? 1 : 0 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.3 }}
-        onClick={onClose}
-        aria-label="Close sidebar overlay"
-      />
+      {/* ⚡ PRO FIX 1: Completely unmounts the overlay from the DOM when closed so it CANNOT intercept touches */}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div 
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-md z-[35] lg:hidden"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            onClick={onClose}
+            aria-label="Close sidebar overlay"
+          />
+        )}
+      </AnimatePresence>
 
-      {/* Premium Sidebar: Changed position and height constraints */}
+      {/* Premium Sidebar */}
       <motion.aside 
         ref={sidebarRef}
         className={`
           absolute lg:relative left-0 top-0 z-40 w-72
-          h-[calc(100dvh-120px)] 
+          h-full 
           bg-gradient-to-b from-white to-slate-50 dark:from-slate-950 dark:to-slate-900 
           border-r border-slate-200/50 dark:border-white/5
           shadow-2xl shadow-black/5 dark:shadow-black/20

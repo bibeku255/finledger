@@ -12,10 +12,11 @@ import {
   HiOutlineArrowUp, HiOutlineArrowDown, HiOutlineClock,
   HiOutlineChevronRight
 } from 'react-icons/hi';
+
 import { 
   FaWallet, FaBolt, FaTrophy, 
   FaPiggyBank, FaSun, FaMoon, FaCloudSun, FaGem, FaChartLine,
-  FaArrowUp, FaArrowDown
+  FaArrowUp, FaArrowDown, FaGlobe, FaUniversity, FaMoneyBillWave, FaBitcoin
 } from 'react-icons/fa';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1', '#ec4899', '#14b8a6', '#f97316', '#06b6d4'];
@@ -77,7 +78,7 @@ const StatCard = ({ title, value, icon: Icon, gradient, trend, trendValue, subti
           </span>
         )}
       </p>
-      <h2 className="text-3xl md:text-4xl font-black tracking-tight mb-1">{value}</h2>
+      <h2 className="text-3xl md:text-4xl font-black tracking-tight mb-1 truncate">{value}</h2>
       {subtitle && (
         <p className="text-[10px] font-bold opacity-70 uppercase tracking-wider">{subtitle}</p>
       )}
@@ -113,8 +114,7 @@ const MarketIcon = ({ symbol, apiImage, customLogo, type }) => {
   }
 
   const sources = [
-    apiImage, 
-    customLogo, 
+    apiImage, customLogo, 
     `https://bin.bnbstatic.com/image/admin_mgl/coin-logo/${symbolUpper}.png`, 
     `https://assets.coincap.io/assets/icons/${symbolLower}@2x.png`, 
     `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${symbolLower}.png`
@@ -144,7 +144,6 @@ const MarketIcon = ({ symbol, apiImage, customLogo, type }) => {
 
 const MarketCard = ({ item, baseCurrency, currencySymbol }) => {
   const isPositive = item.change >= 0;
-  
   return (
     <div className="min-w-[240px] snap-center p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] shadow-sm flex flex-col justify-between shrink-0 hover:shadow-xl hover:border-blue-500/30 transition-all duration-300 group relative overflow-hidden">
       <div className={`absolute -right-4 -top-4 w-20 h-20 bg-gradient-to-br rounded-full blur-2xl opacity-0 group-hover:opacity-20 transition-opacity duration-500 pointer-events-none ${
@@ -154,12 +153,7 @@ const MarketCard = ({ item, baseCurrency, currencySymbol }) => {
       <div className="flex justify-between items-center mb-4 relative z-10">
         <div className="flex items-center gap-3">
           <div className="relative w-12 h-12 rounded-full overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-700 flex items-center justify-center shrink-0 border-2 border-white dark:border-slate-700 shadow-md group-hover:scale-110 transition-transform duration-300">
-            <MarketIcon 
-              symbol={item.symbol} 
-              apiImage={item.image} 
-              customLogo={item.customLogo} 
-              type={item.type} 
-            />
+            <MarketIcon symbol={item.symbol} apiImage={item.image} customLogo={item.customLogo} type={item.type} />
           </div>
           <div>
             <span className="font-black text-slate-800 dark:text-white text-base tracking-tight">{item.symbol}</span>
@@ -180,21 +174,13 @@ const MarketCard = ({ item, baseCurrency, currencySymbol }) => {
       
       <div className="relative z-10">
         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Value in {baseCurrency}</p>
-        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight truncate">
           {currencySymbol}{item.priceBase < 1 ? item.priceBase.toFixed(6) : item.priceBase.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
         </p>
         <div className="flex items-center gap-2 mt-2">
-          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest truncate">
             ≈ $ {item.priceUSD < 1 ? item.priceUSD.toFixed(6) : item.priceUSD.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
           </p>
-        </div>
-      </div>
-      
-      <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-          isPositive ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'
-        }`}>
-          {isPositive ? <FaArrowUp size={14} /> : <FaArrowDown size={14} />}
         </div>
       </div>
     </div>
@@ -210,6 +196,7 @@ const Dashboard = () => {
   const [bankTotal, setBankTotal] = useState(0);
   const [cashTotal, setCashTotal] = useState(0);
   const [onlineTotal, setOnlineTotal] = useState(0);
+  const [cryptoHoldings, setCryptoHoldings] = useState([]); 
   const [incomeTotal, setIncomeTotal] = useState(0);
   const [expenseTotal, setExpenseTotal] = useState(0);
   const [marketData, setMarketData] = useState([]);
@@ -255,6 +242,10 @@ const Dashboard = () => {
     const unsubCash = onSnapshot(collection(db, "users", user.uid, "cashWallet"), snap => setCashTotal(calcVaultBalance(snap)));
     const unsubOnline = onSnapshot(collection(db, "users", user.uid, "onlineWallet"), snap => setOnlineTotal(calcVaultBalance(snap)));
     
+    const unsubCrypto = onSnapshot(collection(db, "users", user.uid, "cryptoWallet"), snap => {
+      setCryptoHoldings(snap.docs.map(doc => doc.data()));
+    });
+
     const unsubIncome = onSnapshot(collection(db, "users", user.uid, "incomeLogs"), snap => {
       let total = 0;
       snap.docs.forEach(doc => { total += Number(doc.data().finalBaseAmount) || 0; });
@@ -268,9 +259,10 @@ const Dashboard = () => {
       setIsLoading(false); 
     });
 
-    return () => { unsubBank(); unsubCash(); unsubOnline(); unsubIncome(); unsubExpense(); };
+    return () => { unsubBank(); unsubCash(); unsubOnline(); unsubCrypto(); unsubIncome(); unsubExpense(); };
   }, [user]);
 
+  // 🚀 STRICT MARKET FETCH: ONLY Fetches explicitly selected cryptos & fiats!
   useEffect(() => {
     const fetchMarketData = async () => {
       setIsMarketLoading(true);
@@ -280,6 +272,7 @@ const Dashboard = () => {
         const usdToBase = fiatData.rates[baseCurrency] || 1;
         let newMarketData = [];
 
+        // STRICTLY use selectedCryptos ONLY
         if (selectedCryptos && selectedCryptos.length > 0) {
           let cgJson = [];
           const normalAssets = [];
@@ -312,15 +305,17 @@ const Dashboard = () => {
             let finalImage = live?.image || null;
             const priceInBase = priceInUsd * usdToBase;
 
-            newMarketData.push({ 
-              symbol: asset.symbol, 
-              type: 'crypto', 
-              priceUSD: priceInUsd, 
-              priceBase: priceInBase, 
-              change: change24h,
-              image: finalImage,
-              customLogo: asset.customLogo
-            });
+            if (!newMarketData.find(m => m.symbol === asset.symbol)) {
+              newMarketData.push({ 
+                symbol: asset.symbol, 
+                type: 'crypto', 
+                priceUSD: priceInUsd, 
+                priceBase: priceInBase, 
+                change: change24h,
+                image: finalImage,
+                customLogo: asset.customLogo
+              });
+            }
           }
         }
 
@@ -356,7 +351,24 @@ const Dashboard = () => {
     return () => clearInterval(interval);
   }, [baseCurrency, selectedCryptos, selectedFiats]);
 
-  const netWorth = bankTotal + cashTotal + onlineTotal;
+  // LIVE CRYPTO VALUATION CALCULATOR
+  const cryptoTotal = useMemo(() => {
+    if (!cryptoHoldings.length) return 0;
+    return cryptoHoldings.reduce((sum, coin) => {
+      const sym = (coin.symbol || '').toUpperCase();
+      const amount = Number(coin.amount || coin.balance || 0);
+      const liveMarketInfo = marketData.find(m => m.symbol === sym);
+      
+      if (liveMarketInfo && amount > 0) {
+        return sum + (amount * liveMarketInfo.priceBase);
+      }
+      return sum + Number(coin.totalBaseValue || coin.investedAmount || coin.finalBaseAmount || 0);
+    }, 0);
+  }, [cryptoHoldings, marketData]);
+
+  // EXPANDED TOTAL NET WORTH
+  const netWorth = bankTotal + cashTotal + onlineTotal + cryptoTotal;
+
   const savingsTotal = incomeTotal - expenseTotal;
   const savingsRate = incomeTotal > 0 ? ((savingsTotal / incomeTotal) * 100).toFixed(1) : 0;
   const monthlyTrend = incomeTotal > expenseTotal ? 'positive' : 'negative';
@@ -365,10 +377,11 @@ const Dashboard = () => {
     const realAssetAllocation = [
       { name: 'Bank Ledger', value: Math.max(0, bankTotal) },
       { name: 'Physical Cash', value: Math.max(0, cashTotal) },
-      { name: 'E-Wallets', value: Math.max(0, onlineTotal) }
+      { name: 'E-Wallets', value: Math.max(0, onlineTotal) },
+      { name: 'Crypto Assets', value: Math.max(0, cryptoTotal) }
     ].filter(asset => asset.value > 0);
     return { assetAllocation: realAssetAllocation };
-  }, [bankTotal, cashTotal, onlineTotal]);
+  }, [bankTotal, cashTotal, onlineTotal, cryptoTotal]);
 
   const [rawIncomes, setRawIncomes] = useState([]);
   const [rawExpenses, setRawExpenses] = useState([]);
@@ -420,7 +433,7 @@ const Dashboard = () => {
 
   if (isLoading) {
     return (
-      <div className="w-full flex items-center justify-center p-20">
+      <div className="w-full flex items-center justify-center py-32">
         <div className="flex flex-col items-center gap-4">
            <div className="relative">
              <div className="absolute inset-0 bg-blue-500 rounded-full blur-xl opacity-30 animate-pulse" />
@@ -437,34 +450,30 @@ const Dashboard = () => {
   const formattedToday = formatGlobalDate ? formatGlobalDate(today, 'full') : today.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
   return (
-    // ⚡ PRO FIX: Using standard block layout. No height constraints. Content will naturally flow.
     <div className="w-full h-auto pb-10">
-      
-      {/* ⚡ PRO FIX: Removed negative margins and tricky paddings. Added clear gap. */}
       <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
         
-        {/* Premium Greeting Section */}
-        <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50">
+        {/* PREMIUM GREETING & EXPANDED NET WORTH SECTION */}
+        <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 p-6 md:p-8 shadow-2xl border border-slate-700/50">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.15),transparent_70%)]" />
           <div className="absolute right-0 top-0 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl" />
           
-          <div className="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-2xl flex items-center justify-center shadow-lg">
-                  <FaGem size={24} className="text-white" />
-                </div>
-                <div>
-                  <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight flex items-center gap-2">
-                    {greetingIcon} {greeting}, {user?.displayName ? user.displayName.split(' ')[0] : 'Investor'}!
-                  </h1>
-                  <p className="text-sm font-medium text-slate-400">
-                    Welcome back to your financial command center
-                  </p>
-                </div>
+          <div className="relative z-10 flex flex-col md:flex-row md:items-start justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-2xl flex items-center justify-center shadow-lg">
+                <FaGem size={24} className="text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight flex items-center gap-2">
+                  {greetingIcon} {greeting}, {user?.displayName ? user.displayName.split(' ')[0] : 'Investor'}!
+                </h1>
+                <p className="text-sm font-medium text-slate-400">
+                  Welcome back to your financial command center
+                </p>
               </div>
             </div>
-            <div className="md:text-right">
+            
+            <div className="flex flex-wrap items-center gap-3 mt-2 md:mt-0">
               <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10">
                 <HiOutlineClock className="text-blue-400" size={16} />
                 <div>
@@ -472,26 +481,68 @@ const Dashboard = () => {
                   <p className="text-sm font-bold text-white">{formattedToday}</p>
                 </div>
               </div>
+              <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10">
+                {monthlyTrend === 'positive' ? <FaArrowUp className="text-emerald-400" size={14}/> : <FaArrowDown className="text-rose-400" size={14}/>}
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Savings Rate</p>
+                  <p className="text-sm font-bold text-white">{savingsRate}%</p>
+                </div>
+              </div>
             </div>
           </div>
           
-          <div className="relative z-10 grid grid-cols-3 gap-3 mt-6">
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Net Worth</p>
-              <p className="text-lg font-black text-white">{currencySymbol}{netWorth.toLocaleString()}</p>
-            </div>
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Monthly Trend</p>
-              <p className={`text-lg font-black flex items-center gap-1 ${monthlyTrend === 'positive' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {monthlyTrend === 'positive' ? <FaArrowUp size={16} /> : <FaArrowDown size={16} />}
-                {savingsRate}%
-              </p>
-            </div>
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Assets Tracked</p>
-              <p className="text-lg font-black text-white">{selectedCryptos.length + selectedFiats.length}</p>
+          {/* EXPANDED NET WORTH BREAKDOWN GRID */}
+          <div className="relative z-10 mt-8 bg-white/5 border border-white/10 rounded-[2rem] p-5 md:p-6 backdrop-blur-md">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Liquid Net Worth</p>
+            <h2 className="text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-tight mb-8 truncate">
+              {currencySymbol}{netWorth.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+            </h2>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+              
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center shrink-0">
+                  <FaUniversity size={18} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Bank Vault</p>
+                  <p className="text-sm font-bold text-white truncate">{currencySymbol}{bankTotal.toLocaleString()}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                  <FaMoneyBillWave size={18} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Physical Cash</p>
+                  <p className="text-sm font-bold text-white truncate">{currencySymbol}{cashTotal.toLocaleString()}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0">
+                  <FaGlobe size={18} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">E-Wallets</p>
+                  <p className="text-sm font-bold text-white truncate">{currencySymbol}{onlineTotal.toLocaleString()}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center shrink-0">
+                  <FaBitcoin size={18} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1">Crypto <span className="text-emerald-400 animate-pulse text-[6px]">● LIVE</span></p>
+                  <p className="text-sm font-bold text-white truncate">{currencySymbol}{cryptoTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                </div>
+              </div>
+
             </div>
           </div>
+
         </div>
 
         {/* KPI Cards */}
@@ -539,7 +590,7 @@ const Dashboard = () => {
               <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest flex items-center gap-2">
                 <FaWallet className="text-blue-500" size={16}/> Asset Allocation
               </h3>
-              <p className="text-[10px] text-slate-500 font-medium mt-0.5">Portfolio distribution</p>
+              <p className="text-[10px] text-slate-500 font-medium mt-0.5">Portfolio distribution (Including Live Crypto)</p>
             </div>
             
             {assetAllocation.length > 0 ? (
@@ -557,7 +608,9 @@ const Dashboard = () => {
                   </ResponsiveContainer>
                   <div className="absolute inset-0 flex items-center justify-center flex-col pointer-events-none">
                     <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total</span>
-                    <span className="text-xl font-black text-slate-800 dark:text-white">{currencySymbol}{netWorth.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+                    <span className="text-xl font-black text-slate-800 dark:text-white truncate max-w-[80%]">
+                      {currencySymbol}{netWorth.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                    </span>
                   </div>
                 </div>
                 <div className="mt-4 space-y-2 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700/50 shrink-0">
@@ -568,7 +621,7 @@ const Dashboard = () => {
                         <span className="text-xs font-bold text-slate-700 dark:text-slate-300 truncate">{item.name}</span>
                       </div>
                       <span className="text-xs font-black text-slate-900 dark:text-white tracking-tight shrink-0 pl-2">
-                        {currencySymbol}{(item.value || 0).toLocaleString()}
+                        {currencySymbol}{(item.value || 0).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}
                       </span>
                     </div>
                   ))}
@@ -584,13 +637,13 @@ const Dashboard = () => {
         </div>
 
         {/* Live Market Portfolio */}
-        <div className="mt-2">
+        <div className="mt-8">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest flex items-center gap-2">
                 <FaBolt className="text-amber-500" /> Live Market Portfolio
               </h3>
-              <p className="text-[10px] text-slate-500 font-medium mt-0.5">Real-time prices from your selected assets</p>
+              <p className="text-[10px] text-slate-500 font-medium mt-0.5">Real-time prices for your watchlist & holdings</p>
             </div>
             <div className="flex items-center gap-2">
               {isMarketLoading && <HiOutlineRefresh className="text-slate-400 animate-spin" size={18} />}
@@ -621,7 +674,7 @@ const Dashboard = () => {
         </div>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pb-10">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pb-10">
           <button onClick={() => navigate('/dashboard/goals')} className="group relative overflow-hidden p-5 flex flex-col items-center justify-center gap-3 bg-gradient-to-br from-amber-50 to-yellow-50 dark:from-amber-500/5 dark:to-yellow-500/5 text-amber-600 dark:text-amber-400 rounded-[2rem] hover:shadow-xl transition-all font-black text-xs uppercase tracking-widest border border-amber-200 dark:border-amber-500/20 active:scale-95">
             <FaTrophy size={24} className="group-hover:scale-110 transition-transform" /> Savings Goals
           </button>
