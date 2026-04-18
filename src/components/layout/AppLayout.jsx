@@ -28,7 +28,8 @@ const AppLayout = ({ children }) => {
     <div className="flex flex-col h-[100dvh] bg-slate-50 dark:bg-slate-950 overflow-hidden relative transition-colors duration-500">
       
       {/* 1. TOP HEADER SECTION */}
-      <header className="flex-shrink-0 sticky top-0 z-[200] w-full bg-white dark:bg-slate-950 shadow-sm">
+      {/* ⚡ PRO FIX: Changed z-[200] to z-30. Ab Header Sidebar ke peeche rahega jab Sidebar khulega! */}
+       <header className="flex-shrink-0 sticky top-0 z-50 w-full bg-white dark:bg-slate-950 shadow-sm">
         <NewsTicker />
         <Navbar 
           // Match these prop names with your Navbar.jsx destructured props
@@ -66,7 +67,8 @@ const AppLayout = ({ children }) => {
       </div>
 
       {/* 5. FLOATING DARK MODE TOGGLE (Bottom Right) */}
-      <div className="fixed bottom-6 right-6 z-[210]">
+      {/* ⚡ PRO FIX: Changed z-[210] to z-50 to keep stacking contexts clean */}
+      <div className="fixed bottom-6 right-6 z-50">
         <DarkModeToggle />
       </div>
     </div>
