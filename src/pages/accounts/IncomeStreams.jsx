@@ -2,19 +2,21 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { collection, addDoc, doc, deleteDoc, updateDoc, onSnapshot, query, orderBy, where, getDocs, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
-
-// 🚀 IMPORTED REPORT UTILS
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
 
 import { 
   HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
   HiOutlineSearch, HiOutlineRefresh, HiOutlineBriefcase,
   HiOutlineLockClosed, HiOutlineExclamationCircle, HiOutlineChevronDown,
-  HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable
+  HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable,
+  HiOutlineCalendar, HiOutlineShieldCheck, HiOutlineTrendingUp, HiOutlineTrendingDown,
+  HiOutlineCash, HiOutlineGlobe
 } from 'react-icons/hi';
-import { FaMoneyBillWave, FaArrowDown, FaBitcoin, FaUniversity, FaWallet, FaExchangeAlt, FaBuilding } from 'react-icons/fa';
-
-const fiatCurrencies = ["USD", "EUR", "GBP", "AUD", "CAD", "SGD", "AED", "SAR", "JPY", "CNY", "INR", "NPR", "PKR", "BDT"];
+import { 
+  FaMoneyBillWave, FaBitcoin, FaUniversity, FaWallet, 
+  FaExchangeAlt, FaBuilding, FaGem, FaChartLine, FaPiggyBank,
+  FaArrowUp, FaArrowDown
+} from 'react-icons/fa';
 
 const cryptoPlatformsList = [
   "Binance", "CoinDCX", "WazirX", "ZebPay", "Mudrex", "SunCrypto",
@@ -26,7 +28,6 @@ const cryptoPlatformsList = [
   "Coinpot", "RollerCoin", "Other Wallet/Site"
 ];
 
-// 🚀 BINANCE SAFE COINS TO PREVENT CORS/404 ERRORS
 const BINANCE_SAFE_COINS = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC', 'BCH', 'ADA', 'XMR', 'XLM', 'DAI', 'ZEC', 'SHIB', 'SUI', 'TON', 'DOT', 'PEPE', 'NEAR', 'POL', 'ATOM', 'ARB', 'BONK', 'CAKE', 'XTZ', 'FLOKI', 'OP', 'TWT', 'BAT', 'DGB', 'KAVA', 'AVAX', 'MEME', 'DASH'];
 
 const incomeCategories = [
@@ -42,10 +43,34 @@ const hashPIN = async (pinCode) => {
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
+// 🚀 Premium Stat Card Component
+const StatCard = ({ title, value, icon: Icon, color, trend, subtitle }) => (
+  <div className={`relative overflow-hidden rounded-2xl p-5 bg-gradient-to-br ${color} text-white shadow-xl group hover:scale-[1.02] transition-all duration-300`}>
+    <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(255,255,255,0.15),transparent_70%)]" />
+    <Icon className="absolute right-[-10%] bottom-[-10%] text-7xl opacity-10 group-hover:scale-110 transition-transform duration-500" />
+    <div className="relative z-10">
+      <p className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-1">{title}</p>
+      <h3 className="text-2xl font-black tracking-tight">{value}</h3>
+      {trend !== undefined && (
+        <div className={`flex items-center gap-1 mt-2 text-[10px] font-bold ${trend >= 0 ? 'text-emerald-200' : 'text-rose-200'}`}>
+          {trend >= 0 ? <HiOutlineTrendingUp size={14} /> : <HiOutlineTrendingDown size={14} />}
+          {Math.abs(trend)}% from last month
+        </div>
+      )}
+      {subtitle && <p className="text-[9px] font-medium opacity-70 mt-1">{subtitle}</p>}
+    </div>
+  </div>
+);
+
 const IncomeStreams = () => {
-  // 🚀 ENGINE CONNECTED: Global Date Formatter
+  // 🚀 FETCHING BASE CURRENCY AND WATCHLIST FROM CONTEXT
   const { user, baseCurrency = 'INR', selectedCryptos = [], selectedFiats = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
+
+  // 🚀 DYNAMIC CURRENCY LIST: Merges Base Currency and Watchlist
+  const availableFiats = useMemo(() => {
+    return Array.from(new Set([baseCurrency, ...selectedFiats]));
+  }, [baseCurrency, selectedFiats]);
 
   const [incomes, setIncomes] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -55,14 +80,12 @@ const IncomeStreams = () => {
   const [filterCategory, setFilterCategory] = useState('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  
-  // 🔐 Security Delete States
   const [deleteContext, setDeleteContext] = useState(null); 
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
-
   const [customUserCoins, setCustomUserCoins] = useState([]); 
+  const [bankWalletLogs, setBankWalletLogs] = useState([]);
 
   const todayDate = new Date().toISOString().split('T')[0];
 
@@ -72,11 +95,9 @@ const IncomeStreams = () => {
 
   const [formData, setFormData] = useState({
     title: '', category: incomeCategories[0], vault: 'bank', 
-    subWallet: '', 
-    cryptoPlatform: 'Binance', asset: baseCurrency, 
+    subWallet: '', cryptoPlatform: 'Binance', asset: baseCurrency, 
     amount: '', exchangeRate: 1, date: todayDate, linkedIncomeId: '',
-    isCustomSingle: false,
-    isSynced: false 
+    isCustomSingle: false, isSynced: false 
   });
 
   useEffect(() => {
@@ -113,8 +134,6 @@ const IncomeStreams = () => {
     return Array.from(coinMap.values());
   }, [customUserCoins, selectedCryptos]);
 
-  // 🚀 FETCH EXISTING BANKS FOR AUTO-SUGGEST
-  const [bankWalletLogs, setBankWalletLogs] = useState([]);
   useEffect(() => {
      if(!user) return;
      const fetchBanks = async () => {
@@ -127,7 +146,6 @@ const IncomeStreams = () => {
   
   const existingBanks = useMemo(() => Array.from(new Set(bankWalletLogs)), [bankWalletLogs]);
 
-  // 🚀 UPDATED HYBRID LIVE RATE FETCHER (WITH CORS FIX)
   const fetchLiveRate = async () => {
     if (formData.asset === baseCurrency) return;
     setIsFetchingRate(true);
@@ -136,11 +154,13 @@ const IncomeStreams = () => {
       const fiatData = await fiatRes.json();
       const usdToBase = fiatData.rates[baseCurrency] || 1;
 
-      if (fiatCurrencies.includes(formData.asset)) {
+      // Handle Fiat Currency
+      if (availableFiats.includes(formData.asset)) {
         const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${formData.asset}`);
         const data = await res.json();
         if (data.rates[baseCurrency]) setFormData(prev => ({ ...prev, exchangeRate: data.rates[baseCurrency].toFixed(4) }));
       } else {
+        // Handle Crypto
         const upperSym = formData.asset.toUpperCase();
         const coinObj = fullDatabase.find(c => c.symbol === upperSym) || {};
         const searchId = coinObj.id || formData.asset.toLowerCase();
@@ -190,7 +210,6 @@ const IncomeStreams = () => {
   const isForeign = formData.asset !== baseCurrency;
   const finalBaseAmount = (parseFloat(formData.amount) || 0) * (isForeign ? (parseFloat(formData.exchangeRate) || 1) : 1);
 
-  // --- Processed Incomes & Running Balance Logic ---
   const processedIncomes = useMemo(() => {
     const filtered = incomes.filter(inc => {
       const matchSearch = inc.title.toLowerCase().includes(searchTerm.toLowerCase()) || inc.asset.toLowerCase().includes(searchTerm.toLowerCase());
@@ -203,7 +222,6 @@ const IncomeStreams = () => {
     
     sorted.forEach(t => {
       const dateObj = new Date(t.date || new Date());
-      // 🚀 GLOBAL DATE MONTH GROUPING
       const monthName = formatGlobalDate ? formatGlobalDate(dateObj, 'monthYear') : dateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
       const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
       
@@ -218,8 +236,12 @@ const IncomeStreams = () => {
   }, [incomes, searchTerm, filterCategory, formatGlobalDate]);
 
   const totalIncomeBase = incomes.reduce((acc, curr) => acc + (Number(curr.finalBaseAmount) || 0), 0);
+  const thisMonthIncome = useMemo(() => {
+    const now = new Date();
+    const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    return incomes.filter(i => i.date?.startsWith(thisMonth)).reduce((acc, i) => acc + (Number(i.finalBaseAmount) || 0), 0);
+  }, [incomes]);
 
-  // 🚀 REPORT DOWNLOAD LOGIC
   const handleDownloadReport = (format) => {
     const filteredForReport = incomes.filter(inc => {
       const matchSearch = inc.title.toLowerCase().includes(searchTerm.toLowerCase()) || inc.asset.toLowerCase().includes(searchTerm.toLowerCase());
@@ -304,7 +326,6 @@ const IncomeStreams = () => {
     try {
       if (editingId) {
         if (formData.isSynced) {
-           // SAFE EDIT: Only update subWallet mapping for synced entries
            await updateDoc(doc(db, "users", user.uid, "incomeLogs", editingId), {
                subWallet: formData.subWallet,
                vault: formData.vault
@@ -323,7 +344,6 @@ const IncomeStreams = () => {
               }
            }
         } else {
-           // Normal Edit
            const vaults = ['cashWallet', 'bankWallet', 'onlineWallet', 'cryptoWalletLogs'];
            for (const v of vaults) {
              const q = query(collection(db, "users", user.uid, v), where("linkedIncomeId", "==", linkId));
@@ -341,11 +361,7 @@ const IncomeStreams = () => {
     } catch (error) { alert("Error saving."); } finally { setIsSaving(false); }
   };
 
-  const initiateDelete = (rec) => {
-    setDeleteContext(rec);
-    setPinInput('');
-    setPinError('');
-  };
+  const initiateDelete = (rec) => { setDeleteContext(rec); setPinInput(''); setPinError(''); };
 
   const executeSecureDelete = async (e) => {
     e.preventDefault();
@@ -402,7 +418,7 @@ const IncomeStreams = () => {
     const isSyncedEntry = !!(rec.linkedIncomeId && !rec.linkedIncomeId.startsWith('INC_'));
     setFormData({ 
       title: rec.title, category: rec.category, vault: rec.vault || 'bank', 
-      subWallet: rec.subWallet || rec.bankName || rec.walletName || '', // Legacy mappings
+      subWallet: rec.subWallet || rec.bankName || rec.walletName || '',
       cryptoPlatform: rec.cryptoPlatform || cryptoPlatformsList[12], asset: rec.asset || baseCurrency, 
       amount: rec.amount, exchangeRate: rec.exchangeRate || 1, date: rec.date, linkedIncomeId: rec.linkedIncomeId,
       isCustomSingle: rec.vault === 'crypto' && !cryptoPlatformsList.includes(rec.cryptoPlatform),
@@ -414,374 +430,476 @@ const IncomeStreams = () => {
 
   const getVaultIcon = (v) => {
     if (v === 'bank') return <FaUniversity className="text-blue-500" />;
-    if (v === 'cash') return <FaMoneyBillWave className="text-emerald-500" />;
+    if (v === 'cash') return <HiOutlineCash className="text-emerald-500" />;
     if (v === 'crypto') return <FaBitcoin className="text-orange-500" />;
     return <FaWallet className="text-purple-500" />;
   };
 
   return (
-    <div className="pt-24 space-y-8 animate-in fade-in duration-500 pb-20 max-w-7xl mx-auto px-4 md:px-0">
-      {/* HEADER */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-3.5 bg-emerald-500/10 text-emerald-500 rounded-2xl ring-1 ring-emerald-500/20"><HiOutlineBriefcase size={26} /></div>
-            <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Income Streams</h1>
-          </div>
-          <p className="text-sm font-semibold text-slate-500 max-w-xl">Track salaries, crypto rewards, and freelance income. Auto-synced with your vaults.</p>
-        </div>
+    // 🚀 FIXED: Global scrolling fix with natural block layout (no fixed height cutoff)
+    <div className="w-full h-auto pb-24">
+      <div className="pt-8 md:pt-12 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 md:px-6">
         
-        <div className="flex items-center gap-2 md:gap-3">
-          {/* 🚀 DOWNLOAD REPORT DROPDOWN */}
-          <div className="relative group">
-            <button className="flex items-center gap-1 md:gap-2 p-3 md:p-3.5 bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400 rounded-2xl font-bold text-xs md:text-sm hover:bg-indigo-100 transition-colors border border-indigo-100 dark:border-indigo-500/20 shadow-sm">
-              <HiOutlineDownload size={18}/> 
-              <span className="hidden sm:inline">Download Report</span>
-              <span className="sm:hidden">Report</span>
-            </button>
-            <div className="absolute top-full right-0 md:left-0 md:right-auto mt-2 w-36 md:w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all flex flex-col p-1 z-50">
-              <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] md:text-xs font-bold rounded-lg text-left w-full">
-                <HiOutlineDocumentText className="text-rose-500" size={16}/> As PDF
-              </button>
-              <button onClick={() => handleDownloadReport('excel')} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] md:text-xs font-bold rounded-lg text-left w-full">
-                <HiOutlineTable className="text-emerald-500" size={16}/> As Excel (CSV)
-              </button>
-            </div>
-          </div>
-
-          <button onClick={openModal} className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 md:px-7 py-3 md:py-3.5 rounded-2xl font-black text-xs md:text-sm shadow-lg active:scale-95 transition-all flex items-center gap-2 whitespace-nowrap">
-            <HiOutlinePlus size={20}/> <span className="hidden sm:inline">Log New Income</span><span className="sm:hidden">Log</span>
-          </button>
-        </div>
-      </div>
-
-      {/* STATS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="p-8 bg-slate-900 rounded-[2.5rem] shadow-xl md:col-span-2 relative overflow-hidden border border-slate-700/50">
-           <div className="absolute right-0 top-0 opacity-5 text-white blur-[2px] -mt-10 -mr-10"><HiOutlineBriefcase size={250} /></div>
-           <div className="relative z-10">
-             <p className="text-sm font-black text-emerald-400 uppercase tracking-widest mb-2">Total Life-Time Value</p>
-             <h2 className="text-5xl md:text-6xl font-black text-white tracking-tighter"><span className="text-emerald-500 mr-2">{currencySymbol}</span>{totalIncomeBase.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
-           </div>
-        </div>
-        <div className="p-8 bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col justify-center">
-           <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Total Entries</p>
-           <p className="text-4xl font-black dark:text-white">{incomes.length}</p>
-        </div>
-      </div>
-
-      {/* SEARCH/FILTER */}
-      <div className="flex flex-col md:flex-row gap-4 bg-white dark:bg-slate-900 p-2 rounded-3xl border border-slate-200 dark:border-slate-800">
-        <div className="relative flex-1">
-          <HiOutlineSearch className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input type="text" placeholder="Search client or asset..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-14 pr-4 py-4 bg-transparent font-bold outline-none dark:text-white"/>
-        </div>
-        <div className="w-px bg-slate-200 dark:bg-slate-800 hidden md:block my-2"></div>
-        <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className="pl-5 pr-12 py-4 bg-transparent font-bold outline-none cursor-pointer dark:text-white border-t md:border-t-0 border-slate-200 dark:border-slate-800">
-          <option value="all">All Categories</option>
-          {incomeCategories.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-      </div>
-
-      {/* LEDGER */}
-      <div className="space-y-8">
-        {isLoading ? <div className="p-10 text-center animate-pulse font-black text-slate-400">SYNCING DATA...</div> : processedIncomes.length === 0 ? (
-          <div className="p-16 text-center bg-white dark:bg-slate-900 rounded-3xl text-slate-500 font-bold border border-slate-200 dark:border-slate-800">No Incomes Found.</div>
-        ) : processedIncomes.map((month) => (
-          <div key={month.monthName} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] overflow-hidden shadow-sm">
-            <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/20">
-              <h2 className="text-xl font-black dark:text-white">{month.monthName}</h2>
-              <div className="text-right">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Opening Balance</p>
-                <p className="font-bold dark:text-slate-300">{currencySymbol}{month.openingBalance.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+        {/* Premium Header */}
+        <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(16,185,129,0.1),transparent_70%)]" />
+          <div className="absolute right-0 top-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl" />
+          
+          <div className="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center shadow-lg">
+                  <HiOutlineBriefcase size={24} className="text-white" />
+                </div>
+                <div>
+                  <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">Income Streams</h1>
+                  <p className="text-sm font-medium text-slate-400">Track salaries, crypto rewards, and freelance income</p>
+                </div>
               </div>
             </div>
-            <div className="overflow-x-auto custom-scrollbar">
-              <table className="w-full text-left border-collapse min-w-[900px]">
-                <thead className="bg-white dark:bg-slate-900 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-800">
-                  <tr>
-                    <th className="p-4 pl-6">Date</th>
-                    <th className="p-4">Source & Category</th>
-                    <th className="p-4">Vault Details</th>
-                    <th className="p-4 text-right">Native Asset</th>
-                    <th className="p-4 text-right">Base Value</th>
-                    <th className="p-4 pr-6 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50 dark:divide-slate-800/50">
-                  {month.records.map((rec) => (
-                    <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 group">
-                      {/* 🚀 GLOBAL DATE APPLIED HERE */}
-                      <td className="p-4 pl-6 text-xs font-bold text-slate-500">
-                        {formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rec.date}
-                      </td>
-                      <td className="p-4">
-                        <p className="font-black dark:text-white text-sm mb-0.5">{rec.title}</p>
-                        <span className="inline-block px-2 py-0.5 bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 text-[9px] font-black uppercase tracking-wider rounded">{rec.category}</span>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex flex-col gap-1 w-max bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg">
-                           <div className="flex items-center gap-2 text-xs font-black uppercase text-slate-500">
-                             {getVaultIcon(rec.vault)} {rec.vault} Vault
-                           </div>
-                           {(rec.vault === 'bank' || rec.vault === 'online') && rec.subWallet && (
-                             <div className="text-[10px] font-bold text-blue-500 flex items-center gap-1 mt-0.5 ml-1"><FaBuilding/> {rec.subWallet}</div>
-                           )}
-                           {rec.vault === 'crypto' && rec.cryptoPlatform && (
-                             <div className="text-[9px] font-bold text-slate-500 flex items-center gap-1"><FaBuilding/> {rec.cryptoPlatform}</div>
-                           )}
-                        </div>
-                      </td>
-                      <td className="p-4 text-right font-bold dark:text-slate-300">
-                         {rec.amount.toLocaleString()} <span className="text-[10px] text-slate-400 uppercase">{rec.asset}</span>
-                         {rec.asset !== baseCurrency && <p className="text-[9px] text-slate-400 font-bold mt-0.5">@ {rec.exchangeRate} rate</p>}
-                      </td>
-                      <td className="p-4 text-right font-black text-emerald-600">+{currencySymbol}{rec.finalBaseAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                      <td className="p-4 pr-6 text-right">
-                         <div className="flex items-center justify-end gap-2">
-                           {rec.linkedIncomeId && !rec.linkedIncomeId.startsWith('INC_') && (
-                              <span className="inline-block px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 text-[9px] font-black uppercase tracking-widest rounded border border-slate-200 dark:border-slate-700">Auto-Synced</span>
-                           )}
-                           {/* 🚀 ALWAYS SHOW PENCIL SO WE CAN FIX OLD BANK NAMES */}
-                           <button onClick={() => handleEdit(rec)} className="p-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-xl transition-all shadow-sm">
-                             <HiOutlinePencil size={18} />
-                           </button>
-                           <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-xl transition-all shadow-sm" title={rec.linkedIncomeId && !rec.linkedIncomeId.startsWith('INC_') ? "Force Delete Auto-Synced Entry" : "Delete"}>
-                             <HiOutlineTrash size={18} />
-                           </button>
-                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="px-6 py-4 flex justify-between items-center bg-emerald-50/30 dark:bg-emerald-900/10 border-t border-slate-100 dark:border-slate-800/80">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">End of Period</span>
-              <div className="text-right">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Mined / Earned</p>
-                <p className="text-xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">{currencySymbol}{(month.closingBalance || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* 🚀 MODAL ENGINE (RE-ALIGNED FOR PROPER SIZING & SELECTION) */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-[500] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden border dark:border-slate-800 animate-in zoom-in-95 flex flex-col max-h-[90dvh]">
             
-            {/* Header */}
-            <div className="px-8 py-5 flex justify-between items-center bg-emerald-500 text-white font-black shrink-0">
-              <h3 className="text-xl">{editingId ? 'EDIT INCOME ENTRY' : 'LOG INCOME'}</h3>
-              <button type="button" onClick={closeModal} className="p-2 hover:bg-white/20 rounded-full transition-colors"><HiOutlineX size={24}/></button>
-            </div>
-
-            {/* Scrollable Form Body */}
-            <form onSubmit={handleSaveEntry} className="p-8 space-y-6 overflow-y-auto custom-scrollbar">
+            <div className="flex items-center gap-3">
+              <div className="relative group">
+                <button className="flex items-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10">
+                  <HiOutlineDownload size={16} /> Report
+                </button>
+                <div className="absolute top-full right-0 mt-2 w-40 bg-slate-800 border border-slate-700 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all flex flex-col p-1 z-50">
+                  <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg">
+                    <HiOutlineDocumentText className="text-rose-400" size={16}/> PDF Document
+                  </button>
+                  <button onClick={() => handleDownloadReport('excel')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg">
+                    <HiOutlineTable className="text-emerald-400" size={16}/> Excel (CSV)
+                  </button>
+                </div>
+              </div>
               
-              {/* 🚀 WARNING FOR AUTO-SYNCED ENTRIES */}
+              <button 
+                onClick={openModal} 
+                className="flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-5 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-emerald-500/30"
+              >
+                <HiOutlinePlus size={18} /> Log Income
+              </button>
+            </div>
+          </div>
+          
+          {/* Stats Row */}
+          <div className="relative z-10 grid grid-cols-3 gap-3 mt-6">
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total Income</p>
+              <p className="text-lg font-black text-white">{currencySymbol}{totalIncomeBase.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+            </div>
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">This Month</p>
+              <p className="text-lg font-black text-emerald-400">{currencySymbol}{thisMonthIncome.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+            </div>
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total Entries</p>
+              <p className="text-lg font-black text-white">{incomes.length}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Search & Filter */}
+        <div className="flex flex-col md:flex-row gap-4">
+          <div className="relative flex-1">
+            <HiOutlineSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+            <input 
+              type="text" placeholder="Search by source or asset..."
+              value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-12 pr-4 py-4 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:border-emerald-500 transition-all placeholder-slate-400 dark:placeholder-slate-500 shadow-sm"
+            />
+          </div>
+          <div className="flex gap-2">
+            <select 
+              value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
+              className="px-4 py-4 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:border-emerald-500 cursor-pointer transition-all shadow-sm"
+            >
+              <option value="all">All Categories</option>
+              {incomeCategories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Ledger */}
+        <div className="space-y-6">
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-16">
+              <div className="relative">
+                <div className="absolute inset-0 bg-emerald-500 rounded-full blur-xl opacity-30 animate-pulse" />
+                <HiOutlineRefresh className="animate-spin text-4xl text-emerald-500 relative" />
+              </div>
+              <p className="text-sm font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest mt-4 animate-pulse">Loading Income Streams...</p>
+            </div>
+          ) : processedIncomes.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 bg-white dark:bg-slate-900 rounded-3xl border border-slate-300 dark:border-slate-800 shadow-sm">
+              <div className="w-20 h-20 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center mb-4">
+                <HiOutlineBriefcase className="text-4xl text-slate-400" />
+              </div>
+              <p className="text-sm font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">No income records found</p>
+              <p className="text-xs text-slate-500 mt-1">Log your first income to get started</p>
+            </div>
+          ) : (
+            processedIncomes.map((month) => (
+              <div key={month.monthName} className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm">
+                <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50">
+                  <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                    <HiOutlineCalendar className="text-emerald-500" size={18} />
+                    {month.monthName}
+                  </h2>
+                  <div className="text-right">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Opening</p>
+                    <p className="font-bold text-slate-800 dark:text-slate-200">{currencySymbol}{month.openingBalance.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-100/50 dark:bg-slate-800/30 text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                      <tr>
+                        <th className="p-4 pl-6">Date</th>
+                        <th className="p-4">Source & Category</th>
+                        <th className="p-4">Vault</th>
+                        <th className="p-4 text-right">Amount</th>
+                        <th className="p-4 text-right">Base Value</th>
+                        <th className="p-4 pr-6 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                      {month.records.map((rec) => (
+                        <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors group">
+                          <td className="p-4 pl-6">
+                            <p className="font-bold text-slate-700 dark:text-slate-300 text-sm">
+                              {formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rec.date}
+                            </p>
+                          </td>
+                          <td className="p-4">
+                            <p className="font-black text-slate-900 dark:text-white text-sm">{rec.title}</p>
+                            <span className="inline-block px-2 py-0.5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[9px] font-black uppercase tracking-wider rounded mt-1 border border-emerald-200 dark:border-emerald-500/20 shadow-sm">
+                              {rec.category}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <div className="flex items-center gap-2">
+                              {getVaultIcon(rec.vault)}
+                              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 capitalize">{rec.vault}</span>
+                              {rec.subWallet && (
+                                <span className="text-[9px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded font-bold border border-slate-200 dark:border-slate-700">
+                                  {rec.subWallet}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-4 text-right">
+                            <p className="font-black text-slate-800 dark:text-slate-200">
+                              {rec.amount.toLocaleString()} <span className="text-[10px] text-slate-500 font-bold ml-0.5">{rec.asset}</span>
+                            </p>
+                          </td>
+                          <td className="p-4 text-right">
+                            <p className="text-base font-black text-emerald-600 dark:text-emerald-400">
+                              +{currencySymbol}{rec.finalBaseAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                            </p>
+                          </td>
+                          <td className="p-4 pr-6">
+                            <div className="flex items-center justify-end gap-2">
+                              {rec.linkedIncomeId && !rec.linkedIncomeId.startsWith('INC_') && (
+                                <span className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[8px] font-black rounded border border-amber-200 dark:border-amber-500/30">SYNCED</span>
+                              )}
+                              <button onClick={() => handleEdit(rec)} className="p-2 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg transition-all border border-slate-300 dark:border-slate-700 shadow-sm">
+                                <HiOutlinePencil size={16} />
+                              </button>
+                              <button onClick={() => initiateDelete(rec)} className="p-2 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-lg transition-all border border-slate-300 dark:border-slate-700 shadow-sm">
+                                <HiOutlineTrash size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex justify-end bg-slate-50/80 dark:bg-slate-800/50">
+                  <div className="text-right">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Closing Balance</p>
+                    <p className="text-xl font-black text-emerald-700 dark:text-emerald-400">
+                      {currencySymbol}{(month.closingBalance || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Add/Edit Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90dvh] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-200 dark:border-slate-700">
+            
+            <div className="px-6 py-5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white flex justify-between items-center shrink-0">
+              <h3 className="text-xl font-black flex items-center gap-2">
+                <HiOutlineBriefcase /> {editingId ? 'Edit Income' : 'Log Income'}
+              </h3>
+              <button onClick={closeModal} className="p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors">
+                <HiOutlineX size={20} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleSaveEntry} className="p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
               {formData.isSynced && (
-                 <div className="bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 p-4 rounded-xl text-xs font-bold leading-relaxed border border-amber-200 dark:border-amber-500/30">
-                   <span className="flex items-center gap-1 mb-1"><HiOutlineExclamationCircle size={16}/> Auto-Synced Entry</span>
-                   This income came from outside (e.g. Yield Farming or Party Refund). You can only update the <span className="underline">Bank Name / Vault</span> here to organize your money. To change amounts or dates, edit the original source.
-                 </div>
+                <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 p-4 rounded-xl text-xs font-bold leading-relaxed border border-amber-200 dark:border-amber-500/30">
+                  <p className="flex items-center gap-1 mb-1"><HiOutlineExclamationCircle size={16}/> Auto-Synced Entry</p>
+                  This entry is linked to an Income or Expense log. You can only update the <span className="underline">Vault/Bank Name</span> here. To change the amount, please edit the source transaction.
+                </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Title / Source Name</label>
-                  <input disabled={formData.isSynced} type="text" required value={formData.title} onChange={(e)=>setFormData({...formData, title:e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-60"/>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div>
+                  <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Source / Title</label>
+                  <input 
+                    disabled={formData.isSynced} type="text" required value={formData.title} 
+                    onChange={(e) => setFormData({...formData, title: e.target.value})} 
+                    placeholder="e.g., Monthly Salary"
+                    className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-60 transition-colors placeholder-slate-400 dark:placeholder-slate-500"
+                  />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Category</label>
+                <div>
+                  <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Category</label>
                   <div className="relative">
-                    <select disabled={formData.isSynced} value={formData.category} onChange={(e)=>setFormData({...formData, category:e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer appearance-none disabled:opacity-60">
+                    <select 
+                      disabled={formData.isSynced} value={formData.category} 
+                      onChange={(e) => setFormData({...formData, category: e.target.value})}
+                      className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-60 appearance-none cursor-pointer transition-colors"
+                    >
                       {incomeCategories.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
-                    <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
+                    <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
                   </div>
                 </div>
               </div>
 
-              {/* 🚀 VAULT LOGIC ENGINE - FIXED FOR CRYPTO SELECTION */}
-              <div className="p-5 bg-emerald-50/30 dark:bg-emerald-500/5 rounded-3xl border border-emerald-100 dark:border-emerald-500/10 space-y-6">
-                 
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Vault / Storage</label>
-                      <div className="relative">
-                        <select value={formData.vault} onChange={(e) => {
-                            const v = e.target.value;
-                            const cList = cryptoSymbols.length > 0 ? cryptoSymbols : ['BTC'];
-                            setFormData({
-                                ...formData, 
-                                vault: v, 
-                                asset: v === 'crypto' ? cList[0] : baseCurrency, 
-                                subWallet: '',
-                                exchangeRate: 1
-                            });
-                        }} className="w-full p-4 bg-white dark:bg-slate-900 border dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer appearance-none">
-                          <option value="bank">Bank Account</option>
-                          <option value="online">Online E-Wallet</option>
-                          <option value="cash">Physical Cash</option>
-                          <option value="crypto" className="font-black text-emerald-500">Crypto Engine</option>
-                        </select>
-                        <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
-                      </div>
+              <div className="p-4 bg-emerald-50/50 dark:bg-slate-800/80 rounded-xl border border-emerald-200 dark:border-slate-700 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Vault</label>
+                    <div className="relative">
+                      <select 
+                        value={formData.vault} 
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          const cList = cryptoSymbols.length > 0 ? cryptoSymbols : ['BTC'];
+                          setFormData({
+                            ...formData, vault: v, 
+                            asset: v === 'crypto' ? cList[0] : baseCurrency, 
+                            subWallet: '', exchangeRate: 1
+                          });
+                        }}
+                        className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 appearance-none cursor-pointer transition-colors"
+                      >
+                        <option value="bank">Bank Account</option>
+                        <option value="online">Online E-Wallet</option>
+                        <option value="cash">Physical Cash</option>
+                        <option value="crypto">Crypto Engine</option>
+                      </select>
+                      <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
                     </div>
+                  </div>
 
-                    {/* FIAT SUB-WALLET */}
-                    {(formData.vault === 'bank' || formData.vault === 'online') && (
-                      <div className="space-y-2 animate-in fade-in">
-                        <label className="text-[11px] font-black text-blue-500 uppercase tracking-widest ml-1">{formData.vault === 'bank' ? 'Bank Name' : 'Wallet Name'}</label>
-                        <input type="text" list="sub-wallets-inc" required value={formData.subWallet} onChange={(e) => setFormData({...formData, subWallet: e.target.value})} placeholder={formData.vault === 'bank' ? "e.g. SBI, RRR" : "e.g. Paytm, eSewa"} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50" />
-                        <datalist id="sub-wallets-inc">
-                           {existingBanks.map(b => <option key={b} value={b} />)}
-                        </datalist>
-                      </div>
-                    )}
+                  {(formData.vault === 'bank' || formData.vault === 'online') && (
+                    <div className="animate-in fade-in">
+                      <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">
+                        {formData.vault === 'bank' ? 'Bank Name' : 'Wallet Name'}
+                      </label>
+                      <input 
+                        type="text" list="sub-wallets-inc" required value={formData.subWallet} 
+                        onChange={(e) => setFormData({...formData, subWallet: e.target.value})} 
+                        placeholder={formData.vault === 'bank' ? "e.g., SBI, Chase" : "e.g., PayPal, Skrill"}
+                        className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 transition-colors placeholder-slate-400 dark:placeholder-slate-500"
+                      />
+                      <datalist id="sub-wallets-inc">
+                        {existingBanks.map(b => <option key={b} value={b} />)}
+                      </datalist>
+                    </div>
+                  )}
 
-                    {/* CRYPTO PLATFORM */}
-                    {formData.vault === 'crypto' && (
-                      <div className="space-y-2 animate-in fade-in">
-                        <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Platform</label>
-                        {formData.isCustomSingle ? (
-                          <div className="flex gap-2">
-                            <input type="text" required placeholder="Custom platform..." value={formData.cryptoPlatform} onChange={(e)=>setFormData({...formData, cryptoPlatform: e.target.value})} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none" />
-                            <button type="button" onClick={()=>{setFormData({...formData, isCustomSingle: false, cryptoPlatform: cryptoPlatformsList[12]});}} className="px-4 bg-slate-100 dark:bg-slate-800 rounded-2xl text-slate-500"><HiOutlineX size={20}/></button>
-                          </div>
-                        ) : (
-                          <div className="relative">
-                            <select value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} onChange={(e) => { if(e.target.value === 'CUSTOM'){ setFormData({...formData, isCustomSingle: true, cryptoPlatform: ''}); } else { setFormData({...formData, cryptoPlatform: e.target.value}); } }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer appearance-none">
-                              {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
-                              <option value="CUSTOM" className="font-black text-orange-500">✨ Custom Platform</option>
-                            </select>
-                            <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* FIAT CURRENCY */}
-                    {formData.vault !== 'crypto' && (
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Asset Currency</label>
-                        <div className="relative">
-                          <select disabled={formData.isSynced} value={formData.asset} onChange={(e)=>setFormData({...formData, asset:e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})} className="w-full p-4 bg-white dark:bg-slate-900 border dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer appearance-none disabled:opacity-60">
-                            <option value={baseCurrency}>{baseCurrency} (Base)</option>
-                            {selectedFiats.filter(c => c !== baseCurrency).map(a => <option key={a} value={a}>{a}</option>)}
-                          </select>
-                          <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
+                  {formData.vault === 'crypto' && (
+                    <div className="animate-in fade-in">
+                      <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Platform</label>
+                      {formData.isCustomSingle ? (
+                        <div className="flex gap-2">
+                          <input 
+                            type="text" required value={formData.cryptoPlatform} 
+                            onChange={(e) => setFormData({...formData, cryptoPlatform: e.target.value})} 
+                            className="flex-1 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 transition-colors"
+                          />
+                          <button type="button" onClick={() => setFormData({...formData, isCustomSingle: false, cryptoPlatform: cryptoPlatformsList[0]})} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">
+                            <HiOutlineX size={20} />
+                          </button>
                         </div>
-                      </div>
-                    )}
-                 </div>
-
-                 {/* 🚀 CRYPTO COIN SELECTION FIX */}
-                 {formData.vault === 'crypto' && (
-                    <div className="space-y-2 animate-in fade-in">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Crypto Asset</label>
-                      <div className="relative">
-                        <select disabled={formData.isSynced} value={formData.asset} onChange={(e)=>setFormData({...formData, asset:e.target.value, exchangeRate: 1})} className="w-full p-4 bg-white dark:bg-slate-900 border dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none cursor-pointer appearance-none disabled:opacity-60">
-                          {cryptoSymbols.map(a=><option key={a} value={a}>{a}</option>)}
-                        </select>
-                        <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
-                      </div>
+                      ) : (
+                        <div className="relative">
+                          <select 
+                            value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} 
+                            onChange={(e) => {
+                              if(e.target.value === 'CUSTOM') {
+                                setFormData({...formData, isCustomSingle: true, cryptoPlatform: ''});
+                              } else {
+                                setFormData({...formData, cryptoPlatform: e.target.value});
+                              }
+                            }}
+                            className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 appearance-none cursor-pointer transition-colors"
+                          >
+                            {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
+                            <option value="CUSTOM">✨ Custom Platform</option>
+                          </select>
+                          <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
+                        </div>
+                      )}
                     </div>
-                 )}
-              </div>
+                  )}
+                </div>
 
-              {/* AMOUNT ENTRY */}
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Quantity Received</label>
-                <div className="relative">
-                  <input disabled={formData.isSynced} type="number" step="any" required value={formData.amount} onChange={(e)=>setFormData({...formData, amount:e.target.value})} placeholder="0.00" className="w-full p-4 bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 rounded-2xl font-black text-2xl text-emerald-600 outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-60 text-center tracking-widest"/>
-                  <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-slate-400">{formData.asset}</span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Asset</label>
+                    <div className="relative">
+                      <select 
+                        disabled={formData.isSynced} value={formData.asset} 
+                        onChange={(e) => setFormData({...formData, asset: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})}
+                        className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-60 appearance-none cursor-pointer transition-colors"
+                      >
+                        {formData.vault === 'crypto' ? (
+                          cryptoSymbols.map(a => <option key={a} value={a}>{a}</option>)
+                        ) : (
+                          <>
+                            <option value={baseCurrency}>{baseCurrency} (Base)</option>
+                            {availableFiats.filter(c => c !== baseCurrency).map(a => <option key={a} value={a}>{a}</option>)}
+                          </>
+                        )}
+                      </select>
+                      <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Amount ({formData.asset})</label>
+                    <input 
+                      disabled={formData.isSynced} type="number" step="any" required value={formData.amount} 
+                      onChange={(e) => setFormData({...formData, amount: e.target.value})} 
+                      placeholder="0.00"
+                      className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-60 text-lg placeholder-slate-400 dark:placeholder-slate-500 transition-colors"
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* RATE SYNCING */}
               {isForeign && (
-                <div className={`p-4 bg-blue-50 dark:bg-blue-500/5 rounded-2xl border dark:border-blue-500/10 flex items-center justify-between ${formData.isSynced ? 'opacity-60' : ''}`}>
-                   <div className="flex items-center gap-2">
-                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Rate:</span>
-                     <input disabled={formData.isSynced} type="number" step="any" required value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} placeholder={`in ${baseCurrency}`} className="w-24 p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg font-bold dark:text-white outline-none focus:border-blue-400 text-xs" />
-                   </div>
-                   <button type="button" onClick={fetchLiveRate} disabled={isFetchingRate || formData.isSynced} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center gap-1 transition-colors">
-                     <HiOutlineRefresh className={isFetchingRate ? 'animate-spin' : ''} /> {isFetchingRate ? 'FETCHING' : 'LIVE RATE'}
-                   </button>
+                <div className="p-4 bg-emerald-50 dark:bg-slate-800/80 border border-emerald-200 dark:border-slate-700 rounded-xl flex items-center justify-between shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-black text-slate-600 dark:text-slate-400">Rate: 1 {formData.asset} =</span>
+                    <input 
+                      disabled={formData.isSynced} type="number" step="any" required value={formData.exchangeRate} 
+                      onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} 
+                      className="w-28 p-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none text-sm transition-colors disabled:opacity-60"
+                    />
+                    <span className="text-xs font-black text-slate-600 dark:text-slate-400">{baseCurrency}</span>
+                  </div>
+                  <button 
+                    type="button" onClick={fetchLiveRate} disabled={isFetchingRate || formData.isSynced}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center gap-1 transition-colors shadow-sm"
+                  >
+                    <HiOutlineRefresh className={isFetchingRate ? "animate-spin" : ""} size={12} /> Live
+                  </button>
                 </div>
               )}
 
-              {/* 🚀 GLOBAL DATE IN MODAL */}
-              <div className="flex justify-between items-center p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700">
-                 <div className="flex flex-col">
-                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Date</label>
-                   <input disabled={formData.isSynced} type="date" required value={formData.date} onChange={(e)=>setFormData({...formData, date:e.target.value})} className="bg-transparent font-black dark:text-white outline-none cursor-pointer disabled:opacity-60 pl-1"/>
-                   <span className="text-[10px] font-bold text-emerald-500 mt-1 ml-1">{formatGlobalDate ? formatGlobalDate(formData.date, 'short') : ''}</span>
-                 </div>
-                 <div className="w-px h-10 bg-slate-200 dark:bg-slate-700"></div>
-                 <div className="text-right pl-2">
-                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Final Fiat Impact</p>
-                   <p className="text-2xl font-black text-emerald-500 tracking-tight">{currencySymbol}{finalBaseAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
-                 </div>
+              <div className="p-4 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Date</label>
+                    <input 
+                      disabled={formData.isSynced} type="date" required value={formData.date} 
+                      onChange={(e) => setFormData({...formData, date: e.target.value})}
+                      className="block mt-1 p-2 rounded-lg bg-white dark:bg-slate-900 font-bold text-slate-900 dark:text-white outline-none cursor-pointer disabled:opacity-60 border border-slate-300 dark:border-slate-700 transition-colors shadow-sm"
+                    />
+                    <p className="text-[9px] text-emerald-600 dark:text-emerald-400 mt-1.5 ml-1 font-bold">{formatGlobalDate ? formatGlobalDate(formData.date, 'short') : ''}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">Final Value</p>
+                    <p className="text-2xl font-black text-emerald-700 dark:text-emerald-400 tracking-tight mt-1">
+                      {currencySymbol}{finalBaseAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                    </p>
+                  </div>
+                </div>
               </div>
 
-              {/* SUBMIT BUTTON */}
-              <div className="pt-2">
-                <button type="submit" disabled={isSaving} className="w-full p-5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-[2rem] font-black text-lg shadow-xl shadow-emerald-500/20 active:scale-95 transition-all flex justify-center items-center gap-2">
-                  {isSaving ? <HiOutlineRefresh className="animate-spin text-2xl" /> : null}
-                  {isSaving ? 'SYNCING...' : (editingId ? 'UPDATE RECORD' : 'CONFIRM INCOME')}
+              <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-2">
+                <button 
+                  type="submit" disabled={isSaving} 
+                  className={`w-full p-4 rounded-xl font-black text-white text-lg transition-all shadow-xl flex items-center justify-center gap-2 shrink-0 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'active:scale-95'} bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20`}
+                >
+                  {isSaving && <HiOutlineRefresh className="animate-spin text-2xl" />}
+                  {isSaving ? 'Processing...' : (editingId ? 'Update Income' : 'Confirm Income')}
                 </button>
               </div>
             </form>
-
           </div>
         </div>
       )}
 
-      {/* PIN MODAL */}
+      {/* Delete Confirmation Modal */}
       {deleteContext && (
-        <div className="fixed inset-0 z-[600] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] p-8 text-center border dark:border-slate-800 animate-in fade-in zoom-in-95 shadow-2xl">
-            <div className="w-20 h-20 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-6"><HiOutlineLockClosed/></div>
-            <h3 className="text-2xl font-black dark:text-white">Security Check</h3>
-            <p className="text-sm text-slate-500 mt-2 mb-6 font-bold uppercase tracking-widest">Enter PIN to delete "{deleteContext.title}"</p>
-
-            {deleteContext.linkedIncomeId && !deleteContext.linkedIncomeId.startsWith('INC_') ? (
-               <div className="mt-4 mb-6 p-3 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 rounded-xl">
-                 <p className="text-xs font-black text-rose-700 dark:text-rose-400 flex items-start gap-1 text-left">
-                   <HiOutlineExclamationCircle size={16} className="shrink-0" /> 
-                   CRITICAL WARNING: This is an Auto-Synced entry. Force-deleting it will deduct funds from your vault but may cause mismatches in the parent module.
-                 </p>
-               </div>
-            ) : (
-               <div className="mt-4 mb-6 p-3 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-xl">
-                 <p className="text-xs font-black text-amber-700 dark:text-amber-400 flex items-start gap-1 text-left">
-                   <HiOutlineExclamationCircle size={16} className="shrink-0" /> 
-                   WARNING: Deleting this income will remove funds from your Vaults to keep balances accurate.
-                 </p>
-               </div>
-            )}
-            
-            <form onSubmit={executeSecureDelete} className="space-y-4">
-              <div>
-                <input type="password" required maxLength={6} autoFocus value={pinInput} onChange={(e)=>setPinInput(e.target.value)} className="w-full p-5 bg-slate-50 dark:bg-slate-800 rounded-2xl text-center text-3xl tracking-[0.5em] font-black outline-none border dark:border-slate-700 dark:text-white focus:ring-2 focus:ring-rose-500/50 transition-all"/>
-                {pinError && <p className="text-xs font-bold text-rose-500 text-center animate-bounce mt-2">{pinError}</p>}
+        <div className="fixed inset-0 z-[500] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden border border-slate-300 dark:border-slate-700">
+            <div className="px-6 py-5 bg-gradient-to-r from-rose-600 to-pink-600 text-white">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                  <HiOutlineShieldCheck size={24} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black">Security Verification</h3>
+                  <p className="text-xs text-white/70">Enter PIN to confirm deletion</p>
+                </div>
               </div>
-              <div className="flex gap-3">
-                <button type="button" onClick={()=>setDeleteContext(null)} className="flex-1 p-4 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-2xl font-black transition-colors hover:bg-slate-200 dark:hover:bg-slate-700">CANCEL</button>
-                <button type="submit" disabled={isVerifying} className="flex-1 p-4 bg-rose-500 hover:bg-rose-600 text-white rounded-2xl font-black text-lg transition-colors">
-                  {isVerifying ? 'VERIFYING...' : 'DELETE'}
+            </div>
+            
+            <form onSubmit={executeSecureDelete} className="p-6 space-y-5">
+              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-500/30 rounded-xl">
+                <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
+                  You are deleting <span className="font-black">"{deleteContext.title}"</span> worth 
+                  <span className="font-black"> {currencySymbol}{deleteContext.finalBaseAmount?.toLocaleString()}</span>
+                </p>
+                {deleteContext.linkedIncomeId && !deleteContext.linkedIncomeId.startsWith('INC_') && (
+                  <p className="text-[10px] text-rose-600 dark:text-rose-400 mt-2 font-bold flex items-center gap-1">
+                    <HiOutlineExclamationCircle size={14}/> Auto-synced entry - deletion will affect vault balances
+                  </p>
+                )}
+              </div>
+              
+              <div>
+                <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Security PIN</label>
+                <input 
+                  type="password" maxLength={6} required autoFocus
+                  value={pinInput} onChange={(e) => setPinInput(e.target.value)}
+                  className="w-full text-center tracking-[0.3em] text-xl p-4 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors"
+                />
+                {pinError && <p className="text-xs font-bold text-rose-600 dark:text-rose-400 mt-2 text-center">{pinError}</p>}
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setDeleteContext(null)} className="flex-1 p-4 rounded-xl font-black text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 transition-colors">
+                  Cancel
+                </button>
+                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-xl font-black text-sm bg-gradient-to-r from-rose-600 to-pink-600 text-white hover:from-rose-700 hover:to-pink-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30">
+                  {isVerifying ? <HiOutlineRefresh className="animate-spin" size={18} /> : null}
+                  Confirm Delete
                 </button>
               </div>
             </form>
-
           </div>
         </div>
       )}
+
     </div>
   );
 };
