@@ -15,8 +15,10 @@ import {
 import { 
   FaMoneyBillWave, FaBitcoin, FaUniversity, FaWallet, 
   FaExchangeAlt, FaBuilding, FaGem, FaChartLine, FaPiggyBank,
-  FaArrowUp, FaArrowDown
+  FaArrowUp, FaArrowDown, FaRandom
 } from 'react-icons/fa';
+
+const fiatCurrencies = ["USD", "EUR", "GBP", "AUD", "CAD", "SGD", "AED", "SAR", "JPY", "CNY", "INR", "NPR", "PKR", "BDT"];
 
 const cryptoPlatformsList = [
   "Binance", "CoinDCX", "WazirX", "ZebPay", "Mudrex", "SunCrypto",
@@ -63,11 +65,9 @@ const StatCard = ({ title, value, icon: Icon, color, trend, subtitle }) => (
 );
 
 const IncomeStreams = () => {
-  // 🚀 FETCHING BASE CURRENCY AND WATCHLIST FROM CONTEXT
   const { user, baseCurrency = 'INR', selectedCryptos = [], selectedFiats = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
 
-  // 🚀 DYNAMIC CURRENCY LIST: Merges Base Currency and Watchlist
   const availableFiats = useMemo(() => {
     return Array.from(new Set([baseCurrency, ...selectedFiats]));
   }, [baseCurrency, selectedFiats]);
@@ -93,11 +93,17 @@ const IncomeStreams = () => {
     return selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
   }, [selectedCryptos]);
 
+  // 🚀 Added Split Structure to FormData
+  const defaultSplitSource = { 
+    vault: 'bank', subWallet: '', asset: baseCurrency, 
+    cryptoPlatform: cryptoPlatformsList[12], amount: '', exchangeRate: 1, isCustomPlatform: false 
+  };
+
   const [formData, setFormData] = useState({
-    title: '', category: incomeCategories[0], vault: 'bank', 
-    subWallet: '', cryptoPlatform: 'Binance', asset: baseCurrency, 
-    amount: '', exchangeRate: 1, date: todayDate, linkedIncomeId: '',
-    isCustomSingle: false, isSynced: false 
+    title: '', category: incomeCategories[0], date: todayDate, linkedIncomeId: '',
+    isSplit: false, vault: 'bank', subWallet: '', cryptoPlatform: 'Binance', asset: baseCurrency, 
+    amount: '', exchangeRate: 1, isCustomSingle: false, isSynced: false,
+    splitSources: [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ] // 🚀 Splitting Mechanism
   });
 
   useEffect(() => {
@@ -146,33 +152,34 @@ const IncomeStreams = () => {
   
   const existingBanks = useMemo(() => Array.from(new Set(bankWalletLogs)), [bankWalletLogs]);
 
-  const fetchLiveRate = async () => {
-    if (formData.asset === baseCurrency) return;
-    setIsFetchingRate(true);
+  // 🚀 Upgraded Rate Fetcher to handle splits
+  const fetchLiveRate = async (index = null) => {
+    const isSingle = index === null;
+    const assetToCheck = isSingle ? formData.asset : formData.splitSources[index].asset;
+    
+    if (assetToCheck === baseCurrency) return;
+    setIsFetchingRate(isSingle ? 'single' : index);
+    
     try {
       const fiatRes = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
       const fiatData = await fiatRes.json();
       const usdToBase = fiatData.rates[baseCurrency] || 1;
+      let finalRate = 1;
 
-      // Handle Fiat Currency
-      if (availableFiats.includes(formData.asset)) {
-        const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${formData.asset}`);
+      if (availableFiats.includes(assetToCheck) || fiatCurrencies.includes(assetToCheck)) {
+        const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${assetToCheck}`);
         const data = await res.json();
-        if (data.rates[baseCurrency]) setFormData(prev => ({ ...prev, exchangeRate: data.rates[baseCurrency].toFixed(4) }));
+        finalRate = data.rates[baseCurrency] || 1;
       } else {
-        // Handle Crypto
-        const upperSym = formData.asset.toUpperCase();
+        const upperSym = assetToCheck.toUpperCase();
         const coinObj = fullDatabase.find(c => c.symbol === upperSym) || {};
-        const searchId = coinObj.id || formData.asset.toLowerCase();
+        const searchId = coinObj.id || assetToCheck.toLowerCase();
         let priceUsd = null;
 
         if (coinObj.fetchMode === 'contract' && coinObj.network && coinObj.contractAddress) {
            try {
               const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${coinObj.network}/tokens/${coinObj.contractAddress}`);
-              if (gtRes.ok) {
-                 const gtJson = await gtRes.json();
-                 priceUsd = parseFloat(gtJson.data.attributes.price_usd);
-              }
+              if (gtRes.ok) { const gtJson = await gtRes.json(); priceUsd = parseFloat(gtJson.data.attributes.price_usd); }
            } catch(e) {}
         } 
 
@@ -196,9 +203,15 @@ const IncomeStreams = () => {
         }
 
         const finalPrice = priceUsd || (coinObj?.fallbackPrice || 0);
-        const finalRate = finalPrice * usdToBase;
-        
+        finalRate = finalPrice * usdToBase;
+      }
+
+      if (isSingle) {
         setFormData(prev => ({ ...prev, exchangeRate: finalRate.toFixed(6) }));
+      } else {
+        const updatedSplits = [...formData.splitSources];
+        updatedSplits[index].exchangeRate = finalRate.toFixed(6);
+        setFormData(prev => ({ ...prev, splitSources: updatedSplits }));
       }
     } catch (error) {
       alert("Rate fetch failed. Please enter manually.");
@@ -207,12 +220,15 @@ const IncomeStreams = () => {
     }
   };
 
+  const getBaseAmount = (amount, isForeign, rate) => (parseFloat(amount) || 0) * (isForeign ? (parseFloat(rate) || 1) : 1);
+  const getSplitTotalBase = () => formData.splitSources.reduce((acc, curr) => acc + getBaseAmount(curr.amount, curr.asset !== baseCurrency, curr.exchangeRate), 0);
+
   const isForeign = formData.asset !== baseCurrency;
-  const finalBaseAmount = (parseFloat(formData.amount) || 0) * (isForeign ? (parseFloat(formData.exchangeRate) || 1) : 1);
+  const finalBaseAmount = formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, isForeign, formData.exchangeRate);
 
   const processedIncomes = useMemo(() => {
     const filtered = incomes.filter(inc => {
-      const matchSearch = inc.title.toLowerCase().includes(searchTerm.toLowerCase()) || inc.asset.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchSearch = inc.title.toLowerCase().includes(searchTerm.toLowerCase()) || (inc.asset && inc.asset.toLowerCase().includes(searchTerm.toLowerCase()));
       const matchCategory = filterCategory === 'all' || inc.category === filterCategory;
       return matchSearch && matchCategory;
     });
@@ -244,7 +260,7 @@ const IncomeStreams = () => {
 
   const handleDownloadReport = (format) => {
     const filteredForReport = incomes.filter(inc => {
-      const matchSearch = inc.title.toLowerCase().includes(searchTerm.toLowerCase()) || inc.asset.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchSearch = inc.title.toLowerCase().includes(searchTerm.toLowerCase()) || (inc.asset && inc.asset.toLowerCase().includes(searchTerm.toLowerCase()));
       const matchCategory = filterCategory === 'all' || inc.category === filterCategory;
       return matchSearch && matchCategory;
     }).sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -253,8 +269,8 @@ const IncomeStreams = () => {
 
     const reportData = filteredForReport.map(rec => {
       const cleanTitle = (rec.title || 'N/A').replace(/(\r\n|\n|\r)/gm, " ");
-      const sourceText = `${rec.vault.charAt(0).toUpperCase() + rec.vault.slice(1)} Vault${rec.subWallet ? ` (${rec.subWallet})` : ''}`;
-      const nativeAmtText = `${(Number(rec.amount) || 0).toLocaleString()} ${rec.asset}`;
+      const sourceText = rec.isSplit ? 'Split Income' : `${rec.vault.charAt(0).toUpperCase() + rec.vault.slice(1)} Vault${rec.subWallet ? ` (${rec.subWallet})` : ''}`;
+      const nativeAmtText = rec.isSplit ? 'Multiple Assets' : `${(Number(rec.amount) || 0).toLocaleString()} ${rec.asset}`;
 
       return {
         date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rec.date,
@@ -285,43 +301,71 @@ const IncomeStreams = () => {
     }
   };
 
+  // 🚀 Creates a single vault entry payload
+  const createVaultRecord = (sourceData, linkId, amountToAdd) => {
+    const isForeignAsset = sourceData.asset !== baseCurrency;
+    const baseAmt = getBaseAmount(amountToAdd, isForeignAsset, sourceData.exchangeRate);
+    
+    if (sourceData.vault === 'crypto') {
+      return {
+        collection: 'cryptoWalletLogs',
+        data: {
+          type: 'in', coin: sourceData.asset, quantity: amountToAdd, platform: sourceData.cryptoPlatform,
+          reason: `Income: ${formData.category} (${formData.title})`,
+          referenceNo: linkId, date: formData.date, timestamp: new Date(formData.date).getTime(), linkedIncomeId: linkId
+        }
+      };
+    }
+    
+    return {
+      collection: sourceData.vault + 'Wallet',
+      data: {
+        title: `Income: ${formData.category} (${formData.title})`,
+        type: 'in', date: formData.date, timestamp: new Date(formData.date).getTime(),
+        currency: sourceData.asset, foreignAmount: amountToAdd, exchangeRate: isForeignAsset ? parseFloat(sourceData.exchangeRate) : 1,
+        fee: 0, finalBaseAmount: baseAmt, isIncome: true, linkedIncomeId: linkId,
+        walletName: sourceData.subWallet || 'Default Wallet', bankName: sourceData.subWallet || 'Default Bank', 
+        transferType: 'Income Deposit', walletCategory: sourceData.vault === 'online' ? 'Fiat Wallet' : 'Fiat Wallet'
+      }
+    };
+  };
+
   const handleSaveEntry = async (e) => {
     e.preventDefault();
     if (!user) return alert("Please login!");
 
-    if (formData.vault === 'crypto' && !formData.cryptoPlatform.trim()) return alert("Please specify the crypto platform.");
-    if ((formData.vault === 'bank' || formData.vault === 'online') && !formData.subWallet.trim()) return alert("Please specify the Bank or Wallet Name.");
+    if (!formData.isSplit) {
+      if (formData.vault === 'crypto' && !formData.cryptoPlatform.trim()) return alert("Please specify the crypto platform.");
+      if ((formData.vault === 'bank' || formData.vault === 'online') && !formData.subWallet.trim()) return alert("Please specify the Bank or Wallet Name.");
+      if (!formData.amount || parseFloat(formData.amount) <= 0) return alert("Amount must be greater than zero.");
+    } else {
+      for (let i = 0; i < formData.splitSources.length; i++) {
+        const s = formData.splitSources[i];
+        if (!s.amount || parseFloat(s.amount) <= 0) return alert(`Amount in Source ${i + 1} must be greater than zero.`);
+        if (s.vault === 'crypto' && !s.cryptoPlatform.trim()) return alert(`Please specify platform for Source ${i + 1}.`);
+        if ((s.vault === 'bank' || s.vault === 'online') && !s.subWallet.trim()) return alert(`Please specify Bank/Wallet for Source ${i + 1}.`);
+      }
+    }
 
     setIsSaving(true);
     const timestamp = editingId ? incomes.find(i => i.id === editingId)?.timestamp : new Date(formData.date).getTime();
     const linkId = formData.linkedIncomeId || `INC_${timestamp}_${Math.floor(Math.random() * 1000)}`;
 
     const incomeRecord = {
-      title: formData.title, category: formData.category, vault: formData.vault,
-      subWallet: (formData.vault === 'bank' || formData.vault === 'online') ? formData.subWallet.trim() : '', 
-      cryptoPlatform: formData.vault === 'crypto' ? formData.cryptoPlatform : '',
-      asset: formData.asset, amount: parseFloat(formData.amount),
-      exchangeRate: isForeign ? parseFloat(formData.exchangeRate) : 1,
-      finalBaseAmount, date: formData.date, timestamp, linkedIncomeId: linkId
+      title: formData.title, category: formData.category,
+      asset: formData.isSplit ? 'Multiple' : formData.asset,
+      amount: formData.isSplit ? finalBaseAmount : parseFloat(formData.amount),
+      exchangeRate: formData.isSplit ? 1 : (formData.asset !== baseCurrency ? parseFloat(formData.exchangeRate) : 1),
+      finalBaseAmount, date: formData.date, timestamp, linkedIncomeId: linkId,
+      isSplit: formData.isSplit,
+      vault: formData.isSplit ? 'split' : formData.vault,
+      subWallet: !formData.isSplit && (formData.vault === 'bank' || formData.vault === 'online') ? formData.subWallet : '', 
+      cryptoPlatform: !formData.isSplit && formData.vault === 'crypto' ? formData.cryptoPlatform : '', 
+      splitDetails: formData.isSplit ? formData.splitSources.map(s => ({
+        vault: s.vault, subWallet: s.subWallet, asset: s.asset, amount: parseFloat(s.amount),
+        cryptoPlatform: s.vault === 'crypto' ? s.cryptoPlatform : '', exchangeRate: parseFloat(s.exchangeRate)
+      })) : null
     };
-
-    let targetVault = ''; let vaultRecord = {};
-    if (formData.vault === 'crypto') {
-      targetVault = 'cryptoWalletLogs';
-      vaultRecord = { 
-        type: 'in', coin: formData.asset, quantity: parseFloat(formData.amount), platform: formData.cryptoPlatform, 
-        reason: `Income: ${formData.category} (${formData.title})`, referenceNo: linkId, date: formData.date, timestamp, linkedIncomeId: linkId 
-      };
-    } else {
-      targetVault = formData.vault === 'bank' ? 'bankWallet' : formData.vault === 'cash' ? 'cashWallet' : 'onlineWallet';
-      vaultRecord = { 
-        title: `Income: ${formData.category} (${formData.title})`, type: 'in', date: formData.date, timestamp, 
-        currency: formData.asset, foreignAmount: parseFloat(formData.amount), exchangeRate: isForeign ? parseFloat(formData.exchangeRate) : 1, 
-        finalBaseAmount, linkedIncomeId: linkId, transferType: 'Income Deposit', fee: 0,
-        walletName: formData.subWallet || 'Default Wallet', 
-        bankName: formData.subWallet || 'Default Bank',
-      };
-    }
 
     try {
       if (editingId) {
@@ -350,12 +394,31 @@ const IncomeStreams = () => {
              const snap = await getDocs(q);
              snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, v, d.id)));
            }
+           
            await updateDoc(doc(db, "users", user.uid, "incomeLogs", editingId), incomeRecord);
-           await addDoc(collection(db, "users", user.uid, targetVault), vaultRecord);
+           
+           if (formData.isSplit) {
+             for (let s of formData.splitSources) {
+               const rec = createVaultRecord(s, linkId, parseFloat(s.amount));
+               await addDoc(collection(db, "users", user.uid, rec.collection), rec.data);
+             }
+           } else {
+             const singleRec = createVaultRecord({ vault: formData.vault, subWallet: formData.subWallet, asset: formData.asset, exchangeRate: formData.exchangeRate, cryptoPlatform: formData.cryptoPlatform }, linkId, parseFloat(formData.amount));
+             await addDoc(collection(db, "users", user.uid, singleRec.collection), singleRec.data);
+           }
         }
       } else {
         await addDoc(collection(db, "users", user.uid, "incomeLogs"), incomeRecord);
-        await addDoc(collection(db, "users", user.uid, targetVault), vaultRecord);
+        
+        if (formData.isSplit) {
+          for (let s of formData.splitSources) {
+            const rec = createVaultRecord(s, linkId, parseFloat(s.amount));
+            await addDoc(collection(db, "users", user.uid, rec.collection), rec.data);
+          }
+        } else {
+          const singleRec = createVaultRecord({ vault: formData.vault, subWallet: formData.subWallet, asset: formData.asset, exchangeRate: formData.exchangeRate, cryptoPlatform: formData.cryptoPlatform }, linkId, parseFloat(formData.amount));
+          await addDoc(collection(db, "users", user.uid, singleRec.collection), singleRec.data);
+        }
       }
       closeModal();
     } catch (error) { alert("Error saving."); } finally { setIsSaving(false); }
@@ -405,24 +468,35 @@ const IncomeStreams = () => {
     setIsModalOpen(true); 
     const lastBank = existingBanks.length > 0 ? existingBanks[0] : '';
     setFormData({ 
-      title: '', category: incomeCategories[0], vault: 'bank', 
-      subWallet: lastBank,
-      cryptoPlatform: cryptoPlatformsList[12], asset: baseCurrency, 
-      amount: '', exchangeRate: 1, date: todayDate, linkedIncomeId: '', isCustomSingle: false, isSynced: false
+      title: '', category: incomeCategories[0], date: todayDate, linkedIncomeId: '', isSplit: false,
+      vault: 'bank', subWallet: lastBank, cryptoPlatform: cryptoPlatformsList[12], asset: baseCurrency, 
+      amount: '', exchangeRate: 1, isCustomSingle: false, isSynced: false,
+      splitSources: [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ]
     }); 
   };
   
   const closeModal = () => setIsModalOpen(false);
   
   const handleEdit = (rec) => { 
+    const isSplit = rec.isSplit || false;
+    let mappedSplits = [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ];
+    if (isSplit && rec.splitDetails) {
+      mappedSplits = rec.splitDetails.map(s => ({
+        vault: s.vault, subWallet: s.subWallet || s.bankName || s.walletName || '',
+        asset: s.asset || baseCurrency, amount: s.amount || '', cryptoPlatform: s.cryptoPlatform || cryptoPlatformsList[12], 
+        exchangeRate: s.exchangeRate || 1, isCustomPlatform: s.vault === 'crypto' && !cryptoPlatformsList.includes(s.cryptoPlatform)
+      }));
+    }
+
     const isSyncedEntry = !!(rec.linkedIncomeId && !rec.linkedIncomeId.startsWith('INC_'));
+
     setFormData({ 
-      title: rec.title, category: rec.category, vault: rec.vault || 'bank', 
-      subWallet: rec.subWallet || rec.bankName || rec.walletName || '',
-      cryptoPlatform: rec.cryptoPlatform || cryptoPlatformsList[12], asset: rec.asset || baseCurrency, 
-      amount: rec.amount, exchangeRate: rec.exchangeRate || 1, date: rec.date, linkedIncomeId: rec.linkedIncomeId,
-      isCustomSingle: rec.vault === 'crypto' && !cryptoPlatformsList.includes(rec.cryptoPlatform),
-      isSynced: isSyncedEntry
+      title: rec.title, category: rec.category, date: rec.date, linkedIncomeId: rec.linkedIncomeId || '', 
+      isSplit: isSplit, vault: isSplit ? 'bank' : (rec.vault || 'bank'), subWallet: isSplit ? '' : (rec.subWallet || rec.bankName || rec.walletName || ''),
+      asset: isSplit ? baseCurrency : (rec.asset || baseCurrency), amount: isSplit ? '' : (rec.amount || ''), 
+      exchangeRate: isSplit ? 1 : (rec.exchangeRate || 1), cryptoPlatform: isSplit ? cryptoPlatformsList[12] : (rec.cryptoPlatform || cryptoPlatformsList[12]),
+      isCustomSingle: !isSplit && rec.vault === 'crypto' && !cryptoPlatformsList.includes(rec.cryptoPlatform),
+      isSynced: isSyncedEntry, splitSources: mappedSplits
     }); 
     setEditingId(rec.id); 
     setIsModalOpen(true); 
@@ -432,11 +506,25 @@ const IncomeStreams = () => {
     if (v === 'bank') return <FaUniversity className="text-blue-500" />;
     if (v === 'cash') return <HiOutlineCash className="text-emerald-500" />;
     if (v === 'crypto') return <FaBitcoin className="text-orange-500" />;
-    return <FaWallet className="text-purple-500" />;
+    if (v === 'online') return <FaWallet className="text-purple-500" />;
+    return <FaRandom className="text-amber-500" />;
   };
 
+  const updateSplit = (index, field, value) => {
+    const updated = [...formData.splitSources]; updated[index][field] = value;
+    if (field === 'vault') {
+        const cList = cryptoSymbols.length > 0 ? cryptoSymbols : ['BTC'];
+        updated[index].asset = value === 'crypto' ? (cList[0] || 'BTC') : baseCurrency; updated[index].exchangeRate = 1;
+        if(value === 'cash' || value === 'crypto') updated[index].subWallet = ''; 
+    }
+    if (field === 'isCustomPlatform' && !value) { updated[index].cryptoPlatform = cryptoPlatformsList[12]; }
+    setFormData({ ...formData, splitSources: updated });
+  };
+
+  const addSplitSource = () => setFormData({ ...formData, splitSources: [...formData.splitSources, { ...defaultSplitSource, vault: 'online' }] });
+  const removeSplitSource = (index) => { if (formData.splitSources.length > 2) setFormData({ ...formData, splitSources: formData.splitSources.filter((_, i) => i !== index) }); };
+
   return (
-    // 🚀 FIXED: Global scrolling fix with natural block layout (no fixed height cutoff)
     <div className="w-full h-auto pb-24">
       <div className="pt-8 md:pt-12 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 md:px-6">
         
@@ -528,7 +616,7 @@ const IncomeStreams = () => {
                 <div className="absolute inset-0 bg-emerald-500 rounded-full blur-xl opacity-30 animate-pulse" />
                 <HiOutlineRefresh className="animate-spin text-4xl text-emerald-500 relative" />
               </div>
-              <p className="text-sm font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest mt-4 animate-pulse">Loading Income Streams...</p>
+              <p className="text-sm font-black text-slate-500 uppercase tracking-widest mt-4 animate-pulse">Loading Income Streams...</p>
             </div>
           ) : processedIncomes.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 bg-white dark:bg-slate-900 rounded-3xl border border-slate-300 dark:border-slate-800 shadow-sm">
@@ -554,7 +642,7 @@ const IncomeStreams = () => {
 
                 <div className="overflow-x-auto">
                   <table className="w-full text-left">
-                    <thead className="bg-slate-100/50 dark:bg-slate-800/30 text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                    <thead className="bg-slate-100/50 dark:bg-slate-800/30 text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest border-b border-slate-200 dark:border-slate-700">
                       <tr>
                         <th className="p-4 pl-6">Date</th>
                         <th className="p-4">Source & Category</th>
@@ -566,10 +654,10 @@ const IncomeStreams = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                       {month.records.map((rec) => (
-                        <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors group">
+                        <tr key={rec.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors group ${rec.isSplit ? 'bg-amber-50/30 dark:bg-amber-900/10' : ''}`}>
                           <td className="p-4 pl-6">
-                            <p className="font-bold text-slate-700 dark:text-slate-300 text-sm">
-                              {formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rec.date}
+                            <p className="font-medium text-slate-700 dark:text-slate-300 text-sm">
+                              {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date}
                             </p>
                           </td>
                           <td className="p-4">
@@ -579,23 +667,30 @@ const IncomeStreams = () => {
                             </span>
                           </td>
                           <td className="p-4">
-                            <div className="flex items-center gap-2">
-                              {getVaultIcon(rec.vault)}
-                              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 capitalize">{rec.vault}</span>
-                              {rec.subWallet && (
-                                <span className="text-[9px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded font-bold border border-slate-200 dark:border-slate-700">
+                            <div className={`flex items-center gap-2 ${rec.isSplit ? 'bg-amber-100/50 dark:bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-200 dark:border-amber-500/20 w-max' : ''}`}>
+                              {rec.isSplit ? (
+                                <><FaRandom className="text-amber-600 dark:text-amber-500" /> <span className="text-xs font-bold text-amber-700 dark:text-amber-400">Split Income</span></>
+                              ) : (
+                                <>{getVaultIcon(rec.vault)} <span className="text-xs font-bold text-slate-700 dark:text-slate-300 capitalize">{rec.vault}</span></>
+                              )}
+                              {!rec.isSplit && rec.subWallet && (
+                                <span className="text-[9px] text-slate-600 dark:text-slate-400 bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded font-bold border border-slate-300 dark:border-slate-700">
                                   {rec.subWallet}
                                 </span>
                               )}
                             </div>
                           </td>
                           <td className="p-4 text-right">
-                            <p className="font-black text-slate-800 dark:text-slate-200">
-                              {rec.amount.toLocaleString()} <span className="text-[10px] text-slate-500 font-bold ml-0.5">{rec.asset}</span>
-                            </p>
+                            {rec.isSplit ? (
+                              <p className="font-bold text-slate-800 dark:text-slate-200 text-sm">Multiple</p>
+                            ) : (
+                              <p className="font-black text-slate-800 dark:text-slate-200 text-sm">
+                                {rec.amount.toLocaleString()} <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold ml-0.5">{rec.asset}</span>
+                              </p>
+                            )}
                           </td>
                           <td className="p-4 text-right">
-                            <p className="text-base font-black text-emerald-600 dark:text-emerald-400">
+                            <p className="text-base font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
                               +{currencySymbol}{rec.finalBaseAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}
                             </p>
                           </td>
@@ -604,10 +699,10 @@ const IncomeStreams = () => {
                               {rec.linkedIncomeId && !rec.linkedIncomeId.startsWith('INC_') && (
                                 <span className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[8px] font-black rounded border border-amber-200 dark:border-amber-500/30">SYNCED</span>
                               )}
-                              <button onClick={() => handleEdit(rec)} className="p-2 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg transition-all border border-slate-300 dark:border-slate-700 shadow-sm">
+                              <button onClick={() => handleEdit(rec)} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-xl transition-all border border-slate-300 dark:border-slate-700 shadow-sm">
                                 <HiOutlinePencil size={16} />
                               </button>
-                              <button onClick={() => initiateDelete(rec)} className="p-2 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-lg transition-all border border-slate-300 dark:border-slate-700 shadow-sm">
+                              <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-xl transition-all border border-slate-300 dark:border-slate-700 shadow-sm">
                                 <HiOutlineTrash size={16} />
                               </button>
                             </div>
@@ -635,11 +730,12 @@ const IncomeStreams = () => {
       {/* Add/Edit Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90dvh] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-200 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90dvh] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-300 dark:border-slate-700">
             
             <div className="px-6 py-5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white flex justify-between items-center shrink-0">
               <h3 className="text-xl font-black flex items-center gap-2">
-                <HiOutlineBriefcase /> {editingId ? 'Edit Income' : 'Log Income'}
+                {formData.isSplit ? <FaRandom /> : <HiOutlineBriefcase />} 
+                {editingId ? 'Edit Income' : 'Log Income'}
               </h3>
               <button onClick={closeModal} className="p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors">
                 <HiOutlineX size={20} />
@@ -650,7 +746,7 @@ const IncomeStreams = () => {
               {formData.isSynced && (
                 <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 p-4 rounded-xl text-xs font-bold leading-relaxed border border-amber-200 dark:border-amber-500/30">
                   <p className="flex items-center gap-1 mb-1"><HiOutlineExclamationCircle size={16}/> Auto-Synced Entry</p>
-                  This entry is linked to an Income or Expense log. You can only update the <span className="underline">Vault/Bank Name</span> here. To change the amount, please edit the source transaction.
+                  This entry is linked to an expense or shift log. You can only update the <span className="underline">Vault/Bank Name</span> here. To change the amount, please edit the source transaction.
                 </div>
               )}
 
@@ -679,141 +775,205 @@ const IncomeStreams = () => {
                 </div>
               </div>
 
-              <div className="p-4 bg-emerald-50/50 dark:bg-slate-800/80 rounded-xl border border-emerald-200 dark:border-slate-700 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Vault</label>
-                    <div className="relative">
-                      <select 
-                        value={formData.vault} 
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          const cList = cryptoSymbols.length > 0 ? cryptoSymbols : ['BTC'];
-                          setFormData({
-                            ...formData, vault: v, 
-                            asset: v === 'crypto' ? cList[0] : baseCurrency, 
-                            subWallet: '', exchangeRate: 1
-                          });
-                        }}
-                        className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 appearance-none cursor-pointer transition-colors"
-                      >
-                        <option value="bank">Bank Account</option>
-                        <option value="online">Online E-Wallet</option>
-                        <option value="cash">Physical Cash</option>
-                        <option value="crypto">Crypto Engine</option>
-                      </select>
-                      <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
+              {!formData.isSynced && (
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/30 rounded-xl border border-slate-300 dark:border-slate-700 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-black text-sm text-slate-900 dark:text-white">Split Income</h4>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Receive into multiple vaults</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" className="sr-only peer" checked={formData.isSplit} onChange={(e) => setFormData({...formData, isSplit: e.target.checked})} />
+                      <div className="w-11 h-6 bg-slate-300 rounded-full peer dark:bg-slate-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {!formData.isSplit ? (
+                <div className="p-5 bg-emerald-50/50 dark:bg-slate-800/80 rounded-2xl border border-emerald-200 dark:border-slate-700 shadow-sm space-y-5">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div>
+                      <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Vault</label>
+                      <div className="relative">
+                        <select 
+                          value={formData.vault} 
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            const cList = cryptoSymbols.length > 0 ? cryptoSymbols : ['BTC'];
+                            setFormData({
+                              ...formData, vault: v, 
+                              asset: v === 'crypto' ? cList[0] : baseCurrency, 
+                              subWallet: '', exchangeRate: 1
+                            });
+                          }}
+                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 appearance-none cursor-pointer transition-colors shadow-sm"
+                        >
+                          <option value="bank">Bank Account</option>
+                          <option value="online">Online E-Wallet</option>
+                          <option value="cash">Physical Cash</option>
+                          <option value="crypto">Crypto Engine</option>
+                        </select>
+                        <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
+                      </div>
+                    </div>
+
+                    {(formData.vault === 'bank' || formData.vault === 'online') && (
+                      <div className="animate-in fade-in">
+                        <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">
+                          {formData.vault === 'bank' ? 'Bank Name' : 'Wallet Name'}
+                        </label>
+                        <input 
+                          type="text" list="sub-wallets-inc" required value={formData.subWallet} 
+                          onChange={(e) => setFormData({...formData, subWallet: e.target.value})} 
+                          placeholder={formData.vault === 'bank' ? "e.g., SBI, Chase" : "e.g., PayPal, Skrill"}
+                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 transition-colors placeholder-slate-400 dark:placeholder-slate-500 shadow-sm"
+                        />
+                        <datalist id="sub-wallets-inc">
+                          {existingBanks.map(b => <option key={b} value={b} />)}
+                        </datalist>
+                      </div>
+                    )}
+
+                    {formData.vault === 'crypto' && (
+                      <div className="animate-in fade-in">
+                        <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Platform</label>
+                        {formData.isCustomSingle ? (
+                          <div className="flex gap-2">
+                            <input 
+                              type="text" required value={formData.cryptoPlatform} 
+                              onChange={(e) => setFormData({...formData, cryptoPlatform: e.target.value})} 
+                              className="flex-1 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 transition-colors shadow-sm"
+                            />
+                            <button type="button" onClick={() => setFormData({...formData, isCustomSingle: false, cryptoPlatform: cryptoPlatformsList[0]})} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors border border-slate-300 dark:border-slate-600 shadow-sm">
+                              <HiOutlineX size={20} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="relative">
+                            <select 
+                              value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} 
+                              onChange={(e) => {
+                                if(e.target.value === 'CUSTOM') {
+                                  setFormData({...formData, isCustomSingle: true, cryptoPlatform: ''});
+                                } else {
+                                  setFormData({...formData, cryptoPlatform: e.target.value});
+                                }
+                              }}
+                              className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 appearance-none cursor-pointer transition-colors shadow-sm"
+                            >
+                              {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
+                              <option value="CUSTOM">✨ Custom Platform</option>
+                            </select>
+                            <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div>
+                      <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Asset</label>
+                      <div className="relative">
+                        <select 
+                          disabled={formData.isSynced} value={formData.asset} 
+                          onChange={(e) => setFormData({...formData, asset: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})}
+                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-60 appearance-none cursor-pointer transition-colors shadow-sm"
+                        >
+                          {formData.vault === 'crypto' ? (
+                            cryptoSymbols.map(a => <option key={a} value={a}>{a}</option>)
+                          ) : (
+                            <>
+                              <option value={baseCurrency}>{baseCurrency} (Base)</option>
+                              {availableFiats.filter(c => c !== baseCurrency).map(a => <option key={a} value={a}>{a}</option>)}
+                            </>
+                          )}
+                        </select>
+                        <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Amount ({formData.asset})</label>
+                      <input 
+                        disabled={formData.isSynced} type="number" step="any" required value={formData.amount} 
+                        onChange={(e) => setFormData({...formData, amount: e.target.value})} 
+                        placeholder="0.00"
+                        className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-60 text-lg placeholder-slate-400 dark:placeholder-slate-500 transition-colors shadow-sm"
+                      />
                     </div>
                   </div>
 
-                  {(formData.vault === 'bank' || formData.vault === 'online') && (
-                    <div className="animate-in fade-in">
-                      <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">
-                        {formData.vault === 'bank' ? 'Bank Name' : 'Wallet Name'}
-                      </label>
-                      <input 
-                        type="text" list="sub-wallets-inc" required value={formData.subWallet} 
-                        onChange={(e) => setFormData({...formData, subWallet: e.target.value})} 
-                        placeholder={formData.vault === 'bank' ? "e.g., SBI, Chase" : "e.g., PayPal, Skrill"}
-                        className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 transition-colors placeholder-slate-400 dark:placeholder-slate-500"
-                      />
-                      <datalist id="sub-wallets-inc">
-                        {existingBanks.map(b => <option key={b} value={b} />)}
-                      </datalist>
+                  {formData.asset !== baseCurrency && (
+                    <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
+                      <div className="flex items-center gap-3 w-full md:w-auto">
+                        <span className="text-xs font-black text-slate-600 dark:text-slate-400">Rate: 1 {formData.asset} =</span>
+                        <input 
+                          disabled={formData.isSynced} type="number" step="any" required value={formData.exchangeRate} 
+                          onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} 
+                          className="flex-1 w-28 p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none text-sm transition-colors disabled:opacity-60 shadow-sm"
+                        />
+                        <span className="text-xs font-black text-slate-600 dark:text-slate-400">{baseCurrency}</span>
+                      </div>
+                      <button 
+                        type="button" onClick={()=>fetchLiveRate(null)} disabled={isFetchingRate === 'single' || formData.isSynced} 
+                        className="w-full md:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3 md:py-2 rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center justify-center gap-1 transition-colors shadow-sm"
+                      >
+                        <HiOutlineRefresh className={isFetchingRate === 'single' ? "animate-spin" : ""} size={14} /> Live
+                      </button>
                     </div>
                   )}
-
-                  {formData.vault === 'crypto' && (
-                    <div className="animate-in fade-in">
-                      <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Platform</label>
-                      {formData.isCustomSingle ? (
-                        <div className="flex gap-2">
-                          <input 
-                            type="text" required value={formData.cryptoPlatform} 
-                            onChange={(e) => setFormData({...formData, cryptoPlatform: e.target.value})} 
-                            className="flex-1 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 transition-colors"
-                          />
-                          <button type="button" onClick={() => setFormData({...formData, isCustomSingle: false, cryptoPlatform: cryptoPlatformsList[0]})} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">
-                            <HiOutlineX size={20} />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {formData.splitSources.map((split, index) => (
+                    <div key={index} className="p-5 border border-amber-300 dark:border-amber-500/30 bg-amber-50/40 dark:bg-amber-900/10 rounded-2xl space-y-4 shadow-sm">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-black text-amber-800 dark:text-amber-400 uppercase tracking-widest">Source {index + 1}</span>
+                        {formData.splitSources.length > 2 && (
+                          <button type="button" onClick={() => removeSplitSource(index)} className="text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-900/30 p-1.5 rounded-lg border border-transparent hover:border-rose-200 dark:hover:border-rose-800 transition-colors">
+                            <HiOutlineTrash size={16}/>
                           </button>
-                        </div>
-                      ) : (
-                        <div className="relative">
-                          <select 
-                            value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} 
-                            onChange={(e) => {
-                              if(e.target.value === 'CUSTOM') {
-                                setFormData({...formData, isCustomSingle: true, cryptoPlatform: ''});
-                              } else {
-                                setFormData({...formData, cryptoPlatform: e.target.value});
-                              }
-                            }}
-                            className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 appearance-none cursor-pointer transition-colors"
-                          >
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <select value={split.vault} onChange={(e) => updateSplit(index, 'vault', e.target.value)} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer">
+                          <option value="bank">Bank Account</option><option value="cash">Physical Cash</option><option value="online">Online Wallet</option><option value="crypto">Crypto Engine</option>
+                        </select>
+                        {(split.vault === 'bank' || split.vault === 'online') && (
+                          <input type="text" list={`split-banks-${index}`} required value={split.subWallet} onChange={(e) => updateSplit(index, 'subWallet', e.target.value)} placeholder={split.vault === 'bank' ? "Bank Name" : "Wallet Name"} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400" />
+                        )}
+                        {split.vault === 'crypto' && (
+                          <select value={split.cryptoPlatform} onChange={(e) => updateSplit(index, 'cryptoPlatform', e.target.value)} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer">
                             {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
-                            <option value="CUSTOM">✨ Custom Platform</option>
                           </select>
-                          <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
+                        )}
+                        <select value={split.asset} onChange={(e) => { updateSplit(index, 'asset', e.target.value); updateSplit(index, 'exchangeRate', 1); }} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer">
+                          {split.vault === 'crypto' ? cryptoSymbols.map(c => <option key={c} value={c}>{c}</option>) : [baseCurrency, ...availableFiats.filter(c => c !== baseCurrency)].map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                        <input type="number" step="any" required value={split.amount} onChange={(e) => updateSplit(index, 'amount', e.target.value)} placeholder="Amount" className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400" />
+                      </div>
+                      
+                      {split.asset !== baseCurrency && (
+                        <div className="flex flex-col md:flex-row items-center gap-3 pt-2">
+                          <button type="button" onClick={()=>fetchLiveRate(index)} disabled={isFetchingRate === index} className="w-full md:w-auto text-[10px] font-black bg-amber-500 hover:bg-amber-600 text-white px-4 py-3 md:py-2 rounded-lg flex items-center justify-center gap-1 uppercase tracking-widest transition-colors shadow-sm">
+                            <HiOutlineRefresh className={isFetchingRate === index ? "animate-spin" : ""} size={14}/> Rate
+                          </button>
+                          <div className="flex items-center gap-3 w-full md:w-auto flex-1">
+                            <span className="text-xs font-black text-slate-600 dark:text-slate-400">1 {split.asset} =</span>
+                            <input type="number" step="any" required value={split.exchangeRate} onChange={(e) => updateSplit(index, 'exchangeRate', e.target.value)} className="flex-1 p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-sm font-bold text-slate-900 dark:text-white outline-none shadow-sm" />
+                          </div>
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Asset</label>
-                    <div className="relative">
-                      <select 
-                        disabled={formData.isSynced} value={formData.asset} 
-                        onChange={(e) => setFormData({...formData, asset: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})}
-                        className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-60 appearance-none cursor-pointer transition-colors"
-                      >
-                        {formData.vault === 'crypto' ? (
-                          cryptoSymbols.map(a => <option key={a} value={a}>{a}</option>)
-                        ) : (
-                          <>
-                            <option value={baseCurrency}>{baseCurrency} (Base)</option>
-                            {availableFiats.filter(c => c !== baseCurrency).map(a => <option key={a} value={a}>{a}</option>)}
-                          </>
-                        )}
-                      </select>
-                      <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Amount ({formData.asset})</label>
-                    <input 
-                      disabled={formData.isSynced} type="number" step="any" required value={formData.amount} 
-                      onChange={(e) => setFormData({...formData, amount: e.target.value})} 
-                      placeholder="0.00"
-                      className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-60 text-lg placeholder-slate-400 dark:placeholder-slate-500 transition-colors"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {isForeign && (
-                <div className="p-4 bg-emerald-50 dark:bg-slate-800/80 border border-emerald-200 dark:border-slate-700 rounded-xl flex items-center justify-between shadow-sm">
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-black text-slate-600 dark:text-slate-400">Rate: 1 {formData.asset} =</span>
-                    <input 
-                      disabled={formData.isSynced} type="number" step="any" required value={formData.exchangeRate} 
-                      onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} 
-                      className="w-28 p-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none text-sm transition-colors disabled:opacity-60"
-                    />
-                    <span className="text-xs font-black text-slate-600 dark:text-slate-400">{baseCurrency}</span>
-                  </div>
-                  <button 
-                    type="button" onClick={fetchLiveRate} disabled={isFetchingRate || formData.isSynced}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center gap-1 transition-colors shadow-sm"
-                  >
-                    <HiOutlineRefresh className={isFetchingRate ? "animate-spin" : ""} size={12} /> Live
+                  ))}
+                  <button type="button" onClick={addSplitSource} className="w-full py-4 border-2 border-dashed border-amber-300 dark:border-amber-700/50 text-amber-700 dark:text-amber-500 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors flex items-center justify-center gap-2">
+                    <HiOutlinePlus size={18}/> Add Another Source
                   </button>
                 </div>
               )}
 
-              <div className="p-4 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700">
+              <div className="p-4 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-300 dark:border-slate-700 shadow-sm">
                 <div className="flex justify-between items-center">
                   <div>
                     <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Date</label>
@@ -825,9 +985,9 @@ const IncomeStreams = () => {
                     <p className="text-[9px] text-emerald-600 dark:text-emerald-400 mt-1.5 ml-1 font-bold">{formatGlobalDate ? formatGlobalDate(formData.date, 'short') : ''}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">Final Value</p>
-                    <p className="text-2xl font-black text-emerald-700 dark:text-emerald-400 tracking-tight mt-1">
-                      {currencySymbol}{finalBaseAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                    <p className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">Total Income</p>
+                    <p className="text-2xl md:text-3xl font-black text-emerald-700 dark:text-emerald-400 tracking-tight mt-1">
+                      +{currencySymbol}{(formData.isSplit ? getSplitTotalBase() : finalBaseAmount).toLocaleString(undefined, {minimumFractionDigits: 2})}
                     </p>
                   </div>
                 </div>
@@ -836,7 +996,7 @@ const IncomeStreams = () => {
               <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-2">
                 <button 
                   type="submit" disabled={isSaving} 
-                  className={`w-full p-4 rounded-xl font-black text-white text-lg transition-all shadow-xl flex items-center justify-center gap-2 shrink-0 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'active:scale-95'} bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20`}
+                  className={`w-full p-4 rounded-2xl font-black text-white text-lg transition-all shadow-xl flex items-center justify-center gap-2 shrink-0 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'active:scale-95'} ${formData.isSplit ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 shadow-amber-500/30' : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-emerald-500/30'}`}
                 >
                   {isSaving && <HiOutlineRefresh className="animate-spin text-2xl" />}
                   {isSaving ? 'Processing...' : (editingId ? 'Update Income' : 'Confirm Income')}
