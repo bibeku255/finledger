@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, query, limit, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
 
@@ -16,7 +16,8 @@ import {
 import { 
   FaWallet, FaBolt, FaTrophy, 
   FaPiggyBank, FaSun, FaMoon, FaCloudSun, FaGem, FaChartLine,
-  FaArrowUp, FaArrowDown, FaGlobe, FaUniversity, FaMoneyBillWave, FaBitcoin
+  FaArrowUp, FaArrowDown, FaGlobe, FaUniversity, FaMoneyBillWave, FaBitcoin,
+  FaHandHoldingUsd, FaHandHoldingHeart
 } from 'react-icons/fa';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1', '#ec4899', '#14b8a6', '#f97316', '#06b6d4'];
@@ -78,7 +79,8 @@ const StatCard = ({ title, value, icon: Icon, gradient, trend, trendValue, subti
           </span>
         )}
       </p>
-      <h2 className="text-3xl md:text-4xl font-black tracking-tight mb-1 truncate">{value}</h2>
+      {/* 🚀 FIXED: Replaced truncate with break-words to handle extremely large numbers smoothly */}
+      <h2 className="text-3xl md:text-4xl font-black tracking-tight mb-1 break-words">{value}</h2>
       {subtitle && (
         <p className="text-[10px] font-bold opacity-70 uppercase tracking-wider">{subtitle}</p>
       )}
@@ -174,11 +176,11 @@ const MarketCard = ({ item, baseCurrency, currencySymbol }) => {
       
       <div className="relative z-10">
         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Value in {baseCurrency}</p>
-        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight truncate">
+        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight break-words">
           {currencySymbol}{item.priceBase < 1 ? item.priceBase.toFixed(6) : item.priceBase.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
         </p>
         <div className="flex items-center gap-2 mt-2">
-          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest truncate">
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest break-words">
             ≈ $ {item.priceUSD < 1 ? item.priceUSD.toFixed(6) : item.priceUSD.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
           </p>
         </div>
@@ -199,6 +201,11 @@ const Dashboard = () => {
   const [cryptoHoldings, setCryptoHoldings] = useState([]); 
   const [incomeTotal, setIncomeTotal] = useState(0);
   const [expenseTotal, setExpenseTotal] = useState(0);
+  
+  // 🚀 New State for Smart Khata Integration
+  const [khataReceivables, setKhataReceivables] = useState(0);
+  const [khataPayables, setKhataPayables] = useState(0);
+
   const [marketData, setMarketData] = useState([]);
   const [isMarketLoading, setIsMarketLoading] = useState(true);
   const [greeting, setGreeting] = useState('');
@@ -225,15 +232,7 @@ const Dashboard = () => {
       return snapshot.docs.reduce((acc, doc) => {
         const data = doc.data();
         const finalAmount = Number(data.finalBaseAmount || data.amount || 0);
-        let feeAmount = 0;
-        if (data.fee && data.feeExchangeRate) {
-            feeAmount = Number(data.fee) * Number(data.feeExchangeRate);
-        } else if (data.fee && data.exchangeRate) { 
-            feeAmount = Number(data.fee) * Number(data.exchangeRate);
-        } else if (data.fee) {
-            feeAmount = Number(data.fee);
-        }
-        const netChange = data.type === 'in' ? finalAmount : -(finalAmount + feeAmount);
+        const netChange = data.type === 'in' ? finalAmount : -finalAmount;
         return acc + netChange;
       }, 0);
     };
@@ -259,10 +258,24 @@ const Dashboard = () => {
       setIsLoading(false); 
     });
 
-    return () => { unsubBank(); unsubCash(); unsubOnline(); unsubCrypto(); unsubIncome(); unsubExpense(); };
+    // 🚀 NEW: Sync Khata Balances
+    const unsubParties = onSnapshot(collection(db, "users", user.uid, "parties"), snap => {
+      let rec = 0;
+      let pay = 0;
+      snap.docs.forEach(doc => {
+        const data = doc.data();
+        if (data.status !== 'bad_debt') {
+          if (data.netBalance > 0) rec += data.netBalance;
+          else if (data.netBalance < 0) pay += Math.abs(data.netBalance);
+        }
+      });
+      setKhataReceivables(rec);
+      setKhataPayables(pay);
+    });
+
+    return () => { unsubBank(); unsubCash(); unsubOnline(); unsubCrypto(); unsubIncome(); unsubExpense(); unsubParties(); };
   }, [user]);
 
-  // 🚀 STRICT MARKET FETCH: ONLY Fetches explicitly selected cryptos & fiats!
   useEffect(() => {
     const fetchMarketData = async () => {
       setIsMarketLoading(true);
@@ -272,7 +285,6 @@ const Dashboard = () => {
         const usdToBase = fiatData.rates[baseCurrency] || 1;
         let newMarketData = [];
 
-        // STRICTLY use selectedCryptos ONLY
         if (selectedCryptos && selectedCryptos.length > 0) {
           let cgJson = [];
           const normalAssets = [];
@@ -351,7 +363,6 @@ const Dashboard = () => {
     return () => clearInterval(interval);
   }, [baseCurrency, selectedCryptos, selectedFiats]);
 
-  // LIVE CRYPTO VALUATION CALCULATOR
   const cryptoTotal = useMemo(() => {
     if (!cryptoHoldings.length) return 0;
     return cryptoHoldings.reduce((sum, coin) => {
@@ -366,7 +377,6 @@ const Dashboard = () => {
     }, 0);
   }, [cryptoHoldings, marketData]);
 
-  // EXPANDED TOTAL NET WORTH
   const netWorth = bankTotal + cashTotal + onlineTotal + cryptoTotal;
 
   const savingsTotal = incomeTotal - expenseTotal;
@@ -451,7 +461,7 @@ const Dashboard = () => {
 
   return (
     <div className="w-full h-auto pb-10">
-      <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="w-full max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 px-2 md:px-6">
         
         {/* PREMIUM GREETING & EXPANDED NET WORTH SECTION */}
         <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 p-6 md:p-8 shadow-2xl border border-slate-700/50">
@@ -494,53 +504,78 @@ const Dashboard = () => {
           {/* EXPANDED NET WORTH BREAKDOWN GRID */}
           <div className="relative z-10 mt-8 bg-white/5 border border-white/10 rounded-[2rem] p-5 md:p-6 backdrop-blur-md">
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Liquid Net Worth</p>
-            <h2 className="text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-tight mb-8 truncate">
+            {/* 🚀 FIXED: Replaced 'truncate' with 'break-words' to prevent large amounts from getting cut */}
+            <h2 className="text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-tight mb-8 break-words">
               {currencySymbol}{netWorth.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
             </h2>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
               
-              <div className="flex items-center gap-3">
+              <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center shrink-0">
                   <FaUniversity size={18} />
                 </div>
-                <div className="min-w-0">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Bank Vault</p>
-                  <p className="text-sm font-bold text-white truncate">{currencySymbol}{bankTotal.toLocaleString()}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Bank Vault</p>
+                  {/* 🚀 FIXED: Dynamic text sizing and break-words for long numbers */}
+                  <p className="text-[13px] sm:text-sm font-bold text-white break-words leading-tight">{currencySymbol}{bankTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
                   <FaMoneyBillWave size={18} />
                 </div>
-                <div className="min-w-0">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Physical Cash</p>
-                  <p className="text-sm font-bold text-white truncate">{currencySymbol}{cashTotal.toLocaleString()}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Physical Cash</p>
+                  <p className="text-[13px] sm:text-sm font-bold text-white break-words leading-tight">{currencySymbol}{cashTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0">
                   <FaGlobe size={18} />
                 </div>
-                <div className="min-w-0">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">E-Wallets</p>
-                  <p className="text-sm font-bold text-white truncate">{currencySymbol}{onlineTotal.toLocaleString()}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">E-Wallets</p>
+                  <p className="text-[13px] sm:text-sm font-bold text-white break-words leading-tight">{currencySymbol}{onlineTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center shrink-0">
                   <FaBitcoin size={18} />
                 </div>
-                <div className="min-w-0">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1">Crypto <span className="text-emerald-400 animate-pulse text-[6px]">● LIVE</span></p>
-                  <p className="text-sm font-bold text-white truncate">{currencySymbol}{cryptoTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1 mb-0.5">Crypto <span className="text-emerald-400 animate-pulse text-[6px]">● LIVE</span></p>
+                  <p className="text-[13px] sm:text-sm font-bold text-white break-words leading-tight">{currencySymbol}{cryptoTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
                 </div>
               </div>
 
             </div>
+
+            {/* 🚀 NEW: Smart Khata Integration Added Right Below Net Worth */}
+            <div className="mt-6 pt-5 border-t border-white/10 grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                  <FaHandHoldingUsd size={18} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-black text-emerald-400/80 uppercase tracking-widest mb-0.5">To Receive</p>
+                  <p className="text-[13px] sm:text-sm font-bold text-white break-words leading-tight">{currencySymbol}{khataReceivables.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                  <FaHandHoldingHeart size={18} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-black text-rose-400/80 uppercase tracking-widest mb-0.5">To Pay</p>
+                  <p className="text-[13px] sm:text-sm font-bold text-white break-words leading-tight">{currencySymbol}{khataPayables.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+                </div>
+              </div>
+            </div>
+
           </div>
 
         </div>
@@ -608,7 +643,7 @@ const Dashboard = () => {
                   </ResponsiveContainer>
                   <div className="absolute inset-0 flex items-center justify-center flex-col pointer-events-none">
                     <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total</span>
-                    <span className="text-xl font-black text-slate-800 dark:text-white truncate max-w-[80%]">
+                    <span className="text-xl font-black text-slate-800 dark:text-white break-words max-w-[80%] text-center">
                       {currencySymbol}{netWorth.toLocaleString(undefined, {maximumFractionDigits: 0})}
                     </span>
                   </div>
@@ -620,7 +655,7 @@ const Dashboard = () => {
                         <span className="w-3 h-3 rounded-full shadow-sm shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></span>
                         <span className="text-xs font-bold text-slate-700 dark:text-slate-300 truncate">{item.name}</span>
                       </div>
-                      <span className="text-xs font-black text-slate-900 dark:text-white tracking-tight shrink-0 pl-2">
+                      <span className="text-xs font-black text-slate-900 dark:text-white tracking-tight shrink-0 pl-2 break-words">
                         {currencySymbol}{(item.value || 0).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}
                       </span>
                     </div>
