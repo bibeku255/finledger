@@ -1,22 +1,26 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
-import { collection, addDoc, doc, deleteDoc, updateDoc, onSnapshot, query, orderBy, where, getDocs, getDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, setDoc, deleteDoc, updateDoc, onSnapshot, query, orderBy, where, getDocs, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
 
+// 🚀 FIXED: Removed unused/crashing icons from 'react-icons/hi'
 import { 
   HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
   HiOutlineSearch, HiOutlineRefresh, HiOutlineShoppingCart,
   HiOutlineLockClosed, HiOutlineExclamationCircle, HiOutlineChevronDown,
   HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable,
-  HiOutlineCalendar, HiOutlineShieldCheck, HiOutlineTrendingUp, HiOutlineTrendingDown,
-  HiOutlineCash
+  HiOutlineCalendar, HiOutlineShieldCheck, HiOutlineTrendingUp,
+  HiOutlineTrendingDown, HiOutlineCash
 } from 'react-icons/hi';
+
 import { 
   FaMoneyBillWave, FaArrowUp, FaUniversity, FaWallet, 
   FaExchangeAlt, FaRandom, FaBitcoin, FaUserFriends,
-  FaPiggyBank, FaArrowDown
+  FaGem, FaChartLine, FaPiggyBank, FaArrowDown
 } from 'react-icons/fa';
+
+const fiatCurrencies = ["USD", "EUR", "GBP", "AUD", "CAD", "SGD", "AED", "SAR", "JPY", "CNY", "INR", "NPR", "PKR", "BDT"];
 
 const cryptoPlatformsList = [
   "CoinDCX", "WazirX", "ZebPay", "Mudrex", "SunCrypto",
@@ -28,20 +32,12 @@ const cryptoPlatformsList = [
   "Coinpot", "RollerCoin", "Other Wallet/Site"
 ];
 
-const BINANCE_SAFE_COINS = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC', 'BCH', 'ADA', 'XMR', 'XLM', 'DAI', 'ZEC', 'SHIB', 'SUI', 'TON', 'DOT', 'PEPE', 'NEAR', 'POL', 'ATOM', 'ARB', 'BONK', 'CAKE', 'XTZ', 'FLOKI', 'OP', 'TWT', 'BAT', 'DGB', 'KAVA', 'AVAX', 'MEME', 'DASH'];
-
 const expenseCategories = [
   "Food & Dining", "Groceries & Supermarket", "Rent & Housing",
   "Bills & Utilities", "Shopping & E-commerce", "Travel & Transport",
   "Entertainment & Subscriptions", "Crypto Trading Fees / Gas",
   "Forex & Bank Charges", "Health & Wellness", "Other Expenses"
 ];
-
-const fiatFlagMap = {
-  USD: 'us', INR: 'in', NPR: 'np', EUR: 'eu', GBP: 'gb', CAD: 'ca', AUD: 'au', 
-  JPY: 'jp', AED: 'ae', SAR: 'sa', QAR: 'qa', KWD: 'kw', OMR: 'om', BHD: 'bh',
-  PKR: 'pk', BDT: 'bd', SGD: 'sg', CNY: 'cn'
-};
 
 const hashPIN = async (pinCode) => {
   const encoder = new TextEncoder();
@@ -51,39 +47,21 @@ const hashPIN = async (pinCode) => {
 };
 
 // 🚀 Premium Stat Card Component
-const StatCard = ({ title, value, icon: Icon, color, trend, subtitle }) => (
+const StatCard = ({ title, value, icon: Icon, color, subtitle }) => (
   <div className={`relative overflow-hidden rounded-2xl p-5 bg-gradient-to-br ${color} text-white shadow-xl group hover:scale-[1.02] transition-all duration-300`}>
     <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(255,255,255,0.15),transparent_70%)]" />
     <Icon className="absolute right-[-10%] bottom-[-10%] text-7xl opacity-10 group-hover:scale-110 transition-transform duration-500" />
     <div className="relative z-10">
       <p className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-1">{title}</p>
       <h3 className="text-2xl font-black tracking-tight">{value}</h3>
-      {trend !== undefined && (
-        <div className={`flex items-center gap-1 mt-2 text-[10px] font-bold ${trend >= 0 ? 'text-emerald-200' : 'text-rose-200'}`}>
-          {trend >= 0 ? <HiOutlineTrendingUp size={14} /> : <HiOutlineTrendingDown size={14} />}
-          {Math.abs(trend)}% from last month
-        </div>
-      )}
       {subtitle && <p className="text-[9px] font-medium opacity-70 mt-1">{subtitle}</p>}
     </div>
   </div>
 );
 
 const ExpenseTracker = () => {
-  // 🚀 FETCHING BASE CURRENCY AND WATCHLISTS FROM CONTEXT
-  const { user, baseCurrency = 'INR', selectedCryptos = [], selectedFiats = [], formatGlobalDate } = useAuth();
+  const { user, baseCurrency = 'INR', selectedCryptos = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
-
-  // 🚀 STRICT DYNAMIC FIAT LIST
-  const availableFiats = useMemo(() => {
-    return Array.from(new Set([baseCurrency, ...selectedFiats]));
-  }, [baseCurrency, selectedFiats]);
-
-  // 🚀 STRICT DYNAMIC CRYPTO LIST
-  const availableCryptos = useMemo(() => {
-    const customSymbols = selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
-    return Array.from(new Set(["USDT", ...customSymbols])).map(s => s.toUpperCase());
-  }, [selectedCryptos]);
 
   const [expenses, setExpenses] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -157,12 +135,7 @@ const ExpenseTracker = () => {
      const fetchBanksAndParties = async () => {
         const qBank = query(collection(db, "users", user.uid, "bankWallet"));
         const snapBank = await getDocs(qBank);
-        const qOnline = query(collection(db, "users", user.uid, "onlineWallet"));
-        const snapOnline = await getDocs(qOnline);
-        const names = new Set();
-        snapBank.docs.forEach(d => { if(d.data().bankName) names.add(d.data().bankName) });
-        snapOnline.docs.forEach(d => { if(d.data().walletName) names.add(d.data().walletName) });
-        setBankWalletLogs(Array.from(names));
+        setBankWalletLogs(snapBank.docs.map(d => d.data().bankName).filter(Boolean));
         
         const qParty = query(collection(db, "users", user.uid, "parties"));
         const snapParty = await getDocs(qParty);
@@ -174,6 +147,13 @@ const ExpenseTracker = () => {
   }, [user]);
   
   const existingBanks = useMemo(() => Array.from(new Set(bankWalletLogs)), [bankWalletLogs]);
+
+  const activeAssetList = useMemo(() => {
+    if (formData.vault === 'crypto') return selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
+    return fiatCurrencies;
+  }, [formData.vault, selectedCryptos]);
+
+  const getCryptoListForSplit = () => selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
 
   const processedExpenses = useMemo(() => {
     const filtered = expenses.filter(exp => {
@@ -244,17 +224,15 @@ const ExpenseTracker = () => {
   const fetchLiveRate = async (index = null) => {
     const isSingle = index === null;
     const assetToCheck = isSingle ? formData.asset : formData.splitSources[index].asset;
-    
     if (assetToCheck === baseCurrency) return;
     setIsFetchingRate(isSingle ? 'single' : index);
-    
     try {
       const fiatRes = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
       const fiatData = await fiatRes.json();
       const usdToBase = fiatData.rates[baseCurrency] || 1;
       let finalRate = 1;
 
-      if (availableFiats.includes(assetToCheck)) {
+      if (fiatCurrencies.includes(assetToCheck)) {
         const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${assetToCheck}`);
         const data = await res.json();
         finalRate = data.rates[baseCurrency] || 1;
@@ -276,7 +254,7 @@ const ExpenseTracker = () => {
                if (cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
            } catch(e) {}
         }
-        if (!priceUsd && BINANCE_SAFE_COINS.includes(assetToCheck.toUpperCase())) {
+        if (!priceUsd) {
             try {
                 const binanceSymbol = searchId === 'tether' ? 'BTCUSDT' : `${assetToCheck.toUpperCase()}USDT`;
                 const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`);
@@ -297,7 +275,9 @@ const ExpenseTracker = () => {
   };
 
   const getBaseAmount = (amount, isForeign, rate) => (parseFloat(amount) || 0) * (isForeign ? (parseFloat(rate) || 1) : 1);
+
   const getSplitTotalBase = () => formData.splitSources.reduce((acc, curr) => acc + getBaseAmount(curr.amount, curr.asset !== baseCurrency, curr.exchangeRate), 0);
+  
   const getKhataTotal = () => formData.khataSplits.reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
 
   const createVaultRecord = (sourceData, linkId, amountToDeduct) => {
@@ -758,7 +738,7 @@ const ExpenseTracker = () => {
                     {month.monthName}
                   </h2>
                   <div className="text-right">
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Opening</p>
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Opening</p>
                     <p className="font-bold text-slate-800 dark:text-slate-200">{currencySymbol}{month.openingBalance.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
                   </div>
                 </div>
@@ -873,7 +853,7 @@ const ExpenseTracker = () => {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <div>
                   <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Payee / Item</label>
                   <input 
@@ -915,7 +895,7 @@ const ExpenseTracker = () => {
 
               {!formData.isSplit ? (
                 <div className="space-y-5 p-5 bg-rose-50/50 dark:bg-slate-800/80 rounded-2xl border border-rose-200 dark:border-slate-700 shadow-sm">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <div>
                       <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Vault</label>
                       <div className="relative">
@@ -943,7 +923,7 @@ const ExpenseTracker = () => {
                     {(formData.vault === 'bank' || formData.vault === 'online') && (
                       <div className="animate-in fade-in">
                         <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">
-                          {formData.vault === 'bank' ? 'Bank' : 'Wallet'}
+                          {formData.vault === 'bank' ? 'Bank Name' : 'Wallet Name'}
                         </label>
                         <input 
                           type="text" list="sub-wallets-exp" required value={formData.subWallet} 
@@ -976,7 +956,7 @@ const ExpenseTracker = () => {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                     <div>
                       <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Asset</label>
                       <div className="relative">
@@ -1037,7 +1017,7 @@ const ExpenseTracker = () => {
                           </button>
                         )}
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <select value={split.vault} onChange={(e) => updateSplit(index, 'vault', e.target.value)} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer">
                           <option value="bank">Bank Account</option><option value="cash">Physical Cash</option><option value="online">Online Wallet</option><option value="crypto">Crypto Engine</option>
                         </select>
@@ -1092,13 +1072,34 @@ const ExpenseTracker = () => {
 
                   {formData.isKhataSplit && (
                     <div className="mt-4 space-y-3">
+                      {/* 🚀 FIXED: Mobile Responsive Flex Fix for Khata Splits */}
                       {formData.khataSplits.map((ks, index) => (
-                        <div key={index} className="flex gap-2">
-                          <input type="text" list={`khata-${index}`} required placeholder="Name" value={ks.partyName} onChange={(e) => updateKhataSplit(index, 'partyName', e.target.value)} className="flex-1 p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400" />
-                          <datalist id={`khata-${index}`}>{existingParties.map(p => <option key={p} value={p} />)}</datalist>
-                          <input type="number" step="any" required placeholder="Amount" value={ks.amount} onChange={(e) => updateKhataSplit(index, 'amount', e.target.value)} className="w-32 p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400" />
+                        <div key={index} className="flex items-center gap-2 w-full">
+                          <div className="flex-1 min-w-0">
+                            <input 
+                              type="text" list={`khata-${index}`} required placeholder="Name" 
+                              value={ks.partyName} 
+                              onChange={(e) => updateKhataSplit(index, 'partyName', e.target.value)} 
+                              className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400" 
+                            />
+                            <datalist id={`khata-${index}`}>{existingParties.map(p => <option key={p} value={p} />)}</datalist>
+                          </div>
+                          <div className="w-24 sm:w-32 shrink-0">
+                            <input 
+                              type="number" step="any" required placeholder="Amount" 
+                              value={ks.amount} 
+                              onChange={(e) => updateKhataSplit(index, 'amount', e.target.value)} 
+                              className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400" 
+                            />
+                          </div>
                           {formData.khataSplits.length > 1 && (
-                            <button type="button" onClick={() => removeKhataSplit(index)} className="text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-900/30 p-2 rounded-lg transition-colors border border-transparent hover:border-rose-200 dark:hover:border-rose-800"><HiOutlineX size={16}/></button>
+                            <button 
+                              type="button" 
+                              onClick={() => removeKhataSplit(index)} 
+                              className="shrink-0 text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-900/30 p-2.5 rounded-lg transition-colors border border-transparent hover:border-rose-200 dark:hover:border-rose-800"
+                            >
+                              <HiOutlineX size={16}/>
+                            </button>
                           )}
                         </div>
                       ))}
@@ -1108,13 +1109,17 @@ const ExpenseTracker = () => {
                 </div>
               )}
 
-              <div className="flex items-end justify-between pt-4 border-t border-slate-200 dark:border-slate-700">
-                <div className="w-1/3">
+              <div className="flex flex-col sm:flex-row items-start sm:items-end justify-between pt-4 border-t border-slate-200 dark:border-slate-700 gap-4">
+                <div className="w-full sm:w-1/3">
                   <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Date</label>
-                  <input disabled={formData.isSynced} type="date" required value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none disabled:opacity-60 shadow-sm transition-colors" />
+                  <input 
+                    disabled={formData.isSynced} type="date" required value={formData.date} 
+                    onChange={(e) => setFormData({...formData, date: e.target.value})} 
+                    className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none disabled:opacity-60 shadow-sm transition-colors" 
+                  />
                   <p className="text-[9px] text-rose-600 dark:text-rose-400 mt-1 ml-1 font-bold">{formatGlobalDate ? formatGlobalDate(formData.date, 'short') : ''}</p>
                 </div>
-                <div className="text-right">
+                <div className="text-left sm:text-right w-full sm:w-auto">
                   <p className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">Total Expense</p>
                   <p className="text-2xl md:text-3xl font-black text-rose-600 dark:text-rose-400 tracking-tight mt-1">
                     -{currencySymbol}{(formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, formData.asset !== baseCurrency, formData.exchangeRate)).toLocaleString(undefined, {minimumFractionDigits: 2})}
@@ -1127,7 +1132,7 @@ const ExpenseTracker = () => {
 
               <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-2">
                 <button type="submit" disabled={isSaving} className={`w-full p-4 rounded-2xl font-black text-sm uppercase tracking-widest text-white transition-all shadow-xl flex items-center justify-center gap-2 shrink-0 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'active:scale-95'} ${formData.isSplit ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 shadow-amber-500/30' : 'bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 shadow-rose-500/30'}`}>
-                  {isSaving && <HiOutlineRefresh className="animate-spin text-xl" />}
+                  {isSaving && <HiOutlineRefresh className="animate-spin text-2xl" />}
                   {isSaving ? 'Processing...' : (editingId ? 'Update Expense' : (formData.isKhataSplit ? 'Save & Sync Khata' : 'Save Expense'))}
                 </button>
               </div>
@@ -1153,7 +1158,7 @@ const ExpenseTracker = () => {
             </div>
             
             <form onSubmit={executeSecureDelete} className="p-6 space-y-5">
-              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-500/30 rounded-xl">
+              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-500/30 rounded-xl">
                 <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
                   You are deleting <span className="font-black">"{deleteContext.title}"</span> worth 
                   <span className="font-black"> {currencySymbol}{deleteContext.finalBaseAmount?.toLocaleString()}</span>
