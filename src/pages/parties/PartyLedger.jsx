@@ -628,8 +628,7 @@ const PartyLedger = () => {
   }
 
   return (
-    // 🚀 FIXED: Set w-full h-auto without absolute layout blocks to allow free scrolling
-    <div className="w-full h-auto flex flex-col max-w-4xl mx-auto bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-900 md:rounded-[2.5rem] border-x md:border border-slate-200 dark:border-slate-800 shadow-2xl relative md:my-8 overflow-hidden min-h-[90vh]">
+    <div className="flex flex-col h-[calc(100dvh-0px)] md:h-[calc(100dvh-80px)] max-w-4xl mx-auto bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-900 md:rounded-[2.5rem] border-x md:border border-slate-200 dark:border-slate-800 shadow-2xl relative md:my-8 overflow-hidden min-h-[90vh]">
       
       {/* Premium Header */}
       <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800 px-4 md:px-8 py-5 flex items-center justify-between z-10 shadow-sm shrink-0">
@@ -731,8 +730,8 @@ const PartyLedger = () => {
          </div>
       )}
 
-      {/* Chat Ledger Area */}
-      <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-5 custom-scrollbar min-h-[50vh] bg-[url('data:image/svg+xml,%3Csvg width="60" height="60" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg"%3E%3Cg fill="none" fill-rule="evenodd"%3E%3Cg fill="%239C92AC" fill-opacity="0.03"%3E%3Cpath d="M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')] dark:bg-[url('data:image/svg+xml,%3Csvg width="60" height="60" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg"%3E%3Cg fill="none" fill-rule="evenodd"%3E%3Cg fill="%23ffffff" fill-opacity="0.02"%3E%3Cpath d="M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')]">
+      {/* 🚀 FIXED: Double quotes inside inline SVG replaced with properly URL-encoded double quotes (%22) to resolve Vite esbuild JSX parser errors */}
+      <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-5 custom-scrollbar min-h-[50vh] bg-[url('data:image/svg+xml,%3Csvg width=%2260%22 height=%2260%22 viewBox=%220 0 60 60%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cg fill=%22none%22 fill-rule=%22evenodd%22%3E%3Cg fill=%22%239C92AC%22 fill-opacity=%220.03%22%3E%3Cpath d=%22M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')] dark:bg-[url('data:image/svg+xml,%3Csvg width=%2260%22 height=%2260%22 viewBox=%220 0 60 60%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cg fill=%22none%22 fill-rule=%22evenodd%22%3E%3Cg fill=%22%23ffffff%22 fill-opacity=%220.02%22%3E%3Cpath d=%22M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z%22/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')]">
         
         <div className="text-center mt-2 mb-6">
            <span className="bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 text-[10px] font-black uppercase tracking-widest px-5 py-2.5 rounded-full shadow-sm inline-flex items-center gap-2">
@@ -766,7 +765,7 @@ const PartyLedger = () => {
       </div>
 
       {/* Action Footer */}
-      <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-200 dark:border-slate-800 p-5 shrink-0">
+      <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-200 dark:border-slate-800 p-5 shrink-0 shadow-[0_-5px_20px_rgba(0,0,0,0.03)] dark:shadow-[0_-5px_20px_rgba(0,0,0,0.15)]">
         {party.status === 'bad_debt' || party.status === 'settled' ? (
           <div className="text-center p-6 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-inner">
              <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-white dark:bg-slate-800 shadow-sm flex items-center justify-center border border-slate-200 dark:border-slate-700">
@@ -857,7 +856,7 @@ const PartyLedger = () => {
       {/* Transaction Modal */}
       {activeModal && activeModal !== 'settle' && activeModal !== 'writeoff' && (
         <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end md:items-center justify-center p-0 md:p-4 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-t-[2.5rem] md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-300 border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90dvh]">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-t-[2rem] md:rounded-[2rem] shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-300 border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90dvh]">
             
             <div className={`px-6 py-5 flex justify-between items-center text-white shrink-0 ${
               activeModal === 'give' ? 'bg-gradient-to-r from-rose-600 to-pink-600' : 
@@ -920,12 +919,12 @@ const PartyLedger = () => {
                     <div>
                       <label className="text-[10px] font-black text-blue-700 dark:text-blue-400 uppercase tracking-widest flex items-center gap-1 ml-1"><HiOutlineCalendar size={12}/> From</label>
                       <input type="date" required value={formData.startDate} onChange={(e) => setFormData({...formData, startDate: e.target.value})} 
-                        className="w-full p-4 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm" />
+                        className="w-full p-4 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 rounded-xl font-medium dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm" />
                     </div>
                     <div>
                       <label className="text-[10px] font-black text-blue-700 dark:text-blue-400 uppercase tracking-widest flex items-center gap-1 ml-1"><HiOutlineCalendar size={12}/> To</label>
                       <input type="date" required value={formData.endDate} onChange={(e) => setFormData({...formData, endDate: e.target.value})} 
-                        className="w-full p-4 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm" />
+                        className="w-full p-4 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 rounded-xl font-medium dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm" />
                     </div>
                   </div>
                   
@@ -940,7 +939,7 @@ const PartyLedger = () => {
                 <div className="flex gap-4">
                   <div className="w-1/3">
                     <select value={formData.currency} onChange={(e) => setFormData({...formData, currency: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})} 
-                      className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer shadow-sm">
+                      className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer shadow-sm">
                       <option value={baseCurrency}>{baseCurrency}</option>
                       {/* 🚀 STRICT DYNAMIC WATCHLIST CURRENCIES */}
                       <optgroup label="Fiat">
@@ -952,7 +951,7 @@ const PartyLedger = () => {
                     </select>
                   </div>
                   <input type="number" required step="any" value={formData.amount} onChange={(e) => setFormData({...formData, amount: e.target.value})} placeholder="Amount" 
-                    className="flex-1 p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-black text-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm" />
+                    className="flex-1 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-black text-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm placeholder-slate-400" />
                 </div>
               )}
 
@@ -960,7 +959,7 @@ const PartyLedger = () => {
                 <div>
                   <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Purpose</label>
                   <select value={formData.purpose} onChange={(e) => setFormData({...formData, purpose: e.target.value})} 
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 cursor-pointer shadow-sm">
+                    className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 cursor-pointer shadow-sm">
                     <option value="Friendly Support (0% Interest)">Friendly Support (0% Interest)</option>
                     <option value="Business Loan (Fixed Interest)">Business Loan (Fixed Interest)</option>
                     <option value="Conditional (Free for limited time)">Conditional (Free for limited time)</option>
@@ -973,14 +972,14 @@ const PartyLedger = () => {
               {activeModal === 'receive' && (
                 <div className="grid grid-cols-2 gap-4">
                   <label className={`p-4 rounded-xl border-2 cursor-pointer flex flex-col items-center text-center gap-1 transition-all shadow-sm ${
-                    formData.receiveType === 'principal' ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+                    formData.receiveType === 'principal' ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10' : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900'
                   }`}>
                     <input type="radio" name="recType" className="hidden" checked={formData.receiveType === 'principal'} onChange={() => setFormData({...formData, receiveType: 'principal'})} />
                     <span className={`font-black text-sm ${formData.receiveType === 'principal' ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-700 dark:text-slate-300'}`}>Capital</span>
                     <span className="text-[9px] font-bold text-slate-500">Reduces balance</span>
                   </label>
                   <label className={`p-4 rounded-xl border-2 cursor-pointer flex flex-col items-center text-center gap-1 transition-all shadow-sm ${
-                    formData.receiveType === 'interest' ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+                    formData.receiveType === 'interest' ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10' : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900'
                   }`}>
                     <input type="radio" name="recType" className="hidden" checked={formData.receiveType === 'interest'} onChange={() => setFormData({...formData, receiveType: 'interest'})} />
                     <span className={`font-black text-sm ${formData.receiveType === 'interest' ? 'text-blue-700 dark:text-blue-400' : 'text-slate-700 dark:text-slate-300'}`}>Interest</span>
@@ -990,12 +989,12 @@ const PartyLedger = () => {
               )}
 
               {isForeign && activeModal !== 'interest' && (
-                <div className="flex items-center gap-3 p-4 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                <div className="flex items-center gap-3 p-4 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-300 dark:border-slate-700 shadow-sm">
                   <span className="text-xs font-black text-slate-600 dark:text-slate-400">Rate: 1 {formData.currency} =</span>
                   <input type="number" step="any" required value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} 
                     className="flex-1 p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg font-bold text-slate-900 dark:text-white outline-none text-sm shadow-sm" />
                   <span className="text-xs font-black text-slate-600 dark:text-slate-400">{baseCurrency}</span>
-                  <button type="button" onClick={fetchLiveRate} disabled={isFetchingRate} className="text-[10px] font-black bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-50">
+                  <button type="button" onClick={fetchLiveRate} disabled={isFetchingRate} className="text-[10px] font-black bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-50 flex items-center justify-center">
                     <HiOutlineRefresh className={isFetchingRate ? 'animate-spin' : ''} size={14} />
                   </button>
                 </div>
@@ -1007,7 +1006,7 @@ const PartyLedger = () => {
                     <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Vault</label>
                     <div className="relative">
                       <select value={formData.vault} onChange={(e) => setFormData({...formData, vault: e.target.value, subWallet: ''})} 
-                        className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer appearance-none shadow-sm">
+                        className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer appearance-none shadow-sm">
                         <option value="bank">Bank Account</option>
                         <option value="cash">Physical Cash</option>
                         <option value="online">Online Wallet</option>
@@ -1022,7 +1021,7 @@ const PartyLedger = () => {
                       </label>
                       <input type="text" list="sub-wallets-party" required value={formData.subWallet} onChange={(e) => setFormData({...formData, subWallet: e.target.value})} 
                         placeholder={formData.vault === 'bank' ? "e.g., SBI" : "e.g., PayPal"} 
-                        className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm placeholder-slate-400" />
+                        className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm placeholder-slate-400" />
                       <datalist id="sub-wallets-party">
                         {existingVaultNames.map(b => <option key={b} value={b} />)}
                       </datalist>
@@ -1034,17 +1033,17 @@ const PartyLedger = () => {
               <div>
                 <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Date & Time</label>
                 <input type="datetime-local" required value={formData.datetime} onChange={(e) => setFormData({...formData, datetime: e.target.value})} 
-                  className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm" />
+                  className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-colors" />
               </div>
 
               <div>
                 <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Note (Optional)</label>
                 <textarea rows="2" value={formData.note} onChange={(e) => setFormData({...formData, note: e.target.value})} placeholder="Any additional remarks..." 
-                  className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 resize-none shadow-sm placeholder-slate-400" />
+                  className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 resize-none shadow-sm placeholder-slate-400 transition-colors" />
               </div>
 
               <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-2">
-                <button type="submit" disabled={isProcessing || (activeModal === 'interest' && !formData.amount)} className={`w-full p-4 rounded-xl font-black text-white text-lg uppercase tracking-widest shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 ${
+                <button type="submit" disabled={isProcessing || (activeModal === 'interest' && !formData.amount)} className={`w-full p-4 rounded-2xl font-black text-white text-lg uppercase tracking-widest shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 shrink-0 ${
                   activeModal === 'give' ? 'bg-gradient-to-r from-rose-600 to-pink-600 shadow-rose-500/30' : 
                   activeModal === 'receive' ? 'bg-gradient-to-r from-emerald-600 to-teal-600 shadow-emerald-500/30' : 
                   activeModal === 'emi_payment' ? 'bg-gradient-to-r from-indigo-600 to-blue-600 shadow-indigo-500/30' : 
@@ -1076,7 +1075,7 @@ const PartyLedger = () => {
             </div>
             
             <form onSubmit={executeSecureDelete} className="p-6 space-y-5">
-              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-500/30 rounded-xl">
+              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-500/30 rounded-xl">
                 <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
                   Deleting this entry will reverse the balance from your Khata and refund/deduct the amount from your Vault.
                 </p>
@@ -1087,7 +1086,7 @@ const PartyLedger = () => {
                 <input 
                   type="password" maxLength={6} required autoFocus
                   value={pinInput} onChange={(e) => setPinInput(e.target.value)}
-                  className="w-full text-center tracking-[0.3em] text-xl p-4 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 shadow-sm transition-colors"
+                  className="w-full text-center tracking-[0.3em] text-xl p-4 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors shadow-sm"
                 />
                 {pinError && <p className="text-xs font-bold text-rose-600 dark:text-rose-400 mt-2 text-center">{pinError}</p>}
               </div>
