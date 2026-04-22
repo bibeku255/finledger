@@ -4,7 +4,6 @@ import { collection, addDoc, doc, setDoc, deleteDoc, updateDoc, onSnapshot, quer
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
 
-// 🚀 FIXED: Removed unused/crashing icons from 'react-icons/hi'
 import { 
   HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
   HiOutlineSearch, HiOutlineRefresh, HiOutlineShoppingCart,
@@ -39,6 +38,12 @@ const expenseCategories = [
   "Forex & Bank Charges", "Health & Wellness", "Other Expenses"
 ];
 
+const fiatFlagMap = {
+  USD: 'us', INR: 'in', NPR: 'np', EUR: 'eu', GBP: 'gb', CAD: 'ca', AUD: 'au', 
+  JPY: 'jp', AED: 'ae', SAR: 'sa', QAR: 'qa', KWD: 'kw', OMR: 'om', BHD: 'bh',
+  PKR: 'pk', BDT: 'bd', SGD: 'sg', CNY: 'cn'
+};
+
 const hashPIN = async (pinCode) => {
   const encoder = new TextEncoder();
   const data = encoder.encode(pinCode);
@@ -46,22 +51,40 @@ const hashPIN = async (pinCode) => {
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
-// 🚀 Premium Stat Card Component
-const StatCard = ({ title, value, icon: Icon, color, subtitle }) => (
+const BINANCE_SAFE_COINS = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC', 'BCH', 'ADA', 'XMR', 'XLM', 'DAI', 'ZEC', 'SHIB', 'SUI', 'TON', 'DOT', 'PEPE', 'NEAR', 'POL', 'ATOM', 'ARB', 'BONK', 'CAKE', 'XTZ', 'FLOKI', 'OP', 'TWT', 'BAT', 'DGB', 'KAVA', 'AVAX', 'MEME', 'DASH'];
+
+const StatCard = ({ title, value, icon: Icon, color, subtitle, trend }) => (
   <div className={`relative overflow-hidden rounded-2xl p-5 bg-gradient-to-br ${color} text-white shadow-xl group hover:scale-[1.02] transition-all duration-300`}>
     <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(255,255,255,0.15),transparent_70%)]" />
     <Icon className="absolute right-[-10%] bottom-[-10%] text-7xl opacity-10 group-hover:scale-110 transition-transform duration-500" />
     <div className="relative z-10">
       <p className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-1">{title}</p>
       <h3 className="text-2xl font-black tracking-tight">{value}</h3>
+      {trend !== undefined && (
+        <div className={`flex items-center gap-1 mt-2 text-[10px] font-bold ${trend >= 0 ? 'text-emerald-200' : 'text-rose-200'}`}>
+          {trend >= 0 ? <HiOutlineTrendingUp size={14} /> : <HiOutlineTrendingDown size={14} />}
+          {Math.abs(trend)}% from last month
+        </div>
+      )}
       {subtitle && <p className="text-[9px] font-medium opacity-70 mt-1">{subtitle}</p>}
     </div>
   </div>
 );
 
 const ExpenseTracker = () => {
-  const { user, baseCurrency = 'INR', selectedCryptos = [], formatGlobalDate } = useAuth();
+  // 🚀 FIXED: Extracted selectedFiats from useAuth
+  const { user, baseCurrency = 'INR', selectedCryptos = [], selectedFiats = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
+
+  // 🚀 FIXED: Defined availableFiats and availableCryptos to prevent crashes
+  const availableFiats = useMemo(() => {
+    return Array.from(new Set([baseCurrency, ...selectedFiats]));
+  }, [baseCurrency, selectedFiats]);
+
+  const availableCryptos = useMemo(() => {
+    const customSymbols = selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
+    return Array.from(new Set(["USDT", ...customSymbols])).map(s => s.toUpperCase());
+  }, [selectedCryptos]);
 
   const [expenses, setExpenses] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -148,13 +171,6 @@ const ExpenseTracker = () => {
   
   const existingBanks = useMemo(() => Array.from(new Set(bankWalletLogs)), [bankWalletLogs]);
 
-  const activeAssetList = useMemo(() => {
-    if (formData.vault === 'crypto') return selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
-    return fiatCurrencies;
-  }, [formData.vault, selectedCryptos]);
-
-  const getCryptoListForSplit = () => selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
-
   const processedExpenses = useMemo(() => {
     const filtered = expenses.filter(exp => {
       const matchSearch = exp.title.toLowerCase().includes(searchTerm.toLowerCase()) || (exp.asset && exp.asset.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -224,20 +240,23 @@ const ExpenseTracker = () => {
   const fetchLiveRate = async (index = null) => {
     const isSingle = index === null;
     const assetToCheck = isSingle ? formData.asset : formData.splitSources[index].asset;
+    
     if (assetToCheck === baseCurrency) return;
     setIsFetchingRate(isSingle ? 'single' : index);
+    
     try {
       const fiatRes = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
       const fiatData = await fiatRes.json();
       const usdToBase = fiatData.rates[baseCurrency] || 1;
       let finalRate = 1;
 
-      if (fiatCurrencies.includes(assetToCheck)) {
+      if (availableFiats.includes(assetToCheck) || fiatCurrencies.includes(assetToCheck)) {
         const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${assetToCheck}`);
         const data = await res.json();
         finalRate = data.rates[baseCurrency] || 1;
       } else {
-        const coinObj = fullDatabase.find(c => c.symbol === assetToCheck.toUpperCase()) || {};
+        const upperSym = assetToCheck.toUpperCase();
+        const coinObj = fullDatabase.find(c => c.symbol === upperSym) || {};
         const searchId = coinObj.id || assetToCheck.toLowerCase();
         let priceUsd = null;
 
@@ -254,9 +273,9 @@ const ExpenseTracker = () => {
                if (cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
            } catch(e) {}
         }
-        if (!priceUsd) {
+        if (!priceUsd && BINANCE_SAFE_COINS.includes(upperSym)) {
             try {
-                const binanceSymbol = searchId === 'tether' ? 'BTCUSDT' : `${assetToCheck.toUpperCase()}USDT`;
+                const binanceSymbol = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
                 const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`);
                 if (bRes.ok) { const bData = await bRes.json(); priceUsd = searchId === 'tether' ? 1.00 : parseFloat(bData.price); }
             } catch(e) {}
@@ -275,9 +294,7 @@ const ExpenseTracker = () => {
   };
 
   const getBaseAmount = (amount, isForeign, rate) => (parseFloat(amount) || 0) * (isForeign ? (parseFloat(rate) || 1) : 1);
-
   const getSplitTotalBase = () => formData.splitSources.reduce((acc, curr) => acc + getBaseAmount(curr.amount, curr.asset !== baseCurrency, curr.exchangeRate), 0);
-  
   const getKhataTotal = () => formData.khataSplits.reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
 
   const createVaultRecord = (sourceData, linkId, amountToDeduct) => {
@@ -697,13 +714,13 @@ const ExpenseTracker = () => {
             <input 
               type="text" placeholder="Search by payee or category..."
               value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-12 pr-4 py-3.5 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-medium dark:text-white outline-none focus:border-rose-500 transition-all placeholder-slate-400 shadow-sm text-slate-900 font-bold"
+              className="w-full pl-12 pr-4 py-3.5 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:border-rose-500 transition-all placeholder-slate-400 shadow-sm"
             />
           </div>
           <div className="flex gap-2">
             <select 
               value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
-              className="px-4 py-3.5 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-medium dark:text-white outline-none focus:border-rose-500 cursor-pointer transition-all shadow-sm text-slate-900 font-bold"
+              className="px-4 py-3.5 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:border-rose-500 cursor-pointer transition-all shadow-sm"
             >
               <option value="all">All Categories</option>
               {expenseCategories.map(c => <option key={c} value={c}>{c}</option>)}
@@ -738,7 +755,7 @@ const ExpenseTracker = () => {
                     {month.monthName}
                   </h2>
                   <div className="text-right">
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Opening</p>
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Opening</p>
                     <p className="font-bold text-slate-800 dark:text-slate-200">{currencySymbol}{month.openingBalance.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
                   </div>
                 </div>
@@ -860,7 +877,7 @@ const ExpenseTracker = () => {
                     disabled={formData.isSynced} type="text" required value={formData.title} 
                     onChange={(e) => setFormData({...formData, title: e.target.value})} 
                     placeholder="e.g., Dinner, Rent"
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 transition-colors placeholder-slate-400"
+                    className="w-full p-4 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 transition-colors placeholder-slate-400 shadow-sm"
                   />
                 </div>
                 <div>
@@ -869,7 +886,7 @@ const ExpenseTracker = () => {
                     <select 
                       disabled={formData.isSynced} value={formData.category} 
                       onChange={(e) => setFormData({...formData, category: e.target.value})}
-                      className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 appearance-none cursor-pointer transition-colors shadow-sm"
+                      className="w-full p-4 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 appearance-none cursor-pointer transition-colors shadow-sm"
                     >
                       {expenseCategories.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
@@ -909,7 +926,7 @@ const ExpenseTracker = () => {
                               exchangeRate: 1, subWallet: ''
                             });
                           }} 
-                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 cursor-pointer appearance-none shadow-sm"
+                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 cursor-pointer appearance-none shadow-sm transition-colors"
                         >
                           <option value="bank">Bank Account</option>
                           <option value="cash">Physical Cash</option>
@@ -923,12 +940,12 @@ const ExpenseTracker = () => {
                     {(formData.vault === 'bank' || formData.vault === 'online') && (
                       <div className="animate-in fade-in">
                         <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">
-                          {formData.vault === 'bank' ? 'Bank Name' : 'Wallet Name'}
+                          {formData.vault === 'bank' ? 'Bank' : 'Wallet'}
                         </label>
                         <input 
                           type="text" list="sub-wallets-exp" required value={formData.subWallet} 
                           onChange={(e) => setFormData({...formData, subWallet: e.target.value})} 
-                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 placeholder-slate-400 shadow-sm"
+                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 placeholder-slate-400 shadow-sm transition-colors"
                           placeholder={formData.vault === 'bank' ? "e.g. SBI" : "e.g. PayPal"}
                         />
                         <datalist id="sub-wallets-exp">{existingBanks.map(b => <option key={b} value={b} />)}</datalist>
@@ -940,12 +957,12 @@ const ExpenseTracker = () => {
                         <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Platform</label>
                         {formData.isCustomSingle ? (
                           <div className="flex gap-2">
-                            <input type="text" required value={formData.cryptoPlatform} onChange={(e)=>setFormData({...formData, cryptoPlatform: e.target.value})} className="flex-1 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm" />
-                            <button type="button" onClick={()=>setFormData({...formData, isCustomSingle: false, cryptoPlatform: cryptoPlatformsList[0]})} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-300 transition-colors border border-slate-300 dark:border-slate-600 shadow-sm"><HiOutlineX size={20}/></button>
+                            <input type="text" required value={formData.cryptoPlatform} onChange={(e)=>setFormData({...formData, cryptoPlatform: e.target.value})} className="flex-1 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm transition-colors" />
+                            <button type="button" onClick={()=>setFormData({...formData, isCustomSingle: false, cryptoPlatform: cryptoPlatformsList[0]})} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors border border-slate-300 dark:border-slate-600 shadow-sm"><HiOutlineX size={20}/></button>
                           </div>
                         ) : (
                           <div className="relative">
-                            <select value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} onChange={(e) => { if(e.target.value==='CUSTOM'){setFormData({...formData, isCustomSingle: true, cryptoPlatform: ''})} else {setFormData({...formData, cryptoPlatform: e.target.value})} }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none cursor-pointer appearance-none shadow-sm">
+                            <select value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} onChange={(e) => { if(e.target.value==='CUSTOM'){setFormData({...formData, isCustomSingle: true, cryptoPlatform: ''})} else {setFormData({...formData, cryptoPlatform: e.target.value})} }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none cursor-pointer appearance-none shadow-sm transition-colors">
                               {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
                               <option value="CUSTOM">✨ Custom Platform</option>
                             </select>
@@ -1018,24 +1035,24 @@ const ExpenseTracker = () => {
                         )}
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <select value={split.vault} onChange={(e) => updateSplit(index, 'vault', e.target.value)} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer">
+                        <select value={split.vault} onChange={(e) => updateSplit(index, 'vault', e.target.value)} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors">
                           <option value="bank">Bank Account</option><option value="cash">Physical Cash</option><option value="online">Online Wallet</option><option value="crypto">Crypto Engine</option>
                         </select>
                         {(split.vault === 'bank' || split.vault === 'online') && (
-                          <input type="text" list={`split-banks-${index}`} required value={split.subWallet} onChange={(e) => updateSplit(index, 'subWallet', e.target.value)} placeholder={split.vault === 'bank' ? "Bank Name" : "Wallet Name"} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400" />
+                          <input type="text" list={`split-banks-${index}`} required value={split.subWallet} onChange={(e) => updateSplit(index, 'subWallet', e.target.value)} placeholder={split.vault === 'bank' ? "Bank Name" : "Wallet Name"} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400 transition-colors" />
                         )}
                         {split.vault === 'crypto' && (
-                          <select value={split.cryptoPlatform} onChange={(e) => updateSplit(index, 'cryptoPlatform', e.target.value)} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer">
+                          <select value={split.cryptoPlatform} onChange={(e) => updateSplit(index, 'cryptoPlatform', e.target.value)} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors">
                             {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
                           </select>
                         )}
-                        <select value={split.asset} onChange={(e) => { updateSplit(index, 'asset', e.target.value); updateSplit(index, 'exchangeRate', 1); }} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer">
+                        <select value={split.asset} onChange={(e) => { updateSplit(index, 'asset', e.target.value); updateSplit(index, 'exchangeRate', 1); }} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors">
                           {split.vault === 'crypto' 
                             ? availableCryptos.map(c => <option key={c} value={c}>{c}</option>) 
                             : [baseCurrency, ...availableFiats.filter(c => c !== baseCurrency)].map(c => <option key={c} value={c}>{c}</option>)
                           }
                         </select>
-                        <input type="number" step="any" required value={split.amount} onChange={(e) => updateSplit(index, 'amount', e.target.value)} placeholder="Amount" className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400" />
+                        <input type="number" step="any" required value={split.amount} onChange={(e) => updateSplit(index, 'amount', e.target.value)} placeholder="Amount" className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400 transition-colors" />
                       </div>
                       
                       {split.asset !== baseCurrency && (
@@ -1045,7 +1062,7 @@ const ExpenseTracker = () => {
                           </button>
                           <div className="flex items-center gap-3 w-full md:w-auto flex-1">
                             <span className="text-xs font-black text-slate-600 dark:text-slate-400">1 {split.asset} =</span>
-                            <input type="number" step="any" required value={split.exchangeRate} onChange={(e) => updateSplit(index, 'exchangeRate', e.target.value)} className="flex-1 p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-sm font-bold text-slate-900 dark:text-white outline-none shadow-sm" />
+                            <input type="number" step="any" required value={split.exchangeRate} onChange={(e) => updateSplit(index, 'exchangeRate', e.target.value)} className="flex-1 p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-sm font-bold text-slate-900 dark:text-white outline-none shadow-sm transition-colors" />
                           </div>
                         </div>
                       )}
@@ -1080,7 +1097,7 @@ const ExpenseTracker = () => {
                               type="text" list={`khata-${index}`} required placeholder="Name" 
                               value={ks.partyName} 
                               onChange={(e) => updateKhataSplit(index, 'partyName', e.target.value)} 
-                              className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400" 
+                              className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400 transition-colors" 
                             />
                             <datalist id={`khata-${index}`}>{existingParties.map(p => <option key={p} value={p} />)}</datalist>
                           </div>
@@ -1089,7 +1106,7 @@ const ExpenseTracker = () => {
                               type="number" step="any" required placeholder="Amount" 
                               value={ks.amount} 
                               onChange={(e) => updateKhataSplit(index, 'amount', e.target.value)} 
-                              className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400" 
+                              className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400 transition-colors" 
                             />
                           </div>
                           {formData.khataSplits.length > 1 && (
@@ -1131,7 +1148,10 @@ const ExpenseTracker = () => {
               </div>
 
               <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-2">
-                <button type="submit" disabled={isSaving} className={`w-full p-4 rounded-2xl font-black text-sm uppercase tracking-widest text-white transition-all shadow-xl flex items-center justify-center gap-2 shrink-0 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'active:scale-95'} ${formData.isSplit ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 shadow-amber-500/30' : 'bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 shadow-rose-500/30'}`}>
+                <button 
+                  type="submit" disabled={isSaving} 
+                  className={`w-full p-4 rounded-2xl font-black text-white text-lg transition-all shadow-xl flex items-center justify-center gap-2 shrink-0 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'active:scale-95'} ${formData.isSplit ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 shadow-amber-500/30' : 'bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 shadow-rose-500/30'}`}
+                >
                   {isSaving && <HiOutlineRefresh className="animate-spin text-2xl" />}
                   {isSaving ? 'Processing...' : (editingId ? 'Update Expense' : (formData.isKhataSplit ? 'Save & Sync Khata' : 'Save Expense'))}
                 </button>
