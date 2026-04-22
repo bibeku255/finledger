@@ -1,52 +1,39 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { collection, addDoc, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDoc, getDocs } from 'firebase/firestore';
+import { collection, addDoc, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDoc, getDocs, where } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
 
 import { 
   HiOutlineUserAdd, HiOutlineSearch, HiOutlineUsers, 
   HiOutlineTrendingUp, HiOutlineTrendingDown, HiOutlineX, 
-  HiOutlineTrash, HiOutlineChevronRight, HiOutlineLocationMarker,
+  HiOutlineTrash, HiOutlineChevronRight,
   HiOutlineExclamationCircle, HiOutlineRefresh, HiOutlinePencil,
   HiOutlineLockClosed, HiOutlineShieldCheck, HiOutlineChevronDown,
-  HiOutlineBriefcase, HiOutlineCalendar, HiOutlineDownload,
+  HiOutlineCalendar, HiOutlineDownload,
   HiOutlineDocumentText, HiOutlineTable, HiOutlinePhone,
-  HiOutlineMail, HiOutlineUser
+  HiOutlineUser
 } from 'react-icons/hi';
 import { 
-  FaUserCircle, FaPhoneAlt, FaUniversity, FaGem, 
-  FaArrowUp, FaArrowDown, FaWallet, FaUserFriends,
-  FaHandHoldingHeart, FaHandHoldingUsd, FaPiggyBank
+  FaUserCircle, FaPhoneAlt, FaUniversity, 
+  FaArrowUp, FaArrowDown, FaUserFriends,
+  FaHandHoldingHeart, FaHandHoldingUsd, FaWallet, FaBitcoin
 } from 'react-icons/fa'; 
 
-// Removed large hardcoded lists as we now use strict watchlists
+const cryptoPlatformsList = [
+  "CoinDCX", "WazirX", "ZebPay", "Mudrex", "SunCrypto",
+  "Binance", "Coinbase", "Bybit", "KuCoin", "OKX", "Kraken", "Mexc", "Gate.io",
+  "FaucetPay", "Trust Wallet", "MetaMask", "Phantom", "NC Wallet", "Payeer",
+  "Hardware Wallet (Ledger/Trezor)", "Other Wallet/Site"
+];
+
 const hashPIN = async (pinCode) => {
   const encoder = new TextEncoder();
   const data = encoder.encode(pinCode);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 };
-
-// 🚀 Premium Stat Card Component
-const StatCard = ({ title, value, icon: Icon, color, subtitle, trend }) => (
-  <div className={`relative overflow-hidden rounded-2xl p-5 bg-gradient-to-br ${color} text-white shadow-xl group hover:scale-[1.02] transition-all duration-300`}>
-    <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(255,255,255,0.15),transparent_70%)]" />
-    <Icon className="absolute right-[-10%] bottom-[-10%] text-7xl opacity-10 group-hover:scale-110 transition-transform duration-500" />
-    <div className="relative z-10">
-      <p className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-1">{title}</p>
-      <h3 className="text-2xl font-black tracking-tight">{value}</h3>
-      {trend !== undefined && (
-        <div className={`flex items-center gap-1 mt-2 text-[10px] font-bold ${trend >= 0 ? 'text-emerald-200' : 'text-rose-200'}`}>
-          {trend >= 0 ? <FaArrowUp size={12} /> : <FaArrowDown size={12} />}
-          {Math.abs(trend)}% from last month
-        </div>
-      )}
-      {subtitle && <p className="text-[9px] font-medium opacity-70 mt-1">{subtitle}</p>}
-    </div>
-  </div>
-);
 
 // 🚀 Premium Party Card Component
 const PartyCard = ({ party, onEdit, onDelete, onClick, currencySymbol, formatGlobalDate }) => {
@@ -126,12 +113,12 @@ const PartyCard = ({ party, onEdit, onDelete, onClick, currencySymbol, formatGlo
               </span>
             )}
           </div>
-          <p className={`text-2xl font-black tracking-tight ${
+          <p className={`text-2xl font-black tracking-tight break-words ${
             party.status === 'bad_debt' ? 'text-rose-600 dark:text-rose-400' : 
             party.netBalance > 0 ? 'text-emerald-600 dark:text-emerald-400' : 
             party.netBalance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500'
           }`}>
-            {currencySymbol}{Math.abs(party.netBalance).toLocaleString(undefined, {minimumFractionDigits: 2})}
+            {currencySymbol}{Math.abs(party.netBalance).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
           </p>
         </div>
 
@@ -150,12 +137,10 @@ const PartyCard = ({ party, onEdit, onDelete, onClick, currencySymbol, formatGlo
 };
 
 const PartyDirectory = () => {
-  // 🚀 FETCH WATCHLISTS FROM CONTEXT
   const { user, baseCurrency = 'INR', selectedCryptos = [], selectedFiats = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
   const navigate = useNavigate();
 
-  // 🚀 STRICT DYNAMIC LISTS
   const availableFiats = useMemo(() => Array.from(new Set([baseCurrency, ...selectedFiats])), [baseCurrency, selectedFiats]);
   const availableCryptos = useMemo(() => {
     const customSymbols = selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
@@ -176,11 +161,14 @@ const PartyDirectory = () => {
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [customUserCoins, setCustomUserCoins] = useState([]); 
+  const [existingVaultNames, setExistingVaultNames] = useState([]);
 
+  // 🚀 FIXED: Added vault linking details to formData state
   const [formData, setFormData] = useState({
     name: '', phone: '', address: '', accountType: 'casual', 
     emiDueDate: '', emiAmount: '', initialBalanceType: 'none', 
-    initialAmount: '', currency: baseCurrency, exchangeRate: 1
+    initialAmount: '', currency: baseCurrency, exchangeRate: 1,
+    vault: 'none', subWallet: '', cryptoPlatform: cryptoPlatformsList[0], isCustomPlatform: false
   });
 
   useEffect(() => {
@@ -195,15 +183,25 @@ const PartyDirectory = () => {
   }, [user]);
 
   useEffect(() => {
-    const fetchUserData = async () => {
+    const fetchUserDataAndVaults = async () => {
       if (!user) return;
       const userRef = doc(db, "users", user.uid);
       const userSnap = await getDoc(userRef);
       if (userSnap.exists() && userSnap.data().customCoins) {
         setCustomUserCoins(userSnap.data().customCoins);
       }
+
+      // Fetch existing vaults for autocomplete
+      const qBank = query(collection(db, "users", user.uid, "bankWallet"));
+      const snapBank = await getDocs(qBank);
+      const qOnline = query(collection(db, "users", user.uid, "onlineWallet"));
+      const snapOnline = await getDocs(qOnline);
+      const names = new Set();
+      snapBank.docs.forEach(d => { if(d.data().bankName) names.add(d.data().bankName) });
+      snapOnline.docs.forEach(d => { if(d.data().walletName) names.add(d.data().walletName) });
+      setExistingVaultNames(Array.from(names));
     };
-    fetchUserData();
+    fetchUserDataAndVaults();
   }, [user]);
 
   const fullDatabase = useMemo(() => {
@@ -283,7 +281,7 @@ const PartyDirectory = () => {
            } catch(e) {}
         }
 
-        if (!priceUsd && BINANCE_SAFE_COINS.includes(upperSym)) {
+        if (!priceUsd) {
            try {
               const binanceSymbol = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
               const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`);
@@ -322,6 +320,11 @@ const PartyDirectory = () => {
       alert("Please provide the EMI Amount and Due Date for formal loans.");
       return;
     }
+    
+    if (formData.initialBalanceType !== 'none' && formData.vault !== 'none') {
+       if (formData.vault === 'crypto' && !formData.cryptoPlatform.trim()) return alert("Please specify the crypto platform.");
+       if ((formData.vault === 'bank' || formData.vault === 'online') && !formData.subWallet.trim()) return alert("Please specify the Bank or Wallet Name.");
+    }
 
     setIsSaving(true);
 
@@ -357,16 +360,67 @@ const PartyDirectory = () => {
         const docRef = await addDoc(collection(db, "users", user.uid, "parties"), newParty);
         
         if (startingBalanceBase !== 0) {
+          const timestamp = new Date().getTime();
+          const formattedDate = new Date().toISOString().split('T')[0];
+          const linkId = `PARTY_INIT_${timestamp}_${Math.floor(Math.random() * 1000)}`;
+
+          // Create Ledger Entry
           await addDoc(collection(db, "users", user.uid, "parties", docRef.id, "ledger"), {
             type: startingBalanceBase > 0 ? 'give' : 'get',
             amount: parseFloat(formData.initialAmount),
             currency: formData.currency,
             exchangeRate: formData.exchangeRate,
             baseAmount: Math.abs(startingBalanceBase),
-            date: new Date().toISOString().split('T')[0],
-            timestamp: new Date().getTime(),
+            date: formattedDate,
+            timestamp: timestamp,
             note: formData.accountType === 'loan' ? 'Initial Loan Principal' : 'Opening Account Balance',
+            linkId: linkId
           });
+
+          // 🚀 SUPER LOGIC: Create Linked Vault Entry if User Opted In
+          if (formData.vault !== 'none') {
+            const isOutflow = startingBalanceBase > 0; // Receivable (+): money went OUT to them. Payable (-): money came IN from them.
+            const typeStr = isOutflow ? 'out' : 'in';
+            const actionStr = isOutflow ? 'Lent to' : 'Received from';
+
+            let vaultCol = '';
+            let vaultEntry = null;
+
+            if (formData.vault === 'crypto') {
+              vaultCol = 'cryptoWalletLogs';
+              vaultEntry = {
+                  type: typeStr,
+                  coin: formData.currency,
+                  quantity: parseFloat(formData.initialAmount),
+                  platform: formData.cryptoPlatform.trim(),
+                  reason: `${actionStr} ${formData.name.trim()} (Initial Khata)`,
+                  referenceNo: linkId,
+                  date: formattedDate,
+                  timestamp,
+                  linkedPartyId: docRef.id,
+                  linkId
+              };
+            } else {
+              vaultCol = formData.vault + 'Wallet';
+              vaultEntry = {
+                  title: `${actionStr} ${formData.name.trim()} (Initial Khata)`,
+                  type: typeStr,
+                  date: formattedDate,
+                  timestamp,
+                  currency: formData.currency,
+                  foreignAmount: parseFloat(formData.initialAmount),
+                  exchangeRate: isForeign ? parseFloat(formData.exchangeRate) : 1,
+                  finalBaseAmount: Math.abs(startingBalanceBase),
+                  fee: 0,
+                  walletName: formData.subWallet.trim() || 'Default Wallet',
+                  bankName: formData.subWallet.trim() || 'Default Bank',
+                  transferType: 'Khata Settlement',
+                  linkedPartyId: docRef.id,
+                  linkId
+              };
+            }
+            await addDoc(collection(db, "users", user.uid, vaultCol), vaultEntry);
+          }
         }
       }
       closeModal();
@@ -381,16 +435,10 @@ const PartyDirectory = () => {
     e.stopPropagation(); 
     setEditingPartyId(party.id);
     setFormData({
-      name: party.name,
-      phone: party.phone || '',
-      address: party.address || '',
-      accountType: party.accountType || 'casual',
-      emiDueDate: party.emiDueDate || '',
-      emiAmount: party.emiAmount || '',
-      initialBalanceType: 'none', 
-      initialAmount: '',
-      currency: baseCurrency,
-      exchangeRate: 1
+      name: party.name, phone: party.phone || '', address: party.address || '',
+      accountType: party.accountType || 'casual', emiDueDate: party.emiDueDate || '',
+      emiAmount: party.emiAmount || '', initialBalanceType: 'none', initialAmount: '',
+      currency: baseCurrency, exchangeRate: 1, vault: 'none', subWallet: '', cryptoPlatform: cryptoPlatformsList[0], isCustomPlatform: false
     });
     setShowSuggestions(false);
     setIsModalOpen(true);
@@ -427,6 +475,14 @@ const PartyDirectory = () => {
       const snap = await getDocs(q);
       snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, "parties", deleteContext.id, "ledger", d.id)));
 
+      // 🚀 CRITICAL REVERSE ENGINEERING: Delete ANY linked Vault Entries!
+      const collectionsToCheck = ['bankWallet', 'cashWallet', 'onlineWallet', 'cryptoWalletLogs', 'expenseLogs', 'incomeLogs'];
+      for (const colName of collectionsToCheck) {
+        const vQ = query(collection(db, "users", user.uid, colName), where("linkedPartyId", "==", deleteContext.id));
+        const vSnap = await getDocs(vQ);
+        vSnap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, colName, d.id)));
+      }
+
       setDeleteContext(null); 
     } catch (error) {
       setPinError("System error during verification. Try again.");
@@ -461,7 +517,11 @@ const PartyDirectory = () => {
 
   const openModal = () => {
     setEditingPartyId(null);
-    setFormData({ name: '', phone: '', address: '', accountType: 'casual', emiDueDate: '', emiAmount: '', initialBalanceType: 'none', initialAmount: '', currency: baseCurrency, exchangeRate: 1 });
+    setFormData({ 
+      name: '', phone: '', address: '', accountType: 'casual', emiDueDate: '', emiAmount: '', 
+      initialBalanceType: 'none', initialAmount: '', currency: baseCurrency, exchangeRate: 1,
+      vault: 'none', subWallet: existingVaultNames[0] || '', cryptoPlatform: cryptoPlatformsList[0], isCustomPlatform: false
+    });
     setShowSuggestions(false);
     setIsModalOpen(true);
   };
@@ -495,7 +555,7 @@ const PartyDirectory = () => {
             </div>
             
             <div className="flex items-center gap-3">
-              <div className="relative group">
+              <div className="relative group hidden sm:block">
                 <button className="flex items-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10">
                   <HiOutlineDownload size={16} /> Export
                 </button>
@@ -522,15 +582,15 @@ const PartyDirectory = () => {
           <div className="relative z-10 grid grid-cols-3 gap-3 mt-6">
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">To Receive</p>
-              <p className="text-lg font-black text-emerald-400">{currencySymbol}{totalReceivables.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+              <p className="text-sm md:text-lg font-black text-emerald-400 break-words">{currencySymbol}{totalReceivables.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
             </div>
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">To Pay</p>
-              <p className="text-lg font-black text-rose-400">{currencySymbol}{totalPayables.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+              <p className="text-sm md:text-lg font-black text-rose-400 break-words">{currencySymbol}{totalPayables.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
             </div>
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Active Accounts</p>
-              <p className="text-lg font-black text-white">{activeParties}</p>
+              <p className="text-sm md:text-lg font-black text-white">{activeParties}</p>
             </div>
           </div>
         </div>
@@ -542,7 +602,7 @@ const PartyDirectory = () => {
             <input 
               type="text" placeholder="Search by name, phone or bank..."
               value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-12 pr-4 py-3.5 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:border-blue-500 transition-all shadow-sm placeholder-slate-400 dark:placeholder-slate-500"
+              className="w-full pl-12 pr-4 py-4 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:border-blue-500 transition-all shadow-sm placeholder-slate-400 dark:placeholder-slate-500"
             />
           </div>
           
@@ -606,10 +666,10 @@ const PartyDirectory = () => {
         )}
       </div>
 
-      {/* Add/Edit Modal */}
+      {/* 🚀 Add/Edit Modal (With Vault Linking) */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden max-h-[90dvh] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-300 dark:border-slate-700 flex flex-col">
+        <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90dvh] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-300 dark:border-slate-700">
             
             <div className="px-6 py-5 bg-gradient-to-r from-blue-600 to-cyan-600 text-white flex justify-between items-center shrink-0">
               <h3 className="text-xl font-black flex items-center gap-2">
@@ -639,7 +699,7 @@ const PartyDirectory = () => {
                   type="text" required value={formData.name} 
                   onChange={(e) => { setFormData({...formData, name: e.target.value}); if (!editingPartyId) setShowSuggestions(true); }} 
                   onFocus={() => { if(!editingPartyId) setShowSuggestions(true) }}
-                  placeholder={formData.accountType === 'loan' ? "e.g., HDFC Home Loan" : "e.g., Rahul, Office Colleague"} 
+                  placeholder={formData.accountType === 'loan' ? "e.g., HDFC Home Loan" : "e.g., Rahul, Colleague"} 
                   className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm placeholder-slate-400 dark:placeholder-slate-500 transition-colors" 
                 />
                 
@@ -664,30 +724,30 @@ const PartyDirectory = () => {
               </div>
 
               {formData.accountType === 'loan' && (
-                <div className="grid grid-cols-2 gap-4 p-4 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/50 rounded-xl shadow-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/50 rounded-xl shadow-sm">
                   <div>
                     <label className="text-[10px] font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-widest ml-1">EMI Amount</label>
                     <input type="number" required value={formData.emiAmount} onChange={(e) => setFormData({...formData, emiAmount: e.target.value})} placeholder="e.g., 5000" 
-                      className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-sm transition-colors" />
+                      className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-sm transition-colors" />
                   </div>
                   <div>
                     <label className="text-[10px] font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-widest ml-1">Next Due Date</label>
                     <input type="date" required value={formData.emiDueDate} onChange={(e) => setFormData({...formData, emiDueDate: e.target.value})} 
-                      className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-sm transition-colors" />
+                      className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-sm transition-colors" />
                   </div>
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Phone (Optional)</label>
                   <input type="tel" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} placeholder="e.g., +91 987..." 
-                    className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-colors" />
+                    className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-colors" />
                 </div>
                 <div>
                   <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Notes (Optional)</label>
                   <input type="text" value={formData.address} onChange={(e) => setFormData({...formData, address: e.target.value})} placeholder="e.g., Loan A/C 4589" 
-                    className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-colors" />
+                    className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-colors" />
                 </div>
               </div>
 
@@ -697,9 +757,9 @@ const PartyDirectory = () => {
                     {formData.accountType === 'loan' ? 'Total Loan Principal' : 'Previous Balance (If any)'}
                   </label>
                   
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                     {['none', 'receivable', 'payable'].map((type) => (
-                      <label key={type} className={`p-3 rounded-lg border-2 text-center cursor-pointer font-black text-[10px] uppercase tracking-widest transition-all shadow-sm ${
+                      <label key={type} className={`p-2.5 sm:p-3 rounded-lg border-2 text-center cursor-pointer font-black text-[9px] sm:text-[10px] uppercase tracking-widest transition-all flex items-center justify-center leading-tight shadow-sm ${
                         formData.initialBalanceType === type 
                           ? type === 'none' ? 'bg-slate-100 border-slate-400 text-slate-800 dark:bg-slate-700 dark:border-slate-500 dark:text-white' :
                             type === 'receivable' ? 'bg-emerald-50 border-emerald-400 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500' :
@@ -713,12 +773,12 @@ const PartyDirectory = () => {
                   </div>
 
                   {formData.initialBalanceType !== 'none' && (
-                    <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-3">
-                      <div className="flex gap-3">
+                    <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
+                      
+                      <div className="flex flex-row gap-2 sm:gap-3 w-full">
                         <select value={formData.currency} onChange={(e) => setFormData({...formData, currency: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})} 
-                          className="p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors">
+                          className="w-[35%] sm:w-auto min-w-[80px] p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors">
                           <option value={baseCurrency}>{baseCurrency}</option>
-                          {/* 🚀 FIXED: Bind directly to our dynamic active asset lists */}
                           <optgroup label="Fiat">
                             {availableFiats.filter(c => c !== baseCurrency).map(c => <option key={c} value={c}>{c}</option>)}
                           </optgroup>
@@ -727,29 +787,82 @@ const PartyDirectory = () => {
                           </optgroup>
                         </select>
                         <input type="number" required value={formData.initialAmount} onChange={(e) => setFormData({...formData, initialAmount: e.target.value})} placeholder="Amount" 
-                          className={`flex-1 p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-black outline-none shadow-sm transition-colors ${
+                          className={`w-[65%] flex-1 min-w-0 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-black outline-none shadow-sm transition-colors ${
                             formData.initialBalanceType === 'receivable' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
                           }`} />
                       </div>
 
                       {isForeign && (
-                        <div className="flex items-center gap-2">
-                          <button type="button" onClick={fetchLiveRate} disabled={isFetchingRate} className="text-[10px] font-black bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1 shadow-sm transition-colors">
-                            <HiOutlineRefresh className={isFetchingRate ? 'animate-spin' : ''} size={12} /> Live
+                        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full bg-white dark:bg-slate-900 p-2 sm:p-3 rounded-xl border border-slate-300 dark:border-slate-700 shadow-sm">
+                          <button type="button" onClick={fetchLiveRate} disabled={isFetchingRate} className="shrink-0 text-[10px] font-black bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-1 transition-colors">
+                            <HiOutlineRefresh className={isFetchingRate ? 'animate-spin' : ''} size={14} /> <span className="hidden sm:inline">Live</span>
                           </button>
-                          <span className="text-xs font-black text-slate-600 dark:text-slate-400">Rate: 1 {formData.currency} =</span>
-                          <input type="number" step="any" required value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} 
-                            className="flex-1 p-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-sm font-bold text-slate-900 dark:text-white outline-none shadow-sm transition-colors" />
-                          <span className="text-xs font-black text-slate-600 dark:text-slate-400">{baseCurrency}</span>
+                          <div className="flex items-center gap-2 flex-1 min-w-[150px]">
+                            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 shrink-0">1 {formData.currency} =</span>
+                            <input type="number" step="any" required value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} 
+                              className="flex-1 w-full min-w-0 p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg text-sm font-bold text-slate-900 dark:text-white outline-none transition-colors" />
+                            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 shrink-0">{baseCurrency}</span>
+                          </div>
                         </div>
                       )}
+
+                      {/* 🚀 PREMIUM: Vault Linking Option Added Here */}
+                      <div className="pt-4 border-t border-slate-200 dark:border-slate-700 space-y-3">
+                        <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-1">
+                          <FaUniversity className="text-blue-500"/> Link to Vault?
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="relative">
+                            <select value={formData.vault} onChange={(e) => setFormData({...formData, vault: e.target.value, subWallet: ''})} 
+                              className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none cursor-pointer shadow-sm transition-colors">
+                              <option value="none">No Vault (Khata Only)</option>
+                              <option value="bank">Bank Account</option>
+                              <option value="cash">Physical Cash</option>
+                              <option value="online">Online Wallet</option>
+                              <option value="crypto">Crypto Engine</option>
+                            </select>
+                            <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
+                          </div>
+                          
+                          {(formData.vault === 'bank' || formData.vault === 'online') && (
+                            <div className="animate-in fade-in">
+                              <input type="text" list="sub-wallets-party" required value={formData.subWallet} onChange={(e) => setFormData({...formData, subWallet: e.target.value})} 
+                                placeholder={formData.vault === 'bank' ? "e.g., SBI" : "e.g., PayPal"} 
+                                className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm placeholder-slate-400" />
+                              <datalist id="sub-wallets-party">
+                                {existingVaultNames.map(b => <option key={b} value={b} />)}
+                              </datalist>
+                            </div>
+                          )}
+
+                          {formData.vault === 'crypto' && (
+                            <div className="animate-in fade-in">
+                              {formData.isCustomPlatform ? (
+                                <div className="flex gap-2">
+                                  <input type="text" required value={formData.cryptoPlatform} onChange={(e)=>setFormData({...formData, cryptoPlatform: e.target.value})} className="flex-1 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm transition-colors" />
+                                  <button type="button" onClick={()=>setFormData({...formData, isCustomPlatform: false, cryptoPlatform: cryptoPlatformsList[0]})} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors shadow-sm border border-slate-300 dark:border-slate-600"><HiOutlineX size={20}/></button>
+                                </div>
+                              ) : (
+                                <div className="relative">
+                                  <select value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} onChange={(e) => { if(e.target.value==='CUSTOM'){setFormData({...formData, isCustomPlatform: true, cryptoPlatform: ''})} else {setFormData({...formData, cryptoPlatform: e.target.value})} }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none cursor-pointer appearance-none shadow-sm transition-colors">
+                                    {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
+                                    <option value="CUSTOM">✨ Custom Platform</option>
+                                  </select>
+                                  <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
                     </div>
                   )}
                 </div>
               )}
 
               <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-2">
-                <button type="submit" disabled={isSaving} className="w-full p-4 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white rounded-xl font-black text-sm uppercase tracking-widest shadow-lg shadow-blue-500/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2 shrink-0">
+                <button type="submit" disabled={isSaving} className="w-full p-4 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg shadow-blue-500/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2 shrink-0">
                   {isSaving && <HiOutlineRefresh className="animate-spin text-xl" />}
                   {isSaving ? 'Processing...' : (editingPartyId ? 'Update Account' : 'Create Account')}
                 </button>
@@ -762,10 +875,10 @@ const PartyDirectory = () => {
       {/* Delete Confirmation Modal */}
       {deleteContext && (
         <div className="fixed inset-0 z-[500] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden border border-slate-300 dark:border-slate-700">
-            <div className="px-6 py-5 bg-gradient-to-r from-rose-600 to-pink-600 text-white">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden border border-slate-300 dark:border-slate-700 flex flex-col">
+            <div className="px-6 py-5 bg-gradient-to-r from-rose-600 to-pink-600 text-white shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
                   <HiOutlineShieldCheck size={24} />
                 </div>
                 <div>
@@ -778,9 +891,10 @@ const PartyDirectory = () => {
             <form onSubmit={executeSecureDelete} className="p-6 space-y-5">
               <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-500/30 rounded-xl">
                 <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
-                  You are deleting <span className="font-black">"{deleteContext.name}"</span>.
+                  You are deleting <span className="font-black">"{deleteContext.name}"</span>. 
+                  All related Vault transactions linked to this party will also be reversed automatically.
                   {deleteContext.netBalance !== 0 && (
-                    <span className="block mt-1">Active balance: {currencySymbol}{Math.abs(deleteContext.netBalance).toLocaleString()}</span>
+                    <span className="block mt-2">Active balance: {currencySymbol}{Math.abs(deleteContext.netBalance).toLocaleString()}</span>
                   )}
                 </p>
               </div>
