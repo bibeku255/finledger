@@ -6,10 +6,10 @@ import { db } from '../firebase/firebaseConfig';
 import { 
   HiOutlineSearch, HiOutlineCheckCircle, HiOutlineGlobeAlt, 
   HiOutlineEye, HiOutlineInformationCircle, HiOutlineLockClosed,
-  HiOutlineChevronRight, HiOutlineStar, HiOutlineShieldCheck,
-  HiOutlineXCircle, HiOutlineCheck, HiOutlineRefresh
+  HiOutlineChevronRight, HiOutlineXCircle, HiOutlineCheck, HiOutlineRefresh,
+  HiOutlineShieldCheck
 } from 'react-icons/hi';
-import { FaGem, FaCrown, FaGlobeAmericas } from 'react-icons/fa';
+import { FaCrown, FaGlobeAmericas } from 'react-icons/fa';
 
 const currenciesList = [
   { code: 'USD', symbol: '$', name: 'US Dollar', country: 'United States', flag: '🇺🇸', iconId: 'us', region: 'Americas' },
@@ -32,7 +32,6 @@ const currenciesList = [
   { code: 'AUD', symbol: 'A$', name: 'Australian Dollar', country: 'Australia', flag: '🇦🇺', iconId: 'au', region: 'Oceania' },
 ];
 
-// Group currencies by region for better organization
 const regions = ['All', 'Americas', 'Europe', 'Asia', 'Middle East', 'Oceania'];
 
 // 🚀 Premium Currency Card Component
@@ -40,16 +39,6 @@ const CurrencyCard = ({ currency, isSelected, isDisabled, onClick, mode }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   
-  const getGradient = () => {
-    if (isDisabled) return 'from-slate-400 to-slate-500';
-    if (isSelected) {
-      return mode === 'base' 
-        ? 'from-blue-600 to-cyan-600' 
-        : 'from-emerald-600 to-teal-600';
-    }
-    return 'from-white to-slate-50 dark:from-slate-900 dark:to-slate-800';
-  };
-
   return (
     <button 
       onClick={onClick} 
@@ -59,7 +48,7 @@ const CurrencyCard = ({ currency, isSelected, isDisabled, onClick, mode }) => {
       className={`group relative flex items-center gap-4 p-5 rounded-[2rem] border-2 transition-all duration-300 text-left overflow-hidden
         ${isSelected 
           ? `bg-gradient-to-br ${mode === 'base' ? 'from-blue-600 to-cyan-600 border-blue-400' : 'from-emerald-600 to-teal-600 border-emerald-400'} shadow-xl scale-[1.02]` 
-          : 'bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-800 border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-lg'
+          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-lg'
         }
         ${isDisabled ? 'opacity-50 cursor-not-allowed grayscale' : 'cursor-pointer'}
       `}
@@ -90,9 +79,7 @@ const CurrencyCard = ({ currency, isSelected, isDisabled, onClick, mode }) => {
             alt={currency.name}
             className={`w-full h-full object-cover transition-opacity duration-300 ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
             onLoad={() => setImageLoaded(true)}
-            onError={(e) => {
-              e.target.style.display = 'none';
-            }}
+            onError={(e) => { e.target.style.display = 'none'; }}
           />
           <span className="absolute text-3xl z-[-1]">{currency.flag}</span>
         </div>
@@ -223,7 +210,6 @@ const SetCurrency = () => {
   const baseCurrencyData = currenciesList.find(c => c.code === baseCurrency);
 
   return (
-    // ⚡ PRO FIX: Removed "h-full min-h-screen overflow-y-auto" to prevent scrolling conflicts.
     <div className="w-full h-auto pb-24">
       <div className="pt-8 md:pt-12 max-w-6xl mx-auto p-4 md:p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
         
@@ -256,7 +242,7 @@ const SetCurrency = () => {
             
             {/* Current Base Currency Display */}
             <div className="flex items-center gap-3">
-              <div className="bg-white/5 backdrop-blur-md p-4 rounded-2xl border border-white/10">
+              <div className="bg-white/5 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-sm">
                 <div className="flex items-center gap-3">
                   {baseCurrencyData && (
                     <div className="w-10 h-10 rounded-xl overflow-hidden border-2 border-white/20">
@@ -307,7 +293,7 @@ const SetCurrency = () => {
 
         {/* Premium Tabs */}
         <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex p-1.5 bg-slate-100 dark:bg-slate-800/50 backdrop-blur-sm rounded-2xl w-full sm:w-auto">
+          <div className="flex p-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 backdrop-blur-sm rounded-2xl w-full sm:w-auto shadow-sm">
             <button 
               onClick={() => setActiveTab('base')} 
               className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all duration-300 ${
@@ -336,10 +322,10 @@ const SetCurrency = () => {
               <button
                 key={region}
                 onClick={() => setSelectedRegion(region)}
-                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider whitespace-nowrap transition-all ${
+                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider whitespace-nowrap transition-all border ${
                   selectedRegion === region
-                    ? 'bg-slate-800 dark:bg-slate-700 text-white shadow-md'
-                    : 'bg-slate-100 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    ? 'bg-slate-800 dark:bg-slate-700 text-white shadow-md border-transparent'
+                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 shadow-sm'
                 }`}
               >
                 {region}
@@ -356,7 +342,7 @@ const SetCurrency = () => {
             placeholder={`Search ${activeTab === 'base' ? 'base currency' : 'watchlist'} options...`}
             value={searchQuery} 
             onChange={(e) => setSearchQuery(e.target.value)} 
-            className="w-full bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-blue-500 dark:focus:border-blue-500 rounded-2xl py-4 pl-14 pr-12 text-sm font-bold outline-none transition-all dark:text-white shadow-lg" 
+            className="w-full bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-blue-500 dark:focus:border-blue-500 rounded-2xl py-4 pl-14 pr-12 text-sm font-bold outline-none transition-all text-slate-900 dark:text-white shadow-sm placeholder-slate-400 dark:placeholder-slate-500" 
           />
           {searchQuery && (
             <button
@@ -369,15 +355,15 @@ const SetCurrency = () => {
         </div>
 
         {/* Info Alert */}
-        <div className={`flex items-start gap-4 p-5 rounded-2xl border-2 transition-all ${
+        <div className={`flex items-start gap-4 p-5 rounded-2xl border-2 transition-all shadow-sm ${
           activeTab === 'base' && isLocked 
-            ? 'bg-gradient-to-r from-rose-500/10 to-pink-500/10 border-rose-500/30' 
-            : 'bg-gradient-to-r from-blue-500/10 to-cyan-500/10 border-blue-500/30'
+            ? 'bg-rose-50 dark:bg-rose-900/10 border-rose-200 dark:border-rose-500/30' 
+            : 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-500/30'
         }`}>
           <div className={`p-2 rounded-xl ${
             activeTab === 'base' && isLocked 
-              ? 'bg-rose-500/20 text-rose-500' 
-              : 'bg-blue-500/20 text-blue-500'
+              ? 'bg-rose-100 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400' 
+              : 'bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
           }`}>
             {activeTab === 'base' && isLocked 
               ? <HiOutlineLockClosed size={20} /> 
@@ -386,14 +372,14 @@ const SetCurrency = () => {
           </div>
           <div className="flex-1">
             <p className={`text-xs font-black uppercase tracking-widest mb-1 ${
-              activeTab === 'base' && isLocked ? 'text-rose-600 dark:text-rose-400' : 'text-blue-600 dark:text-blue-400'
+              activeTab === 'base' && isLocked ? 'text-rose-700 dark:text-rose-400' : 'text-blue-700 dark:text-blue-400'
             }`}>
               {activeTab === 'base' && isLocked ? 'Security Lock Active' : 'Important Information'}
             </p>
-            <p className={`text-sm font-medium ${
+            <p className={`text-sm font-bold ${
               activeTab === 'base' && isLocked 
-                ? 'text-rose-700/80 dark:text-rose-300/80' 
-                : 'text-blue-700/80 dark:text-blue-300/80'
+                ? 'text-rose-800 dark:text-rose-300' 
+                : 'text-blue-800 dark:text-blue-300'
             }`}>
               {activeTab === 'base' 
                 ? (isLocked 
@@ -416,12 +402,12 @@ const SetCurrency = () => {
             </p>
           </div>
         ) : filteredCurrencies.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16">
+          <div className="flex flex-col items-center justify-center py-16 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm">
             <div className="w-20 h-20 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center mb-4">
               <HiOutlineSearch className="text-4xl text-slate-400" />
             </div>
-            <p className="text-sm font-black text-slate-500 uppercase tracking-widest">No currencies found</p>
-            <p className="text-xs text-slate-400 mt-1">Try a different search term</p>
+            <p className="text-sm font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">No currencies found</p>
+            <p className="text-xs text-slate-500 mt-1">Try a different search term</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-6">
@@ -449,7 +435,7 @@ const SetCurrency = () => {
         <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[200] w-[90%] max-w-md">
           <button 
             onClick={() => navigate('/dashboard')} 
-            className="w-full px-8 py-5 bg-gradient-to-r from-slate-900 to-slate-800 dark:from-white dark:to-slate-100 text-white dark:text-slate-900 rounded-full font-black text-sm uppercase tracking-widest shadow-2xl shadow-slate-900/30 dark:shadow-slate-400/30 transition-all active:scale-95 flex items-center justify-center gap-3 border border-slate-700 dark:border-slate-300"
+            className="w-full px-8 py-5 bg-gradient-to-r from-slate-900 to-slate-800 dark:from-white dark:to-slate-200 text-white dark:text-slate-900 rounded-full font-black text-sm uppercase tracking-widest shadow-2xl shadow-slate-900/30 dark:shadow-slate-400/30 transition-all active:scale-95 flex items-center justify-center gap-3 border border-slate-700 dark:border-slate-300"
           >
             <HiOutlineCheckCircle size={20} />
             Save & Return to Dashboard
