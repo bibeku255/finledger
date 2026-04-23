@@ -25,7 +25,9 @@ const AppLayout = ({ children }) => {
     <div className="flex flex-col h-[100dvh] bg-slate-50 dark:bg-slate-950 overflow-hidden relative transition-colors duration-500">
       
       {/* 1. TOP HEADER SECTION */}
-      <header className="flex-shrink-0 sticky top-0 z-50 w-full bg-white dark:bg-slate-950 shadow-sm">
+      {/* Sticky top-0 makes the header stick to top. z-50 ensures it's above everything else */}
+      <header className="shrink-0 sticky top-0 z-50 w-full bg-white dark:bg-slate-950 shadow-sm border-b border-slate-200 dark:border-slate-800/50 flex flex-col">
+        {/* NewsTicker and Navbar stack naturally inside the header. Header calculates its own total height automatically. */}
         <NewsTicker />
         <Navbar 
           onLogoClick={() => setSidebarOpen(!isSidebarOpen)} 
@@ -34,12 +36,14 @@ const AppLayout = ({ children }) => {
         />
       </header>
 
-      {/* 2. NAVIGATION OVERLAY (MobileMenu) - Right Side */}
-      <MobileMenu isOpen={isMobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
-
-      {/* ⚡ PRO FIX: Added 'min-h-0' here! Yeh parent ko stretch hone se rokega aur scroll chalu kar dega */}
+      {/* ⚡ PRO FIX: The main container takes the remaining height (flex-1). */}
+      {/* Anything rendered inside here with 'absolute inset-0' will perfectly sit BELOW the header without overlapping! */}
       <div className="flex-1 flex overflow-hidden relative min-h-0">
         
+        {/* 2. NAVIGATION OVERLAY (MobileMenu) - Right Side */}
+        {/* Mobile menu is rendered here inside the relative container, NOT in the global root. */}
+        <MobileMenu isOpen={isMobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
+
         {/* 3. FINANCIAL SIDEBAR (Sidebar) - Left Side */}
         {user && (
           <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} />
