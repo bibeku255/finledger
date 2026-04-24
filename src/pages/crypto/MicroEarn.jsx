@@ -34,6 +34,7 @@ const popularCryptoWallets = [
   "MetaMask", "Phantom", "FaucetPay", "KuCoin", "OKX", "Kraken", "Mexc"
 ];
 
+// 🚀 Safety list to prevent Binance CORS API errors
 const BINANCE_SAFE_COINS = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC', 'BCH', 'ADA', 'XMR', 'XLM', 'DAI', 'ZEC', 'SHIB', 'SUI', 'TON', 'DOT', 'PEPE', 'NEAR', 'POL', 'ATOM', 'ARB', 'BONK', 'CAKE', 'XTZ', 'FLOKI', 'OP', 'TWT', 'BAT', 'DGB', 'KAVA', 'AVAX', 'MEME', 'DASH'];
 
 const defaultCryptoDatabase = [
@@ -141,7 +142,11 @@ const MicroEarn = () => {
   const { user, baseCurrency = 'INR', selectedCryptos = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
 
-  const cryptoSymbols = useMemo(() => selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean), [selectedCryptos]);
+  // 🚀 FIXED: Renamed to availableCryptos to prevent crash in Modal
+  const availableCryptos = useMemo(() => {
+    const customSymbols = selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
+    return Array.from(new Set(["USDT", ...customSymbols])).map(s => s.toUpperCase());
+  }, [selectedCryptos]);
 
   const [transactions, setTransactions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -167,7 +172,7 @@ const MicroEarn = () => {
   
   const [formData, setFormData] = useState({
     platform: microEarnPlatforms[0], methods: [], destinationWallet: popularCryptoWallets[0],
-    coin: cryptoSymbols.length > 0 ? cryptoSymbols[0] : 'USDT', withdrawnAmount: '', receivedAmount: '', date: localTime, linkedRecordId: ''
+    coin: availableCryptos.length > 0 ? availableCryptos[0] : 'USDT', withdrawnAmount: '', receivedAmount: '', date: localTime, linkedRecordId: ''
   });
 
   useEffect(() => {
@@ -190,7 +195,6 @@ const MicroEarn = () => {
     return Array.from(coinMap.values());
   }, [customUserCoins, selectedCryptos]);
 
-  // 🚀 SYNCED 5-LAYER UNIVERSAL FETCHING ENGINE (Same as CryptoWallet)
   const fetchMarketData = useCallback(async () => {
     setIsMarketSyncing(true);
     let usdToBase = 1;
@@ -204,7 +208,7 @@ const MicroEarn = () => {
       }
     } catch (error) { console.warn("Forex API Error."); }
 
-    const coinsToFetch = Array.from(new Set([...transactions.map(t => t.coin), ...cryptoSymbols]));
+    const coinsToFetch = Array.from(new Set([...transactions.map(t => t.coin), ...availableCryptos]));
 
     if (coinsToFetch.length > 0) {
       let cgJson = {};
@@ -257,7 +261,8 @@ const MicroEarn = () => {
           priceUsd = cgJson[searchId]?.usd || 0;
         }
 
-        if (!priceUsd && upperSym !== 'ROX' && upperSym !== 'CTC' && upperSym !== 'HSH') {
+        // 🚀 FIXED: Safety wrap for Binance API to prevent CORS/ERR_FAILED
+        if (!priceUsd && BINANCE_SAFE_COINS.includes(upperSym)) {
           try {
             const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${upperSym}USDT`);
             if (bRes.ok) {
@@ -274,7 +279,7 @@ const MicroEarn = () => {
       setLivePrices(priceMap);
     }
     setIsMarketSyncing(false);
-  }, [transactions, cryptoSymbols, baseCurrency, fullDatabase]);
+  }, [transactions, availableCryptos, baseCurrency, fullDatabase]);
 
   useEffect(() => {
     if (!isLoading && fullDatabase.length > 0) { 
@@ -437,7 +442,7 @@ const MicroEarn = () => {
 
   const openModal = () => { 
     setEditingId(null); setIsCustomPlatform(false); setIsCustomWallet(false); 
-    setFormData({ platform: microEarnPlatforms[0], methods: [], destinationWallet: popularCryptoWallets[0], coin: cryptoSymbols[0] || 'USDT', withdrawnAmount: '', receivedAmount: '', date: localTime, linkedRecordId: '' }); 
+    setFormData({ platform: microEarnPlatforms[0], methods: [], destinationWallet: popularCryptoWallets[0], coin: availableCryptos[0] || 'USDT', withdrawnAmount: '', receivedAmount: '', date: localTime, linkedRecordId: '' }); 
     setIsModalOpen(true); 
   };
   
@@ -510,7 +515,7 @@ const MicroEarn = () => {
                     <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
                       <td className="p-4 pl-6 min-w-[200px]">
                         <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 p-0.5 flex items-center justify-center border border-slate-200 dark:border-slate-700 shrink-0"><LogoRenderer symbol={rec.coin} apiImage={null} logoUrl={coinObj?.logo} bg={coinObj?.bg} color={coinObj?.color} /></div>
+                          <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 p-0.5 flex items-center justify-center border"><MarketIcon symbol={rec.coin} apiImage={null} customLogo={coinObj?.logo} /></div>
                           <div className="min-w-0"><p className="font-black dark:text-white text-sm truncate">{rec.platform}</p><p className="text-[9px] font-bold text-slate-500 mt-0.5">{formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date}</p></div>
                         </div>
                       </td>
@@ -530,7 +535,7 @@ const MicroEarn = () => {
 
       {/* 🚀 UPGRADED ADD/EDIT MODAL */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200 pt-[100px] md:pt-[120px]">
+        <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 pt-[100px] md:pt-[120px] animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[calc(100dvh-6rem)] sm:max-h-[85vh] border border-slate-300 dark:border-slate-700 animate-in slide-in-from-bottom-10 sm:zoom-in-95">
             
             <div className="px-6 py-5 bg-gradient-to-r from-yellow-500 to-amber-600 text-white flex justify-between items-center sticky top-0 z-10 shrink-0">
