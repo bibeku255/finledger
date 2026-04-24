@@ -1,46 +1,63 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '../../hooks/useAuth';
-// 🚀 FIXED: Changed updateDoc to setDoc for safety
 import { collection, addDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
-
-// 🚀 IMPORTED REPORT UTILS
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
 
 import { 
   HiOutlineTrendingUp, HiOutlineTrendingDown, 
   HiOutlinePlus, HiOutlineSparkles, HiOutlineX, 
   HiOutlinePencil, HiOutlineTrash, HiOutlineClock, HiOutlineRefresh,
-  HiOutlineLockClosed, HiOutlineChevronDown,
-  HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable
+  HiOutlineLockClosed, HiOutlineChevronDown, HiOutlineShieldCheck,
+  HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable,
+  HiOutlineArrowUp, HiOutlineArrowDown
 } from 'react-icons/hi';
-import { FaExchangeAlt, FaShoppingBag, FaBullseye, FaWallet, FaCoins } from 'react-icons/fa';
+import { 
+  FaExchangeAlt, FaShoppingBag, FaBullseye, FaWallet, FaCoins,
+  FaChartLine, FaRocket
+} from 'react-icons/fa';
 
-// Default DB just in case Context is slow
+const BINANCE_SAFE_COINS = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC', 'BCH', 'ADA', 'XMR', 'XLM', 'DAI', 'ZEC', 'SHIB', 'SUI', 'TON', 'DOT', 'PEPE', 'NEAR', 'POL', 'ATOM', 'ARB', 'BONK', 'CAKE', 'XTZ', 'FLOKI', 'OP', 'TWT', 'BAT', 'DGB', 'KAVA', 'AVAX', 'MEME', 'DASH'];
+
 const defaultCryptoDatabase = [
-  { id: 'bitcoin', symbol: 'BTC', fallbackPrice: 65000 },
-  { id: 'ethereum', symbol: 'ETH', fallbackPrice: 3500 },
-  { id: 'tether', symbol: 'USDT', fallbackPrice: 1.00 },
-  { id: 'ripple', symbol: 'XRP', fallbackPrice: 0.60 },
-  { id: 'binancecoin', symbol: 'BNB', fallbackPrice: 500 }
+  { id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png', color: 'text-orange-500', bg: 'bg-orange-500/10' },
+  { id: 'ethereum', symbol: 'ETH', name: 'Ethereum', logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png', color: 'text-blue-500', bg: 'bg-blue-500/10' },
+  { id: 'tether', symbol: 'USDT', name: 'Tether', logo: 'https://assets.coingecko.com/coins/images/325/large/Tether.png', color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+  { id: 'ripple', symbol: 'XRP', name: 'XRP', logo: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png', color: 'text-slate-800 dark:text-white', bg: 'bg-slate-500/10' },
+  { id: 'solana', symbol: 'SOL', name: 'Solana', logo: 'https://assets.coingecko.com/coins/images/4128/large/solana.png', color: 'text-purple-500', bg: 'bg-purple-500/10' },
+  { id: 'binancecoin', symbol: 'BNB', name: 'BNB', logo: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png', color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
+  { id: 'tron', symbol: 'TRX', name: 'TRON', logo: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png', color: 'text-red-600', bg: 'bg-red-600/10' },
+  { id: 'dogecoin', symbol: 'DOGE', name: 'Dogecoin', logo: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png', color: 'text-yellow-600', bg: 'bg-yellow-600/10' },
+  { id: 'usd-coin', symbol: 'USDC', name: 'USD Coin', logo: 'https://assets.coingecko.com/coins/images/6319/large/usdc.png', color: 'text-blue-400', bg: 'bg-blue-400/10' },
+  
+  // Custom Verified Micro-Links
+  { id: 'feyorra', symbol: 'FEY', name: 'Feyorra', logo: 'https://assets.coingecko.com/coins/images/13600/large/feyorra.png', fallbackPrice: 0.0091, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+  { id: 'pi-network', symbol: 'PI', name: 'Pi Network', logo: 'https://assets.coingecko.com/coins/images/31835/large/pi_network.jpg', fallbackPrice: 36.50, color: 'text-purple-600', bg: 'bg-purple-600/10' },
+  { id: 'ice-decentralized-future', symbol: 'ICE', name: 'Ice Network', logo: 'https://assets.coingecko.com/coins/images/34311/large/ice.png', fallbackPrice: 0.0035, color: 'text-cyan-500', bg: 'bg-cyan-500/10' },
+  { id: 'jumptoken', symbol: 'JMPT', name: 'JumpToken', logo: 'https://assets.coingecko.com/coins/images/22397/large/jmpt.png', fallbackPrice: 0.95, color: 'text-emerald-400', bg: 'bg-emerald-400/10' },
+  { id: 'coinex-token', symbol: 'CET', name: 'CoinEx Token', logo: 'https://assets.coingecko.com/coins/images/2538/large/coinex-token.png', fallbackPrice: 0.035, color: 'text-emerald-600', bg: 'bg-emerald-600/10' },
+  { id: 'tether', symbol: 'CTC', name: 'NC Token', logo: 'https://assets.coingecko.com/coins/images/11105/large/Creditcoin_logo.png', fallbackPrice: 1.00, color: 'text-cyan-500', bg: 'bg-cyan-500/10' },
+  { id: 'tether', symbol: 'ROX', name: 'Robox', logo: 'https://assets.geckoterminal.com/vdl79ryhkyksbnrtp11hqrpuwmyu', fallbackPrice: 1.00, color: 'text-orange-500', bg: 'bg-orange-500/10' }
 ];
 
-const MarketIcon = ({ symbol, apiImage, customLogo }) => {
-  const [imgIndex, setImgIndex] = useState(0);
-  const symbolUpper = symbol?.toUpperCase();
-  const symbolLower = symbol?.toLowerCase();
+const fetchWithRetry = async (url, retries = 2) => {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetch(url);
+      if (res.status !== 429) return res;
+      if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+    } catch (e) {
+      if (i === retries) return null;
+    }
+  }
+  return null; 
+};
 
-  useEffect(() => { setImgIndex(0); }, [symbol, apiImage, customLogo]);
-
-  const sources = [
-    customLogo, apiImage, 
-    `https://bin.bnbstatic.com/image/admin_mgl/coin-logo/${symbolUpper}.png`, 
-    `https://assets.coincap.io/assets/icons/${symbolLower}@2x.png`,
-    `https://cryptologos.cc/logos/${symbolLower}-${symbolLower}-logo.png`
-  ].filter(Boolean);
-
-  if (imgIndex >= sources.length) return <span className="text-[10px] font-black text-slate-400 w-full h-full flex items-center justify-center bg-slate-100 dark:bg-slate-800 rounded-full">{symbolUpper?.charAt(0)}</span>;
-  return <img src={sources[imgIndex]} className="w-full h-full object-contain p-0.5 rounded-full bg-white dark:bg-slate-900" alt={symbolUpper} onError={() => setImgIndex(p => p + 1)} />;
+const LogoRenderer = ({ symbol, logoUrl, bg, color }) => {
+  const [hasError, setHasError] = useState(false);
+  useEffect(() => { setHasError(false); }, [logoUrl]);
+  if (!logoUrl || hasError) return <span className={`w-full h-full rounded-full flex items-center justify-center font-black text-[10px] ${bg || 'bg-slate-200 dark:bg-slate-700'} ${color || 'text-slate-600 dark:text-white'}`}>{symbol?.toUpperCase()?.substring(0, 3)}</span>;
+  return <img src={logoUrl} alt={symbol} className="w-full h-full object-contain rounded-full bg-white dark:bg-slate-800 p-0.5" onError={() => setHasError(true)} />;
 };
 
 const hashPIN = async (pinCode) => {
@@ -50,389 +67,272 @@ const hashPIN = async (pinCode) => {
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
+// Premium AI Signal Badge
+const AISignalBadge = ({ profitPct }) => {
+  const signals = {
+    high: { label: 'SWAP TO USDT', tooltip: 'Heavy profit - swap to secure gains', bg: 'bg-gradient-to-r from-emerald-500 to-teal-500', text: 'text-white', shadow: 'shadow-emerald-500/30', icon: <FaExchangeAlt size={12} /> },
+    medium: { label: 'HOLD ASSET', tooltip: 'In profit zone - hold for more upside', bg: 'bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30', text: 'text-emerald-700 dark:text-emerald-400', shadow: '', icon: <HiOutlineSparkles size={12} /> },
+    sideways: { label: 'STAKE / EARN', tooltip: 'Market sideways - earn yield while waiting', bg: 'bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30', text: 'text-amber-700 dark:text-amber-400', shadow: '', icon: <FaCoins size={12} /> },
+    dip: { label: 'BUY THE DIP', tooltip: 'Heavy discount - average down your entry', bg: 'bg-gradient-to-r from-blue-500 to-cyan-500', text: 'text-white', shadow: 'shadow-blue-500/30', icon: <FaShoppingBag size={12} /> },
+    default: { label: 'HOLD POSITION', tooltip: 'Minor loss - do not sell', bg: 'bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700', text: 'text-slate-600 dark:text-slate-400', shadow: '', icon: <HiOutlineClock size={12} /> }
+  };
+  
+  let signal;
+  if (profitPct >= 15) signal = signals.high;
+  else if (profitPct >= 3) signal = signals.medium;
+  else if (profitPct > -5) signal = signals.sideways;
+  else if (profitPct <= -12) signal = signals.dip;
+  else signal = signals.default;
+
+  return (
+    <div title={signal.tooltip} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black tracking-widest uppercase ${signal.bg} ${signal.text} ${signal.shadow ? 'shadow-lg ' + signal.shadow : 'shadow-sm'} cursor-help transition-transform hover:scale-105`}>
+      {signal.icon} <span className="mt-0.5">{signal.label}</span>
+    </div>
+  );
+};
+
 const HoldAndSwap = () => {
-  // 🚀 ENGINE CONNECTED: Global Date Formatter
   const { user, baseCurrency = 'USD', selectedCryptos = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
 
   const [records, setRecords] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-
-  // USER CUSTOM COINS STATE (To sync full data including Contract Addresses)
+  const [isSaving, setIsSaving] = useState(false);
   const [customUserCoins, setCustomUserCoins] = useState([]);
-
+  
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  
   const [deleteContext, setDeleteContext] = useState(null); 
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
+  
+  const [isFetchingLive, setIsFetchingLive] = useState(false);
+  const [isMarketSyncing, setIsMarketSyncing] = useState(true);
+  const [livePrices, setLivePrices] = useState({});
 
-  const todayDate = new Date().toISOString().split('T')[0];
-
-  // 🚀 Extracting string symbols from object array
-  const cryptoSymbols = useMemo(() => {
-    return selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
-  }, [selectedCryptos]);
+  const localTime = new Date().toISOString().substring(0, 16);
+  
+  // Strict Watchlist
+  const cryptoSymbols = useMemo(() => selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean), [selectedCryptos]);
   
   const [formData, setFormData] = useState({
-    coin: cryptoSymbols.length > 0 ? cryptoSymbols[0] : 'BTC', 
-    amount: '', 
-    entryPrice: '', 
-    wallet: 'FaucetPay',
-    date: todayDate
+    coin: cryptoSymbols.length > 0 ? cryptoSymbols[0] : 'BTC', amount: '', entryPrice: '', wallet: 'FaucetPay', date: localTime
   });
-
-  const [isFetchingLive, setIsFetchingLive] = useState(false);
-  const [livePrices, setLivePrices] = useState({});
 
   useEffect(() => {
     if (!user) return;
-    const recordsRef = collection(db, "users", user.uid, "holdAndSwap");
-    const q = query(recordsRef, orderBy("date", "desc"));
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const dbRecords = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setRecords(dbRecords);
-      setIsLoading(false);
+    const q = query(collection(db, "users", user.uid, "holdAndSwap"), orderBy("timestamp", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => { 
+      setRecords(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))); 
+      setIsLoading(false); 
     });
     return () => unsubscribe();
   }, [user]);
 
-  // Fetch Custom User Coins for Contract MetaData
   useEffect(() => {
     const fetchUserData = async () => {
       if (!user) return;
-      const userRef = doc(db, "users", user.uid);
-      const userSnap = await getDoc(userRef);
-      if (userSnap.exists() && userSnap.data().customCoins) {
-        setCustomUserCoins(userSnap.data().customCoins);
-      }
+      const userSnap = await getDoc(doc(db, "users", user.uid));
+      if (userSnap.exists() && userSnap.data().customCoins) setCustomUserCoins(userSnap.data().customCoins);
     };
     fetchUserData();
   }, [user]);
 
-  // Merge Context Selected Cryptos + Custom Coins + Default Database
   const fullDatabase = useMemo(() => {
     const coinMap = new Map();
     defaultCryptoDatabase.forEach(c => coinMap.set(c.symbol.toUpperCase(), c));
-    
-    // Add selected cryptos from context if they are objects
-    selectedCryptos.forEach(c => {
-       if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c);
-    });
-
-    customUserCoins.forEach(c => {
-      const existing = coinMap.get(c.symbol.toUpperCase());
-      coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c, logo: c.logo || existing?.logo });
+    selectedCryptos.forEach(c => { if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c); });
+    customUserCoins.forEach(c => { 
+      const existing = coinMap.get(c.symbol.toUpperCase()); 
+      coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c, logo: c.logo || existing?.logo }); 
     });
     return Array.from(coinMap.values());
   }, [customUserCoins, selectedCryptos]);
 
-  // 🚀 REBUILT: HYBRID MULTI-TIER PRICE FETCHER FOR TABLE (CG + GeckoTerminal)
-  const fetchTablePrices = async () => {
+  // 🚀 SYNCED 5-LAYER FETCHING ENGINE FOR TRACKING GRID
+  const fetchTablePrices = useCallback(async () => {
     const coinsToFetch = [...new Set([...cryptoSymbols, ...records.map(r => r.coin)])];
     if (coinsToFetch.length === 0) return;
+    
+    setIsMarketSyncing(true);
+    let usdToBase = 1;
 
     try {
-      const forexRes = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
-      const forexJson = await forexRes.json();
-      const userBaseRate = forexJson.rates[baseCurrency] || 1;
-
-      let cgJson = {};
-      let geckoTerminalData = {};
-      const normalCoins = [];
-      const contractCoins = [];
-
-      // Sort coins based on fetchMode
-      coinsToFetch.forEach(sym => {
-         const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase());
-         if (dbCoin?.fetchMode === 'contract' && dbCoin.network && dbCoin.contractAddress) {
-            contractCoins.push(dbCoin);
-         } else {
-            normalCoins.push(dbCoin?.id || sym.toLowerCase());
-         }
-      });
-
-      // Fetch Normal Coins (CoinGecko)
-      if (normalCoins.length > 0) {
-         try {
-           const ids = [...new Set(normalCoins)].join(',');
-           const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
-           if (cgRes.ok) {
-               cgJson = await cgRes.json();
-           }
-         } catch(e) { console.warn("CoinGecko API blocked or limited"); }
+      const forexRes = await fetchWithRetry('https://api.exchangerate-api.com/v4/latest/USD');
+      if (forexRes && forexRes.ok) {
+        const forexJson = await forexRes.json();
+        usdToBase = parseFloat(forexJson.rates[baseCurrency]) || 1;
       }
+    } catch (e) { console.warn("Forex Sync Failed."); }
 
-      // Fetch Custom Contract Coins (GeckoTerminal)
-      for (const customCoin of contractCoins) {
-         try {
-            const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${customCoin.network}/tokens/${customCoin.contractAddress}`);
-            if (gtRes.ok) {
-               const gtJson = await gtRes.json();
-               geckoTerminalData[customCoin.id] = {
-                 usd: parseFloat(gtJson.data.attributes.price_usd)
-               };
-            }
-         } catch (error) { console.warn(`GeckoTerminal failed for ${customCoin.symbol}`); }
-      }
+    let cgJson = {};
+    const normalCoins = [];
+    const contractCoins = [];
 
-      // Combine Results
-      const newPrices = {};
-
-      await Promise.all(coinsToFetch.map(async (sym) => {
-        const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase()) || {};
-        const searchId = dbCoin.id || sym.toLowerCase();
-        
-        let priceInUsd = null;
-
-        if (dbCoin.fetchMode === 'contract') {
-           priceInUsd = geckoTerminalData[searchId]?.usd;
-        } else {
-           priceInUsd = cgJson[searchId]?.usd;
-        }
-
-        // Binance Fallback
-        if (!priceInUsd) {
-          try {
-            const bSym = searchId === 'tether' ? 'BTCUSDT' : `${sym.toUpperCase()}USDT`;
-            const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
-            if (bRes.ok) {
-              const bData = await bRes.json();
-              priceInUsd = (searchId === 'tether' ? 1.00 : parseFloat(bData.price));
-            }
-          } catch(err) {}
-        }
-
-        // Final Hardcoded Fallback
-        if (!priceInUsd && dbCoin.fallbackPrice) {
-          priceInUsd = dbCoin.fallbackPrice;
-        }
-
-        if (priceInUsd) {
-           newPrices[sym.toUpperCase()] = priceInUsd * userBaseRate;
-        }
-      }));
-
-      setLivePrices(prev => ({...prev, ...newPrices}));
-    } catch (error) {
-      console.error("Error updating table prices:", error);
-    }
-  };
-
-  useEffect(() => {
-    if (records.length > 0) fetchTablePrices();
-    const interval = setInterval(fetchTablePrices, 60000); 
-    return () => clearInterval(interval);
-  }, [cryptoSymbols, records.length, baseCurrency, fullDatabase]);
-
-  // 🚀 REBUILT: HYBRID LIVE PRICE FETCHER FOR FORM
-  const fetchLivePriceForForm = async () => {
-    if (!formData.coin) return alert("Please select a coin first!");
-    setIsFetchingLive(true);
-    try {
-      const forexRes = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
-      const forexJson = await forexRes.json();
-      const userBaseRate = forexJson.rates[baseCurrency] || 1;
-
-      const symbol = formData.coin;
-      const dbCoin = fullDatabase.find(c => c.symbol === symbol.toUpperCase()) || {};
-      const searchId = dbCoin?.id || symbol.toLowerCase();
-      
-      let priceInUsd = null;
-
-      // 1. Contract Mode (GeckoTerminal)
-      if (dbCoin.fetchMode === 'contract' && dbCoin.network && dbCoin.contractAddress) {
-         try {
-            const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${dbCoin.network}/tokens/${dbCoin.contractAddress}`);
-            if (gtRes.ok) {
-               const gtJson = await gtRes.json();
-               priceInUsd = parseFloat(gtJson.data.attributes.price_usd);
-            }
-         } catch(e) {}
-      } 
-      // 2. Normal Mode (CoinGecko)
-      else {
-         try {
-           const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
-           const cgJson = await cgRes.json();
-           if (cgJson[searchId] && cgJson[searchId].usd) priceInUsd = cgJson[searchId].usd;
-         } catch(e){}
-      }
-
-      // 3. Binance Fallback
-      if (!priceInUsd) {
-         try {
-           const bSym = searchId === 'tether' ? 'BTCUSDT' : `${symbol.toUpperCase()}USDT`;
-           const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
-           if (bRes.ok) {
-             const bData = await bRes.json();
-             priceInUsd = (searchId === 'tether' ? 1.00 : parseFloat(bData.price));
-           }
-         } catch(e){}
-      }
-
-      // 4. Hardcoded Fallback
-      if (!priceInUsd && dbCoin && dbCoin.fallbackPrice) {
-         priceInUsd = dbCoin.fallbackPrice;
-      }
-
-      if (priceInUsd) {
-        setFormData(prev => ({ ...prev, entryPrice: (priceInUsd * userBaseRate).toFixed(6) }));
+    coinsToFetch.forEach(sym => {
+      const upperSym = sym.toUpperCase();
+      const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || { symbol: upperSym, id: sym.toLowerCase() };
+      if (['ROX', 'CTC', 'HSH'].includes(upperSym)) {
+          // Skip
+      } else if (dbCoin.fetchMode === 'contract' && dbCoin.contractAddress) {
+          contractCoins.push(dbCoin);
       } else {
-        alert("Price stuck or not found. Please enter manually.");
+          normalCoins.push(dbCoin.id || dbCoin.symbol.toLowerCase());
       }
-    } catch (error) {
-      alert("Network Error!");
-    } finally {
-      setIsFetchingLive(false);
-    }
+    });
+
+    try {
+      if (normalCoins.length > 0) {
+        const uniqueIds = [...new Set(normalCoins)].join(',');
+        const cgRes = await fetchWithRetry(`https://api.coingecko.com/api/v3/simple/price?ids=${uniqueIds}&vs_currencies=usd`);
+        if (cgRes && cgRes.ok) cgJson = await cgRes.json();
+      }
+    } catch (e) {}
+
+    const priceMap = {};
+    
+    await Promise.all(coinsToFetch.map(async (sym) => {
+      const upperSym = sym.toUpperCase();
+      const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || { symbol: upperSym, id: sym.toLowerCase() };
+      const searchId = dbCoin.id || upperSym.toLowerCase();
+      const fallback = dbCoin.fallbackPrice ? parseFloat(dbCoin.fallbackPrice) : 0;
+      let priceUsd = 0;
+
+      if (['ROX', 'CTC'].includes(upperSym)) priceUsd = fallback > 0 ? fallback : 1.00;
+      else if (upperSym === 'HSH') priceUsd = fallback > 0 ? fallback : 0.0001; 
+      else if (dbCoin.fetchMode === 'contract' && dbCoin.contractAddress) {
+        try {
+          const dexRes = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${dbCoin.contractAddress}`);
+          if (dexRes && dexRes.ok) {
+            const dexData = await dexRes.json();
+            if (dexData.pairs?.length > 0) priceUsd = parseFloat(dexData.pairs[0].priceUsd);
+          }
+        } catch(e) {}
+      } else {
+        priceUsd = cgJson[searchId]?.usd || 0;
+      }
+
+      if (!priceUsd && upperSym !== 'ROX' && upperSym !== 'CTC' && upperSym !== 'HSH') {
+        try {
+          const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${upperSym}USDT`);
+          if (bRes.ok) { const bData = await bRes.json(); priceUsd = parseFloat(bData.price); }
+        } catch(e) {}
+      }
+
+      if (!priceUsd && fallback > 0) priceUsd = fallback;
+      priceMap[upperSym] = priceUsd * usdToBase;
+    }));
+
+    setLivePrices(prev => ({...prev, ...priceMap}));
+    setIsMarketSyncing(false);
+  }, [baseCurrency, cryptoSymbols, records, fullDatabase]);
+
+  useEffect(() => { 
+    if (records.length > 0 || cryptoSymbols.length > 0) fetchTablePrices(); 
+    const interval = setInterval(fetchTablePrices, 60000); 
+    return () => clearInterval(interval); 
+  }, [fetchTablePrices]);
+
+  // LIVE FORM PRICE ENGINE
+  const fetchLivePriceForForm = async () => {
+    if (!formData.coin) return;
+    setIsFetchingLive(true);
+    let usdToBase = 1;
+    try {
+      const forexRes = await fetchWithRetry('https://api.exchangerate-api.com/v4/latest/USD');
+      if (forexRes && forexRes.ok) usdToBase = parseFloat((await forexRes.json()).rates[baseCurrency]) || 1;
+      
+      const upperSym = formData.coin.toUpperCase();
+      const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || { symbol: upperSym, id: formData.coin.toLowerCase() };
+      const searchId = dbCoin.id || upperSym.toLowerCase();
+      const fallback = dbCoin.fallbackPrice ? parseFloat(dbCoin.fallbackPrice) : 0;
+      
+      let priceInUsd = 0;
+      if (['ROX', 'CTC'].includes(upperSym)) priceInUsd = fallback > 0 ? fallback : 1.00;
+      else if (dbCoin.fetchMode === 'contract' && dbCoin.contractAddress) {
+        const dexRes = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${dbCoin.contractAddress}`);
+        if (dexRes && dexRes.ok) { const dexData = await dexRes.json(); if (dexData.pairs?.length > 0) priceInUsd = parseFloat(dexData.pairs[0].priceUsd); }
+      } else {
+        const cgRes = await fetchWithRetry(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
+        if (cgRes && cgRes.ok) { const cgJson = await cgRes.json(); priceInUsd = cgJson[searchId]?.usd || 0; }
+      }
+
+      if (!priceInUsd) {
+        const bRes = await fetchWithRetry(`https://api.binance.com/api/v3/ticker/price?symbol=${upperSym}USDT`);
+        if (bRes && bRes.ok) priceInUsd = parseFloat((await bRes.json()).price);
+      }
+
+      if (!priceInUsd && fallback > 0) priceInUsd = fallback;
+      
+      if (priceInUsd) setFormData(prev => ({ ...prev, entryPrice: (priceInUsd * usdToBase).toFixed(6).replace(/\.?0+$/, '') }));
+    } catch (error) { 
+      alert("Network Error! Could not fetch live price."); 
+    } finally { setIsFetchingLive(false); }
   };
 
-  // 🚀 ADVANCED AI SIGNALS
-  const getAiSignal = (profitPct) => {
-    if (profitPct >= 15) {
-      return { label: 'SWAP TO USDT (PROFIT)', tooltip: 'Covers swap fees and secures heavy profit.', bg: 'bg-emerald-500', text: 'text-white', icon: <FaExchangeAlt /> };
-    }
-    if (profitPct >= 5 && profitPct < 15) {
-      return { label: 'HOLD (BEATS FEE)', tooltip: 'In profit, but wait for bigger pump to counter 2% swap fees.', bg: 'bg-emerald-100 dark:bg-emerald-500/20', text: 'text-emerald-700 dark:text-emerald-400', icon: <HiOutlineSparkles /> };
-    }
-    if (profitPct > -5 && profitPct < 5) {
-      return { label: 'STAKE / EARN APR', tooltip: 'Market is sideways. Stake to earn interest rather than sitting idle.', bg: 'bg-amber-100 dark:bg-amber-500/20', text: 'text-amber-700 dark:text-amber-400', icon: <FaCoins /> };
-    }
-    if (profitPct <= -15) {
-      return { label: 'BUY THE DIP', tooltip: 'Market is heavily down. Good time to average out your entry.', bg: 'bg-blue-100 dark:bg-blue-500/20', text: 'text-blue-700 dark:text-blue-400', icon: <FaShoppingBag /> };
-    }
-    return { label: 'HOLD ASSET', tooltip: 'Minor loss detected. Do not sell.', bg: 'bg-slate-100 dark:bg-slate-800', text: 'text-slate-600 dark:text-slate-300', icon: <HiOutlineClock /> };
-  };
-
-  // 🚀 REPORT DOWNLOAD LOGIC
   const handleDownloadReport = (format) => {
     if (records.length === 0) return alert("No tracked assets found.");
-
     const reportData = records.map(rec => {
       const livePrice = livePrices[rec.coin] || rec.entryPrice;
       const profitPct = (((livePrice - rec.entryPrice) / rec.entryPrice) * 100);
-      const isProfit = profitPct >= 0;
-      
-      const totalInvestedBase = rec.amount * rec.entryPrice;
-      const currentLiveBase = rec.amount * livePrice;
-      const pnlBase = currentLiveBase - totalInvestedBase;
-
-      const ai = getAiSignal(profitPct);
-
       return {
-        // 🚀 GLOBAL DATE FOR PDF/EXCEL EXPORT
         date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rec.date,
         asset: `${rec.amount} ${rec.coin} (${rec.wallet})`,
-        entryPrice: `${currencySymbol}${rec.entryPrice.toLocaleString(undefined, {maximumFractionDigits: 6})}`,
-        livePrice: `${currencySymbol}${livePrice.toLocaleString(undefined, {maximumFractionDigits: 6})}`,
-        pnl: `${isProfit ? '+' : ''}${currencySymbol}${pnlBase.toLocaleString(undefined, {minimumFractionDigits: 2})} (${profitPct.toFixed(2)}%)`,
-        aiAction: ai.label
+        entry: `${currencySymbol}${rec.entryPrice}`,
+        live: `${currencySymbol}${livePrice.toFixed(4)}`,
+        pnl: `${profitPct >= 0 ? '+' : ''}${profitPct.toFixed(2)}%`
       };
     });
-
-    const columns = [
-      { header: 'Logged Date', key: 'date' },
-      { header: 'Asset / Storage', key: 'asset' },
-      { header: 'Target Entry Price', key: 'entryPrice' },
-      { header: 'Current Market Price', key: 'livePrice' },
-      { header: 'Unrealized P/L', key: 'pnl' },
-      { header: 'AI Recommendation', key: 'aiAction' }
-    ];
-
-    const fileName = `Hold_And_Swap_Analysis`;
-    const reportTitle = `Hold & Swap AI Manager - Performance Report`;
-
-    if (format === 'pdf') {
-      downloadPDFReport(reportData, columns, fileName, reportTitle);
-    } else {
-      downloadExcelReport(reportData, columns, fileName);
-    }
+    const columns = [{ header: 'Date', key: 'date' }, { header: 'Asset (Location)', key: 'asset' }, { header: 'Entry Price', key: 'entry' }, { header: 'Live Price', key: 'live' }, { header: 'Profit/Loss', key: 'pnl' }];
+    if (format === 'pdf') downloadPDFReport(reportData, columns, 'AI_Hold_Swap_Report', 'Hold & Swap AI Report');
+    else downloadExcelReport(reportData, columns, 'AI_Hold_Swap_Report');
   };
 
   const handleSaveEntry = async (e) => {
-    e.preventDefault();
-    if (!user) return alert("Please login first!");
-
-    const recordData = {
-      coin: formData.coin,
-      amount: parseFloat(formData.amount),
-      entryPrice: parseFloat(formData.entryPrice),
-      wallet: formData.wallet || 'Binance',
-      date: formData.date || todayDate,
-      timestamp: new Date().getTime() 
+    e.preventDefault(); if (!user) return;
+    setIsSaving(true);
+    const recordData = { 
+      coin: formData.coin, amount: parseFloat(formData.amount), 
+      entryPrice: parseFloat(formData.entryPrice), wallet: formData.wallet || 'Binance', 
+      date: formData.date.split('T')[0], timestamp: new Date(formData.date).getTime() 
     };
-
-    try {
-      const recordsRef = collection(db, "users", user.uid, "holdAndSwap");
-      if (editingId) {
-        // 🚀 FIXED: Replaced updateDoc with setDoc for 100% crash safety
-        await setDoc(doc(db, "users", user.uid, "holdAndSwap", editingId), recordData, { merge: true });
-      } else {
-        await addDoc(recordsRef, recordData);
-      }
-      closeModal();
-    } catch (error) {
-      alert("Failed to save. Check your connection.");
-    }
+    try { 
+      if (editingId) await setDoc(doc(db, "users", user.uid, "holdAndSwap", editingId), recordData, { merge: true }); 
+      else await addDoc(collection(db, "users", user.uid, "holdAndSwap"), recordData); 
+      closeModal(); 
+    } catch (error) { alert("Failed to save."); } finally { setIsSaving(false); }
   };
 
-  const handleEdit = (rec) => {
+  const handleEdit = (rec) => { 
     setFormData({ 
-      coin: rec.coin, 
-      amount: rec.amount, 
-      entryPrice: rec.entryPrice, 
-      wallet: rec.wallet || '', 
-      date: rec.date || todayDate
-    });
-    setEditingId(rec.id);
-    setIsModalOpen(true);
+      coin: rec.coin, amount: rec.amount, entryPrice: rec.entryPrice, 
+      wallet: rec.wallet || '', date: rec.date + 'T12:00' 
+    }); 
+    setEditingId(rec.id); setIsModalOpen(true); 
   };
-
-  const initiateDelete = (rec) => {
-    setDeleteContext(rec);
-    setPinInput('');
-    setPinError('');
-  };
+  
+  const initiateDelete = (rec) => { setDeleteContext(rec); setPinInput(''); setPinError(''); };
 
   const executeSecureDelete = async (e) => {
-    e.preventDefault();
-    if (!pinInput.trim()) return setPinError("Please enter your PIN.");
-    setIsVerifying(true);
-    setPinError('');
-    
+    e.preventDefault(); if (!pinInput.trim()) return setPinError("Please enter your PIN."); setIsVerifying(true);
     try {
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      const userData = userDoc.data();
-      
-      const hashedInput = await hashPIN(pinInput.trim());
-      const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin; 
-
-      if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) {
-        setPinError("Incorrect Security PIN."); 
-        setIsVerifying(false); 
-        return;
-      }
-      
-      await deleteDoc(doc(db, "users", user.uid, "holdAndSwap", deleteContext.id));
-      setDeleteContext(null); 
+      const userSnap = await getDoc(doc(db, "users", user.uid)); const userData = userSnap.data();
+      const hashedInput = await hashPIN(pinInput.trim()); const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin;
+      if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) { setPinError("Incorrect PIN."); setIsVerifying(false); return; }
+      await deleteDoc(doc(db, "users", user.uid, "holdAndSwap", deleteContext.id)); setDeleteContext(null);
     } catch (error) { setPinError("Verification failed."); } finally { setIsVerifying(false); }
   };
 
-  const closeModal = () => {
-    setIsModalOpen(false);
-    setEditingId(null);
-    setFormData({ 
-      coin: cryptoSymbols.length > 0 ? cryptoSymbols[0] : 'BTC', 
-      amount: '', entryPrice: '', wallet: 'FaucetPay', date: todayDate
-    });
+  // 🚀 FIXED: openModal strictly sets visibility flag, no parameters needed
+  const openModal = () => { 
+    if(cryptoSymbols.length === 0) return alert("Please add at least one crypto to your watchlist from settings!");
+    setIsModalOpen(true); 
+    setEditingId(null); 
+    setFormData({ coin: cryptoSymbols[0] || 'BTC', amount: '', entryPrice: '', wallet: 'FaucetPay', date: localTime }); 
   };
+
+  const closeModal = () => { setIsModalOpen(false); setEditingId(null); };
 
   const totalInvested = records.reduce((acc, rec) => acc + (rec.amount * rec.entryPrice), 0);
   const totalCurrent = records.reduce((acc, rec) => acc + (rec.amount * (livePrices[rec.coin] || rec.entryPrice)), 0);
@@ -440,251 +340,184 @@ const HoldAndSwap = () => {
   const profitPercentage = totalInvested > 0 ? ((totalProfit / totalInvested) * 100).toFixed(2) : 0;
 
   return (
-    <div className="pt-24 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative pb-20 max-w-7xl mx-auto px-4 md:px-0">
-      
-      <datalist id="wallet-suggestions">
-        <option value="FaucetPay" />
-        <option value="Binance" />
-        <option value="Trust Wallet" />
-        <option value="Phantom" />
-        <option value="MetaMask" />
-        <option value="Payeer" />
-        <option value="CoinDCX" />
-      </datalist>
-
-      {/* HEADER SECTION */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-3 bg-blue-500/10 text-blue-500 rounded-xl"><FaBullseye size={24} /></div>
-            <h1 className="text-3xl font-black dark:text-white tracking-tight">AI Swap & Stake Manager</h1>
-          </div>
-          <p className="text-sm font-bold text-slate-500 max-w-xl">
-            Never lose money to hidden swap fees. Our AI monitors your assets and tells you exactly when to Swap, Hold, Buy the Dip, or Stake for APR.
-          </p>
-        </div>
+    <div className="h-full min-h-screen overflow-y-auto pb-24">
+      <div className="pt-8 md:pt-12 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 md:px-6">
         
-        <div className="flex items-center gap-2 md:gap-3">
-          {/* 🚀 DOWNLOAD REPORT DROPDOWN */}
-          <div className="relative group">
-            <button className="flex items-center gap-1 md:gap-2 p-3 md:p-3.5 bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400 rounded-2xl font-bold text-xs md:text-sm hover:bg-indigo-100 transition-colors border border-indigo-100 dark:border-indigo-500/20 shadow-sm">
-              <HiOutlineDownload size={18}/> 
-              <span className="hidden sm:inline">Download Report</span>
-              <span className="sm:hidden">Report</span>
+        {/* Premium Header */}
+        <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.15),transparent_70%)]" />
+          <div className="absolute right-0 top-0 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl" />
+          
+          <div className="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-2xl flex items-center justify-center shadow-lg"><FaBullseye size={24} className="text-white" /></div>
+                <div>
+                  <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">AI Swap & Stake</h1>
+                  <p className="text-sm font-medium text-slate-400">Track individual asset entries and get AI action signals</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <div className="relative group hidden sm:block">
+                <button className="flex items-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10">
+                  <HiOutlineDownload size={16} /> Report
+                </button>
+                <div className="absolute top-full right-0 mt-2 w-40 bg-slate-800 border border-slate-700 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all flex flex-col p-1 z-50">
+                  <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg"><HiOutlineDocumentText className="text-rose-400" size={16}/> PDF</button>
+                  <button onClick={() => handleDownloadReport('excel')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg"><HiOutlineTable className="text-emerald-400" size={16}/> Excel</button>
+                </div>
+              </div>
+              <button onClick={openModal} className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-5 py-3 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-500/30 transition-all active:scale-95">
+                <HiOutlinePlus size={18} /> Add Target
+              </button>
+            </div>
+          </div>
+          
+          <div className="relative z-10 grid grid-cols-3 gap-3 mt-6">
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Total Invested</p>
+              <p className="text-sm md:text-lg font-black text-white truncate">{currencySymbol}{totalInvested.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+            </div>
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5 flex items-center gap-1">Live Value {isMarketSyncing && <HiOutlineRefresh className="animate-spin text-emerald-400" size={10} />}</p>
+              <p className="text-sm md:text-lg font-black text-emerald-400 truncate">{currencySymbol}{totalCurrent.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+            </div>
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Net P/L</p>
+              <p className={`text-sm md:text-lg font-black truncate ${totalProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {totalProfit >= 0 ? '+' : ''}{profitPercentage}%
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Signals Table */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] overflow-hidden shadow-sm">
+          <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/30">
+            <h2 className="text-sm font-black text-slate-800 dark:text-white flex items-center gap-2 uppercase tracking-widest"><FaChartLine className="text-blue-500" size={16} /> Asset Tracking Signals</h2>
+            <button onClick={fetchTablePrices} className="text-[10px] font-black text-slate-500 bg-white dark:bg-slate-800 px-3 py-1.5 rounded-lg hover:text-blue-500 border border-slate-200 dark:border-slate-700 flex items-center gap-1.5 transition-colors shadow-sm">
+              <HiOutlineRefresh size={12} className={isMarketSyncing ? 'animate-spin text-blue-500' : ''} /> Sync Now
             </button>
-            <div className="absolute top-full right-0 md:left-0 md:right-auto mt-2 w-36 md:w-40 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all flex flex-col p-1 z-50">
-              <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] md:text-xs font-bold rounded-lg text-left w-full">
-                <HiOutlineDocumentText className="text-rose-500" size={16}/> As PDF
-              </button>
-              <button onClick={() => handleDownloadReport('excel')} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] md:text-xs font-bold rounded-lg text-left w-full">
-                <HiOutlineTable className="text-emerald-500" size={16}/> As Excel (CSV)
-              </button>
-            </div>
           </div>
-
-          <button onClick={() => setIsModalOpen(true)} className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 md:px-6 py-3.5 rounded-2xl font-black text-xs md:text-sm shadow-lg shadow-blue-500/30 transition-all active:scale-95 whitespace-nowrap">
-            <HiOutlinePlus size={20} className="hidden sm:inline" /> 
-            <span className="hidden sm:inline">Add Target Asset</span>
-            <span className="sm:hidden">Add Target</span>
-          </button>
-        </div>
-      </div>
-
-      {/* DASHBOARD STATS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] shadow-sm">
-          <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Target Value</p>
-          <p className="text-3xl font-black dark:text-white">{currencySymbol}{totalInvested.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
-        </div>
-        <div className="p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] shadow-sm relative">
-          <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1">Current Live Value</p>
-          <p className="text-3xl font-black dark:text-white">{currencySymbol}{totalCurrent.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
-        </div>
-        <div className={`p-6 border rounded-[2rem] shadow-sm relative overflow-hidden ${totalProfit >= 0 ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/30' : 'bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/30'}`}>
-          <div className="absolute -right-6 -top-6 opacity-10"><HiOutlineSparkles size={100} /></div>
-          <p className="text-[11px] font-black uppercase tracking-widest mb-1 opacity-70">Unrealized P/L</p>
-          <div className="flex items-end gap-3">
-            <p className={`text-3xl font-black ${totalProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-              {totalProfit >= 0 ? '+' : ''}{currencySymbol}{totalProfit.toLocaleString(undefined, {minimumFractionDigits: 2})}
-            </p>
-            <div className={`flex items-center gap-1 text-sm font-black mb-1 ${totalProfit >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-              {totalProfit >= 0 ? <HiOutlineTrendingUp size={16} /> : <HiOutlineTrendingDown size={16} />}
-              {profitPercentage}%
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* TABLE DATA */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] overflow-hidden shadow-sm">
-        <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/20">
-          <h2 className="text-xl font-black dark:text-white flex items-center gap-2">
-            <FaExchangeAlt className="text-blue-500" /> Watchlist Signals
-          </h2>
-          <button onClick={fetchTablePrices} className="text-[10px] font-black text-slate-500 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg hover:text-blue-500 flex items-center gap-1 transition-colors">
-            <HiOutlineRefresh /> Sync Live Prices
-          </button>
-        </div>
-
-        {isLoading ? (
-          <div className="p-16 text-center">
-            <HiOutlineRefresh className="mx-auto text-4xl text-slate-300 dark:text-slate-600 animate-spin mb-4" />
-            <p className="text-slate-500 font-bold animate-pulse">Loading strategy signals...</p>
-          </div>
-        ) : records.length === 0 ? (
-          <div className="p-16 text-center bg-white dark:bg-slate-900 shadow-sm">
-            <FaBullseye className="mx-auto text-5xl text-slate-200 dark:text-slate-800 mb-4" />
-            <h3 className="text-xl font-black text-slate-700 dark:text-white mb-2">No Assets Tracked</h3>
-            <p className="text-slate-500 font-semibold">Log your coins to track whether to swap, hold or stake.</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto custom-scrollbar">
-            <table className="w-full text-left border-collapse min-w-[900px]">
+          
+          <div className="overflow-x-auto">
+            <table className="w-full text-left min-w-[700px]">
               <thead className="bg-slate-50/50 dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                <tr>
-                  <th className="p-4 pl-6">Asset & Wallet</th>
-                  <th className="p-4">Holdings & Target</th>
-                  <th className="p-4">Live Momentum</th>
-                  <th className="p-4">AI Smart Action</th>
-                  <th className="p-4 pr-6 text-right">Manage</th>
-                </tr>
+                <tr><th className="p-4 pl-6">Asset & Wallet</th><th className="p-4">Holdings Info</th><th className="p-4">Live Performance</th><th className="p-4">AI Signal</th><th className="p-4 pr-6 text-right">Actions</th></tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
-                {records.map((rec) => {
-                  const livePrice = livePrices[rec.coin] || rec.entryPrice;
-                  const profitPct = (((livePrice - rec.entryPrice) / rec.entryPrice) * 100);
-                  const isProfit = profitPct >= 0;
-                  const ai = getAiSignal(profitPct);
-                  
-                  // 🚀 Safe Logo Retrieval
-                  const coinObj = fullDatabase.find(c => c.symbol === rec.coin.toUpperCase());
-                  const coinLogo = coinObj?.logo || null;
+              <tbody className="divide-y divide-slate-50 dark:divide-slate-800/50">
+                {isLoading ? (
+                  <tr><td colSpan={5} className="p-12 text-center"><HiOutlineRefresh className="animate-spin mx-auto text-3xl text-blue-500" /></td></tr>
+                ) : records.length === 0 ? (
+                  <tr><td colSpan={5} className="p-12 text-center"><FaBullseye className="text-4xl text-slate-300 dark:text-slate-700 mx-auto mb-3" /><p className="text-sm font-black text-slate-500 uppercase tracking-widest">No Assets Tracked</p><p className="text-xs text-slate-400 mt-1 font-bold">Log coins to get AI signals</p></td></tr>
+                ) : (
+                  records.map((rec) => {
+                    const livePrice = livePrices[rec.coin] || rec.entryPrice;
+                    const profitPct = (((livePrice - rec.entryPrice) / rec.entryPrice) * 100);
+                    const isProfit = profitPct >= 0;
+                    const coinObj = fullDatabase.find(c => c.symbol === rec.coin.toUpperCase()) || {};
 
-                  return (
-                    <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
-                      <td className="p-4 pl-6">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 p-1 flex items-center justify-center shrink-0 border border-slate-200 dark:border-slate-700">
-                             <MarketIcon symbol={rec.coin} apiImage={null} customLogo={coinLogo} />
+                    return (
+                      <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group">
+                        <td className="p-4 pl-6">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 p-1 flex items-center justify-center border border-slate-200 dark:border-slate-700 shrink-0">
+                              <LogoRenderer symbol={rec.coin} logoUrl={coinObj.logo} bg={coinObj.bg} color={coinObj.color} />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-black text-slate-900 dark:text-white text-sm uppercase truncate">{rec.coin}</p>
+                              <p className="text-[10px] font-bold text-slate-500 flex items-center gap-1 mt-0.5 truncate"><FaWallet className="text-blue-400" size={10}/> {rec.wallet}</p>
+                            </div>
                           </div>
-                          <div>
-                            <p className="font-black dark:text-white text-sm uppercase">{rec.coin}</p>
-                            {/* 🚀 GLOBAL DATE IN TABLE */}
-                            <p className="text-[10px] font-bold text-slate-500 mt-0.5">
-                              {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date}
-                            </p>
+                        </td>
+                        <td className="p-4">
+                          <p className="font-black text-slate-800 dark:text-white truncate max-w-[120px]">{rec.amount} <span className="text-[10px] text-slate-500 uppercase">{rec.coin}</span></p>
+                          <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">Bought @ {currencySymbol}{rec.entryPrice < 1 ? rec.entryPrice.toFixed(6) : rec.entryPrice}</p>
+                        </td>
+                        <td className="p-4">
+                          <div className={`inline-flex flex-col px-3.5 py-2 rounded-xl border ${isProfit ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:text-emerald-400' : 'bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-500/10 dark:border-rose-500/20 dark:text-rose-400'}`}>
+                            <p className="text-xs font-black flex items-center gap-1">{isProfit ? <HiOutlineTrendingUp size={14}/> : <HiOutlineTrendingDown size={14}/>}{isProfit ? '+' : ''}{profitPct.toFixed(2)}%</p>
+                            <p className="text-[9px] font-bold opacity-80 mt-0.5 uppercase tracking-widest text-center">Live: {currencySymbol}{livePrice < 1 ? livePrice.toFixed(6) : livePrice.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
                           </div>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <p className="font-black dark:text-white text-sm">{rec.amount} <span className="text-[10px] text-slate-500 uppercase">{rec.coin}</span></p>
-                        <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400 mt-1 uppercase tracking-widest">
-                          <FaWallet /> {rec.wallet}
-                        </div>
-                        <p className="text-[9px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest">Logged At: {currencySymbol}{rec.entryPrice.toLocaleString(undefined, {maximumFractionDigits: 6})}</p>
-                      </td>
-                      <td className="p-4">
-                        <div className={`inline-flex flex-col items-start px-3 py-1.5 rounded-xl border ${isProfit ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-500/10 dark:border-emerald-500/30' : 'bg-rose-50 border-rose-200 dark:bg-rose-500/10 dark:border-rose-500/30'}`}>
-                          <p className={`text-xs font-black flex items-center gap-1 ${isProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                            {isProfit ? <HiOutlineTrendingUp size={14} /> : <HiOutlineTrendingDown size={14} />}
-                            {isProfit ? '+' : ''}{profitPct.toFixed(2)}%
-                          </p>
-                          <p className="text-[9px] font-bold text-slate-500 mt-0.5 uppercase tracking-widest">
-                            Live: {currencySymbol}{livePrice.toLocaleString(undefined, {maximumFractionDigits: 6})}
-                          </p>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <div title={ai.tooltip} className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-[10px] font-black tracking-widest uppercase ${ai.bg} ${ai.text} border border-transparent shadow-sm cursor-help`}>
-                          {ai.icon} {ai.label}
-                        </div>
-                      </td>
-                      <td className="p-4 pr-6">
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => handleEdit(rec)} className="p-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-xl transition-all shadow-sm">
-                            <HiOutlinePencil size={18} />
-                          </button>
-                          <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-xl transition-all shadow-sm">
-                            <HiOutlineTrash size={18} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                        </td>
+                        <td className="p-4"><AISignalBadge profitPct={profitPct} /></td>
+                        <td className="p-4 pr-6">
+                          <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => handleEdit(rec)} className="p-2.5 bg-white border border-slate-200 dark:bg-slate-800 dark:border-slate-700 text-slate-500 hover:text-blue-500 hover:border-blue-300 dark:hover:border-blue-500 dark:hover:text-blue-400 rounded-xl transition-all shadow-sm"><HiOutlinePencil size={16}/></button>
+                            <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-500/20 border border-rose-100 dark:border-rose-500/30 rounded-xl transition-all shadow-sm"><HiOutlineTrash size={16}/></button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
-        )}
+        </div>
       </div>
 
-      {/* 🚀 SMART MODAL */}
+      {/* 🚀 UPGRADED ADD/EDIT MODAL */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[500] bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 pt-[100px] md:pt-[120px]">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[calc(100dvh-6rem)] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-100 dark:border-slate-800">
+        <div className="fixed inset-0 z-[500] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 pt-[100px] md:pt-[120px] animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[calc(100dvh-6rem)] sm:max-h-[85vh] border border-slate-300 dark:border-slate-700 animate-in slide-in-from-bottom-10 sm:zoom-in-95">
             
-            <div className="px-6 sm:px-8 py-5 flex justify-between items-center bg-blue-600 text-white shrink-0">
-              <h3 className="text-xl font-black flex items-center gap-2">
-                <FaBullseye size={20} /> {editingId ? 'Edit Ledger Entry' : 'Log New Asset'}
-              </h3>
-              <button onClick={closeModal} className="p-2 bg-white/20 rounded-full transition-colors hover:bg-white/30">
-                <HiOutlineX size={20} />
-              </button>
+            <div className="px-6 py-5 bg-gradient-to-r from-blue-600 to-cyan-600 text-white flex justify-between items-center sticky top-0 z-10 shrink-0">
+              <h3 className="text-xl font-black flex items-center gap-2"><FaBullseye size={20} /> {editingId ? 'Edit Target' : 'Log New Asset'}</h3>
+              <button onClick={closeModal} className="p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors"><HiOutlineX size={20} /></button>
             </div>
-            
+
             <form onSubmit={handleSaveEntry} className="p-6 sm:p-8 overflow-y-auto custom-scrollbar flex-1 space-y-6">
               
-              <div className="grid grid-cols-2 gap-5">
-                <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Select Coin</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Asset (Watchlist)</label>
                   <div className="relative">
                     <div className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 p-1 flex items-center justify-center overflow-hidden z-10 pointer-events-none">
-                       {/* 🚀 Safe Modal Icon Mapping */}
-                      <MarketIcon symbol={formData.coin} apiImage={null} customLogo={fullDatabase.find(c=>c.symbol===formData.coin)?.logo} />
+                      <LogoRenderer symbol={formData.coin} logoUrl={fullDatabase.find(c=>c.symbol===formData.coin)?.logo} bg={fullDatabase.find(c=>c.symbol===formData.coin)?.bg} color={fullDatabase.find(c=>c.symbol===formData.coin)?.color} />
                     </div>
-                    <select required value={formData.coin} onChange={(e) => setFormData({...formData, coin: e.target.value})} className="w-full pl-14 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-black dark:text-white outline-none cursor-pointer appearance-none">
-                      {cryptoSymbols.length > 0 ? cryptoSymbols.map(coin => <option key={coin} value={coin}>{coin}</option>) : <option value="BTC">BTC (Default)</option>}
+                    <select required value={formData.coin} onChange={(e) => setFormData({...formData, coin: e.target.value})} className="w-full pl-14 pr-10 py-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer appearance-none shadow-sm">
+                      {cryptoSymbols.length > 0 ? cryptoSymbols.map(c => <option key={c} value={c}>{c}</option>) : <option value="BTC">BTC (Default)</option>}
                     </select>
                     <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Quantity</label>
-                  <input type="number" step="any" required value={formData.amount} onChange={(e) => setFormData({...formData, amount: e.target.value})} placeholder="e.g. 200" className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-2xl dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 tracking-widest" />
+                <div>
+                  <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Quantity Bought</label>
+                  <input type="number" step="any" required value={formData.amount} onChange={(e) => setFormData({...formData, amount: e.target.value})} placeholder="e.g., 0.5" className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-2xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 tracking-widest shadow-sm placeholder-slate-400" />
                 </div>
               </div>
 
-              <div className="p-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/50 rounded-2xl space-y-3">
+              <div className="p-5 bg-blue-50/50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/50 rounded-2xl space-y-3 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-black text-blue-700 dark:text-blue-400 uppercase tracking-widest flex items-center gap-1">
-                    Value To Track From ({currencySymbol})
-                  </label>
-                  <button type="button" onClick={fetchLivePriceForForm} disabled={isFetchingLive || !formData.coin} className="text-[10px] font-black bg-blue-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-blue-700 active:scale-95 disabled:opacity-50 transition-colors">
-                    <HiOutlineRefresh className={isFetchingLive ? "animate-spin" : ""} /> Get Current Value
+                  <label className="text-[10px] font-black text-blue-700 dark:text-blue-400 uppercase tracking-widest flex items-center gap-1"><FaCoins/> Entry Price ({currencySymbol})</label>
+                  <button type="button" onClick={fetchLivePriceForForm} disabled={isFetchingLive} className="text-[10px] font-black bg-blue-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-50 hover:bg-blue-700 transition-colors shadow-sm">
+                    <HiOutlineRefresh className={isFetchingLive ? "animate-spin" : ""} size={14} /> Fetch Live
                   </button>
                 </div>
-                <input type="number" step="any" required value={formData.entryPrice} onChange={(e) => setFormData({...formData, entryPrice: e.target.value})} placeholder="e.g. 14500" className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50" />
+                <input type="number" step="any" required value={formData.entryPrice} onChange={(e) => setFormData({...formData, entryPrice: e.target.value})} placeholder="Average buy price..." className="w-full p-4 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-700/50 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm" />
               </div>
 
-              <div className="grid grid-cols-2 gap-5">
-                <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-1"><FaWallet/> Storage Wallet</label>
-                  <input type="text" required list="wallet-suggestions" value={formData.wallet} onChange={(e) => setFormData({...formData, wallet: e.target.value})} placeholder="e.g. FaucetPay" className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Wallet Location</label>
+                  <input type="text" required list="wallet-suggestions" value={formData.wallet} onChange={(e) => setFormData({...formData, wallet: e.target.value})} placeholder="e.g., Binance, Trust Wallet" className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm placeholder-slate-400" />
+                  <datalist id="wallet-suggestions"><option value="Binance"/><option value="FaucetPay"/><option value="Trust Wallet"/><option value="MetaMask"/><option value="CoinDCX"/></datalist>
                 </div>
-                
-                {/* 🚀 GLOBAL DATE APPLIED FOR MODAL */}
-                <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex justify-between ml-1">
-                    <span>Date</span>
-                    <span className="text-blue-500">{formatGlobalDate ? formatGlobalDate(formData.date, 'short') : ''}</span>
-                  </label>
-                  <input type="date" required value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50" />
+                <div>
+                  <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Date & Time</label>
+                  <input type="datetime-local" required value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm" />
                 </div>
               </div>
 
-              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-2xl font-black transition-transform active:scale-95 shadow-xl shadow-blue-500/20">
-                {editingId ? 'Update Target' : 'Start Tracking Asset'}
-              </button>
+              <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-2">
+                <button type="submit" disabled={isSaving} className="w-full p-4 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-blue-500/30 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 shrink-0">
+                  {isSaving ? <HiOutlineRefresh className="animate-spin text-xl" /> : <HiOutlineShieldCheck size={20} />}
+                  {isSaving ? 'Processing...' : (editingId ? 'Update Target' : 'Save Track Entry')}
+                </button>
+              </div>
             </form>
           </div>
         </div>
@@ -692,20 +525,28 @@ const HoldAndSwap = () => {
 
       {/* 🔐 DELETE SECURITY MODAL */}
       {deleteContext && (
-        <div className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 pt-[100px] md:pt-[120px] animate-in fade-in">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl p-8 border border-rose-100 dark:border-rose-900/50 relative overflow-hidden max-h-[calc(100dvh-6rem)] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95">
-            <div className="absolute top-0 left-0 w-full h-2 bg-rose-500"></div>
+        <div className="fixed inset-0 z-[500] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 pt-[100px] md:pt-[120px] animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl p-8 border border-rose-200 dark:border-rose-900/50 relative overflow-hidden max-h-[calc(100dvh-6rem)] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95">
+            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-rose-500 to-pink-500"></div>
             <div className="flex flex-col items-center text-center mb-6">
-              <div className="w-16 h-16 bg-rose-100 text-rose-600 dark:bg-rose-500/20 rounded-full flex items-center justify-center text-3xl mb-4"><HiOutlineLockClosed /></div>
+              <div className="w-16 h-16 bg-rose-100 text-rose-600 dark:bg-rose-500/20 rounded-2xl flex items-center justify-center text-3xl mb-4 shadow-inner border border-rose-200 dark:border-rose-500/30"><HiOutlineLockClosed /></div>
               <h3 className="text-2xl font-black text-slate-900 dark:text-white">Security Check</h3>
-              <p className="text-sm font-bold text-slate-500 mt-2">Deleting this record will alter your total invested tracking.</p>
+              <p className="text-xs font-bold text-slate-500 mt-2">Deleting this record will alter your total invested tracking.</p>
             </div>
             <form onSubmit={executeSecureDelete} className="space-y-4">
-              <input type="password" maxLength={6} required autoFocus value={pinInput} onChange={(e) => setPinInput(e.target.value)} placeholder="ENTER PIN" className="w-full text-center tracking-[0.5em] text-2xl p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-black dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50" />
-              {pinError && <p className="text-xs font-bold text-rose-500 text-center animate-bounce">{pinError}</p>}
+              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-500/30 rounded-xl">
+                <p className="text-xs font-bold text-amber-800 dark:text-amber-300">You are permanently deleting <span className="font-black">{deleteContext.amount} {deleteContext.coin}</span> tracking data.</p>
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Security PIN</label>
+                <input type="password" maxLength={6} required autoFocus value={pinInput} onChange={(e) => setPinInput(e.target.value)} placeholder="••••••" className="w-full text-center tracking-[0.5em] text-2xl p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-2xl font-black dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 shadow-sm" />
+                {pinError && <p className="text-xs font-bold text-rose-500 text-center animate-bounce mt-2">{pinError}</p>}
+              </div>
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setDeleteContext(null)} className="flex-1 p-4 rounded-2xl font-black bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors hover:bg-slate-200 dark:hover:bg-slate-700">Cancel</button>
-                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-2xl font-black text-white bg-rose-500 hover:bg-rose-600 disabled:opacity-50">Verify & Delete</button>
+                <button type="button" onClick={() => setDeleteContext(null)} className="flex-1 p-4 rounded-2xl font-black bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors shadow-sm">Cancel</button>
+                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-2xl font-black text-white bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 shadow-lg shadow-rose-500/30 disabled:opacity-50 flex items-center justify-center gap-2">
+                  {isVerifying ? <HiOutlineRefresh className="animate-spin" size={18} /> : null} Confirm
+                </button>
               </div>
             </form>
           </div>
