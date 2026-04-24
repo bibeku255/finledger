@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { collection, onSnapshot, query, limit, getDocs } from 'firebase/firestore';
@@ -36,28 +36,42 @@ const fiatFlagMap = {
   PKR: 'pk', BDT: 'bd', LKR: 'lk', MXN: 'mx'
 };
 
-const cryptoConfig = {
-  BTC: { id: 'bitcoin' }, ETH: { id: 'ethereum' }, USDT: { id: 'tether' }, XRP: { id: 'ripple' },
-  BNB: { id: 'binancecoin' }, USDC: { id: 'usd-coin' }, SOL: { id: 'solana' }, TRX: { id: 'tron' },
-  DOGE: { id: 'dogecoin' }, BCH: { id: 'bitcoin-cash' }, ADA: { id: 'cardano' }, XMR: { id: 'monero' },
-  XLM: { id: 'stellar' }, DAI: { id: 'dai' }, ZEC: { id: 'zcash' }, LTC: { id: 'litecoin' },
-  SHIB: { id: 'shiba-inu' }, SUI: { id: 'sui' }, TON: { id: 'the-open-network' }, DOT: { id: 'polkadot' },
-  PEPE: { id: 'pepe' }, BGB: { id: 'bitget-token' }, OKB: { id: 'okb' }, NEAR: { id: 'near' },
-  POL: { id: 'polygon-ecosystem-token' }, KCS: { id: 'kucoin-shares' }, ATOM: { id: 'cosmos' },
-  ARB: { id: 'arbitrum' }, BONK: { id: 'bonk' }, CAKE: { id: 'pancakeswap-token' },
-  XTZ: { id: 'tezos' }, FLOKI: { id: 'floki' }, TWT: { id: 'trust-wallet-token' }, BAT: { id: 'basic-attention-token' },
-  MX: { id: 'mx-token' }, DGB: { id: 'digibyte' }, KAVA: { id: 'kava' }, AVAX: { id: 'avalanche-2' },
-  MEME: { id: 'memecoin' }, DASH: { id: 'dash' }, WRX: { id: 'wazirx' },
-  CTC: { id: 'tether' }, ROX: { id: 'tether' }, 
-  GT: { id: 'gatetoken', logo: 'https://s2.coinmarketcap.com/static/img/coins/64x64/4269.png' },
-  FEY: { id: 'feyorra', logo: 'https://s2.coinmarketcap.com/static/img/coins/64x64/10361.png' },
-  PI: { id: 'pinetwork', logo: 'https://s2.coinmarketcap.com/static/img/coins/64x64/6636.png' },
-  ICE: { id: 'ice-decentralized-future', logo: 'https://s2.coinmarketcap.com/static/img/coins/64x64/27650.png' },
-  JMPT: { id: 'jumptoken', logo: 'https://s2.coinmarketcap.com/static/img/coins/64x64/17556.png' },
-  TARA: { id: 'taraxa', logo: 'https://s2.coinmarketcap.com/static/img/coins/64x64/8563.png' },
-  CET: { id: 'coinex-token', logo: 'https://s2.coinmarketcap.com/static/img/coins/64x64/2496.png' },
-  XYO: { id: 'xyo-network', logo: 'https://s2.coinmarketcap.com/static/img/coins/64x64/3163.png' },
-  OP: { id: 'optimism', logo: 'https://s2.coinmarketcap.com/static/img/coins/64x64/11840.png' },
+// 🚀 FIXED: Upgraded safe list to match the entire system
+const BINANCE_SAFE_COINS = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC', 'BCH', 'ADA', 'XMR', 'XLM', 'DAI', 'ZEC', 'SHIB', 'SUI', 'TON', 'DOT', 'PEPE', 'NEAR', 'POL', 'ATOM', 'ARB', 'BONK', 'CAKE', 'XTZ', 'FLOKI', 'OP', 'TWT', 'BAT', 'DGB', 'KAVA', 'AVAX', 'MEME', 'DASH'];
+
+const defaultCryptoDatabase = [
+  { id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
+  { id: 'ethereum', symbol: 'ETH', name: 'Ethereum', logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
+  { id: 'tether', symbol: 'USDT', name: 'Tether', logo: 'https://assets.coingecko.com/coins/images/325/large/Tether.png' },
+  { id: 'ripple', symbol: 'XRP', name: 'XRP', logo: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png' },
+  { id: 'solana', symbol: 'SOL', name: 'Solana', logo: 'https://assets.coingecko.com/coins/images/4128/large/solana.png' },
+  { id: 'binancecoin', symbol: 'BNB', name: 'BNB', logo: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png' },
+  { id: 'tron', symbol: 'TRX', name: 'TRON', logo: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png' },
+  { id: 'dogecoin', symbol: 'DOGE', name: 'Dogecoin', logo: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png' },
+  { id: 'usd-coin', symbol: 'USDC', name: 'USD Coin', logo: 'https://assets.coingecko.com/coins/images/6319/large/usdc.png' },
+  { id: 'the-open-network', symbol: 'TON', name: 'Toncoin', logo: 'https://assets.coingecko.com/coins/images/17980/large/ton_symbol.png' },
+  
+  // Custom Verified Micro-Links
+  { id: 'feyorra', symbol: 'FEY', name: 'Feyorra', logo: 'https://assets.coingecko.com/coins/images/13600/large/feyorra.png', fallbackPrice: 0.0091 },
+  { id: 'pi-network', symbol: 'PI', name: 'Pi Network', logo: 'https://assets.coingecko.com/coins/images/31835/large/pi_network.jpg', fallbackPrice: 36.50 },
+  { id: 'ice-decentralized-future', symbol: 'ICE', name: 'Ice Network', logo: 'https://assets.coingecko.com/coins/images/34311/large/ice.png', fallbackPrice: 0.0035 },
+  { id: 'jumptoken', symbol: 'JMPT', name: 'JumpToken', logo: 'https://assets.coingecko.com/coins/images/22397/large/jmpt.png', fallbackPrice: 0.95 },
+  { id: 'coinex-token', symbol: 'CET', name: 'CoinEx Token', logo: 'https://assets.coingecko.com/coins/images/2538/large/coinex-token.png', fallbackPrice: 0.035 },
+  { id: 'tether', symbol: 'CTC', name: 'NC Token', logo: 'https://assets.coingecko.com/coins/images/11105/large/Creditcoin_logo.png', fallbackPrice: 1.00 },
+  { id: 'tether', symbol: 'ROX', name: 'Robox', logo: 'https://assets.geckoterminal.com/vdl79ryhkyksbnrtp11hqrpuwmyu', fallbackPrice: 1.00 }
+];
+
+const fetchWithRetry = async (url, retries = 2) => {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetch(url);
+      if (res.status !== 429) return res;
+      if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+    } catch (e) {
+      if (i === retries) return null;
+    }
+  }
+  return null; 
 };
 
 const StatCard = ({ title, value, icon: Icon, gradient, trend, trendValue, subtitle, onClick }) => (
@@ -79,7 +93,6 @@ const StatCard = ({ title, value, icon: Icon, gradient, trend, trendValue, subti
           </span>
         )}
       </p>
-      {/* 🚀 FIXED: Replaced truncate with break-words to handle extremely large numbers smoothly */}
       <h2 className="text-3xl md:text-4xl font-black tracking-tight mb-1 break-words">{value}</h2>
       {subtitle && (
         <p className="text-[10px] font-bold opacity-70 uppercase tracking-wider">{subtitle}</p>
@@ -94,7 +107,7 @@ const StatCard = ({ title, value, icon: Icon, gradient, trend, trendValue, subti
   </div>
 );
 
-const MarketIcon = ({ symbol, apiImage, customLogo, type }) => {
+const MarketIcon = ({ symbol, customLogo, type }) => {
   const [imgIndex, setImgIndex] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
   const symbolUpper = symbol?.toUpperCase();
@@ -116,7 +129,7 @@ const MarketIcon = ({ symbol, apiImage, customLogo, type }) => {
   }
 
   const sources = [
-    apiImage, customLogo, 
+    customLogo, 
     `https://bin.bnbstatic.com/image/admin_mgl/coin-logo/${symbolUpper}.png`, 
     `https://assets.coincap.io/assets/icons/${symbolLower}@2x.png`, 
     `https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${symbolLower}.png`
@@ -155,7 +168,7 @@ const MarketCard = ({ item, baseCurrency, currencySymbol }) => {
       <div className="flex justify-between items-center mb-4 relative z-10">
         <div className="flex items-center gap-3">
           <div className="relative w-12 h-12 rounded-full overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-700 flex items-center justify-center shrink-0 border-2 border-white dark:border-slate-700 shadow-md group-hover:scale-110 transition-transform duration-300">
-            <MarketIcon symbol={item.symbol} apiImage={item.image} customLogo={item.customLogo} type={item.type} />
+            <MarketIcon symbol={item.symbol} customLogo={item.customLogo} type={item.type} />
           </div>
           <div>
             <span className="font-black text-slate-800 dark:text-white text-base tracking-tight">{item.symbol}</span>
@@ -198,16 +211,19 @@ const Dashboard = () => {
   const [bankTotal, setBankTotal] = useState(0);
   const [cashTotal, setCashTotal] = useState(0);
   const [onlineTotal, setOnlineTotal] = useState(0);
-  const [cryptoHoldings, setCryptoHoldings] = useState([]); 
+  const [cryptoTransactions, setCryptoTransactions] = useState([]); 
+  const [customUserCoins, setCustomUserCoins] = useState([]); 
   const [incomeTotal, setIncomeTotal] = useState(0);
   const [expenseTotal, setExpenseTotal] = useState(0);
   
-  // 🚀 New State for Smart Khata Integration
   const [khataReceivables, setKhataReceivables] = useState(0);
   const [khataPayables, setKhataPayables] = useState(0);
 
   const [marketData, setMarketData] = useState([]);
+  const [livePrices, setLivePrices] = useState({});
+  const [fiatRate, setFiatRate] = useState(1);
   const [isMarketLoading, setIsMarketLoading] = useState(true);
+  
   const [greeting, setGreeting] = useState('');
   const [greetingIcon, setGreetingIcon] = useState(null);
 
@@ -227,6 +243,15 @@ const Dashboard = () => {
   
   useEffect(() => {
     if (!user) return;
+    const fetchUserData = async () => {
+      const userSnap = await getDoc(doc(db, "users", user.uid));
+      if (userSnap.exists() && userSnap.data().customCoins) setCustomUserCoins(userSnap.data().customCoins);
+    };
+    fetchUserData();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
 
     const calcVaultBalance = (snapshot) => {
       return snapshot.docs.reduce((acc, doc) => {
@@ -241,8 +266,9 @@ const Dashboard = () => {
     const unsubCash = onSnapshot(collection(db, "users", user.uid, "cashWallet"), snap => setCashTotal(calcVaultBalance(snap)));
     const unsubOnline = onSnapshot(collection(db, "users", user.uid, "onlineWallet"), snap => setOnlineTotal(calcVaultBalance(snap)));
     
-    const unsubCrypto = onSnapshot(collection(db, "users", user.uid, "cryptoWallet"), snap => {
-      setCryptoHoldings(snap.docs.map(doc => doc.data()));
+    // 🚀 FIXED: Listen to the correct master log collection for accurate holdings
+    const unsubCrypto = onSnapshot(collection(db, "users", user.uid, "cryptoWalletLogs"), snap => {
+      setCryptoTransactions(snap.docs.map(doc => doc.data()));
     });
 
     const unsubIncome = onSnapshot(collection(db, "users", user.uid, "incomeLogs"), snap => {
@@ -258,7 +284,6 @@ const Dashboard = () => {
       setIsLoading(false); 
     });
 
-    // 🚀 NEW: Sync Khata Balances
     const unsubParties = onSnapshot(collection(db, "users", user.uid, "parties"), snap => {
       let rec = 0;
       let pay = 0;
@@ -276,106 +301,190 @@ const Dashboard = () => {
     return () => { unsubBank(); unsubCash(); unsubOnline(); unsubCrypto(); unsubIncome(); unsubExpense(); unsubParties(); };
   }, [user]);
 
-  useEffect(() => {
-    const fetchMarketData = async () => {
-      setIsMarketLoading(true);
-      try {
-        const fiatRes = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
-        const fiatData = await fiatRes.json();
-        const usdToBase = fiatData.rates[baseCurrency] || 1;
-        let newMarketData = [];
+  const fullDatabase = useMemo(() => {
+    const coinMap = new Map();
+    defaultCryptoDatabase.forEach(c => coinMap.set(c.symbol.toUpperCase(), c));
+    selectedCryptos.forEach(c => { if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c); });
+    customUserCoins.forEach(c => { 
+      const existing = coinMap.get(c.symbol.toUpperCase()); 
+      coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c, logo: c.logo || existing?.logo }); 
+    });
+    return Array.from(coinMap.values());
+  }, [customUserCoins, selectedCryptos]);
 
-        if (selectedCryptos && selectedCryptos.length > 0) {
-          let cgJson = [];
-          const normalAssets = [];
-          
-          selectedCryptos.forEach(c => {
-             const symbol = typeof c === 'string' ? c : c.symbol;
-             const upperSym = symbol.toUpperCase();
-             const objId = typeof c === 'object' ? c.id : null;
-             const fallbackId = cryptoConfig[upperSym]?.id || symbol.toLowerCase();
-             normalAssets.push({ 
-               symbol: upperSym, 
-               id: objId || fallbackId, 
-               customLogo: (typeof c === 'object' ? c.logo : null) || cryptoConfig[upperSym]?.logo, 
-               fallbackPrice: (typeof c === 'object' ? c.fallbackPrice : 0)
-             });
-          });
+  // Extract total quantity of each coin from transactions
+  const cryptoHoldings = useMemo(() => {
+    const vault = {};
+    cryptoTransactions.forEach(t => {
+      if (!vault[t.coin]) vault[t.coin] = { total: 0 };
+      const qty = parseFloat(t.quantity) || 0;
+      const fee = parseFloat(t.networkFee) || 0;
+      if (t.type === 'in') vault[t.coin].total += qty;
+      else if (t.type === 'out') vault[t.coin].total -= qty;
+      else if (t.type === 'transfer') vault[t.coin].total -= fee;
+    });
+    // Remove dust
+    Object.keys(vault).forEach(coin => {
+      if (vault[coin].total <= 0.00000001) delete vault[coin];
+    });
+    return vault;
+  }, [cryptoTransactions]);
 
-          if (normalAssets.length > 0) {
-             const uniqueIds = [...new Set(normalAssets.map(a => a.id))].join(',');
-             try {
-               const cgRes = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${uniqueIds}&sparkline=false`);
-               if (cgRes.ok) cgJson = await cgRes.json();
-             } catch(e) {}
-          }
+  // 🚀 THE 5-LAYER SYNCED FETCHING ENGINE FOR DASHBOARD
+  const fetchMarketData = useCallback(async () => {
+    setIsMarketLoading(true);
+    let usdToBase = 1;
 
-          for (let asset of normalAssets) {
-            const live = cgJson.find(c => c.id === asset.id);
-            let priceInUsd = live?.current_price || parseFloat(asset.fallbackPrice) || 0;
-            let change24h = live?.price_change_percentage_24h || 0;
-            let finalImage = live?.image || null;
-            const priceInBase = priceInUsd * usdToBase;
+    try {
+      const forexRes = await fetchWithRetry('https://api.exchangerate-api.com/v4/latest/USD');
+      if (forexRes && forexRes.ok) {
+        const forexJson = await forexRes.json();
+        usdToBase = parseFloat(forexJson.rates[baseCurrency]) || 1;
+        setFiatRate(usdToBase);
+      }
+    } catch (error) { console.warn("Forex API Error."); }
 
-            if (!newMarketData.find(m => m.symbol === asset.symbol)) {
-              newMarketData.push({ 
-                symbol: asset.symbol, 
-                type: 'crypto', 
-                priceUSD: priceInUsd, 
-                priceBase: priceInBase, 
-                change: change24h,
-                image: finalImage,
-                customLogo: asset.customLogo
-              });
-            }
-          }
+    const watchlistSymbols = selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
+    // Include everything in watchlist AND everything we actually hold in wallet
+    const coinsToFetch = Array.from(new Set([...Object.keys(cryptoHoldings), ...watchlistSymbols, 'USDT']));
+
+    if (coinsToFetch.length > 0) {
+      let cgJson = {};
+      const normalCoins = [];
+      const contractCoins = [];
+
+      coinsToFetch.forEach(sym => {
+        const upperSym = sym.toUpperCase();
+        const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || { symbol: upperSym, id: sym.toLowerCase() };
+        
+        if (['ROX', 'CTC', 'HSH'].includes(upperSym)) {
+           // Handled manually later
+        } else if (dbCoin.fetchMode === 'contract' && dbCoin.contractAddress) {
+           contractCoins.push(dbCoin);
+        } else {
+           normalCoins.push(dbCoin.id || dbCoin.symbol.toLowerCase());
         }
+      });
 
-        if (selectedFiats && selectedFiats.length > 0) {
-          selectedFiats.forEach(fiat => {
-            if (fiat !== baseCurrency) { 
-              const rateToUsd = fiatData.rates[fiat];
-              if(rateToUsd) {
-                const priceInUsd = 1 / rateToUsd;
-                const priceInBase = priceInUsd * usdToBase;
-                newMarketData.push({ 
-                  symbol: fiat, 
-                  type: 'fiat', 
-                  priceUSD: priceInUsd, 
-                  priceBase: priceInBase, 
-                  change: (Math.random() * 0.4 - 0.2) 
-                });
+      try {
+        if (normalCoins.length > 0) {
+          const uniqueIds = [...new Set(normalCoins)].join(',');
+          const cgRes = await fetchWithRetry(`https://api.coingecko.com/api/v3/simple/price?ids=${uniqueIds}&vs_currencies=usd&include_24hr_change=true`);
+          if (cgRes && cgRes.ok) cgJson = await cgRes.json();
+        }
+      } catch (error) {}
+
+      const priceMap = {};
+      let newMarketData = [];
+      
+      await Promise.all(coinsToFetch.map(async (sym) => {
+        const upperSym = sym.toUpperCase();
+        const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || { symbol: upperSym, id: sym.toLowerCase() };
+        const searchId = dbCoin.id || upperSym.toLowerCase();
+        const fallback = dbCoin.fallbackPrice ? parseFloat(dbCoin.fallbackPrice) : 0;
+        
+        let priceUsd = 0;
+        let changePercent = 0;
+
+        if (['ROX', 'CTC'].includes(upperSym)) {
+            priceUsd = fallback > 0 ? fallback : 1.00;
+            changePercent = 0.01;
+        } else if (upperSym === 'HSH') {
+            priceUsd = fallback > 0 ? fallback : 0.0001; 
+        } else if (dbCoin.fetchMode === 'contract' && dbCoin.contractAddress) {
+          try {
+            const dexRes = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${dbCoin.contractAddress}`);
+            if (dexRes && dexRes.ok) {
+              const dexData = await dexRes.json();
+              if (dexData.pairs?.length > 0) {
+                priceUsd = parseFloat(dexData.pairs[0].priceUsd);
+                changePercent = parseFloat(dexData.pairs[0].priceChange?.h24) || 0;
               }
             }
-          });
+          } catch(e) {}
+        } 
+        else {
+          priceUsd = cgJson[searchId]?.usd || 0;
+          changePercent = cgJson[searchId]?.usd_24h_change || 0;
         }
 
-        setMarketData(newMarketData);
-      } catch (error) {
-        console.error("Market fetch failed", error);
-      } finally {
-        setIsMarketLoading(false);
-      }
-    };
+        if (!priceUsd && BINANCE_SAFE_COINS.includes(upperSym)) {
+          try {
+            const bRes = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${upperSym}USDT`);
+            if (bRes.ok) {
+              const bData = await bRes.json();
+              priceUsd = parseFloat(bData.lastPrice);
+              changePercent = parseFloat(bData.priceChangePercent);
+            }
+          } catch(e) {}
+        }
 
-    fetchMarketData();
-    const interval = setInterval(fetchMarketData, 60000); 
-    return () => clearInterval(interval);
-  }, [baseCurrency, selectedCryptos, selectedFiats]);
-
-  const cryptoTotal = useMemo(() => {
-    if (!cryptoHoldings.length) return 0;
-    return cryptoHoldings.reduce((sum, coin) => {
-      const sym = (coin.symbol || '').toUpperCase();
-      const amount = Number(coin.amount || coin.balance || 0);
-      const liveMarketInfo = marketData.find(m => m.symbol === sym);
+        if (!priceUsd && fallback > 0) {
+          priceUsd = fallback;
+          changePercent = 0;
+        }
+        
+        priceMap[upperSym] = { priceUSD: priceUsd, change: changePercent };
+        
+        // Push only Watchlist items to the visual market widget slider
+        if (watchlistSymbols.includes(upperSym) || upperSym === 'USDT') {
+          newMarketData.push({ 
+            symbol: upperSym, 
+            type: 'crypto', 
+            priceUSD: priceUsd, 
+            priceBase: priceUsd * usdToBase, 
+            change: changePercent,
+            customLogo: dbCoin.logo
+          });
+        }
+      }));
       
-      if (liveMarketInfo && amount > 0) {
-        return sum + (amount * liveMarketInfo.priceBase);
+      setLivePrices(priceMap);
+
+      if (selectedFiats && selectedFiats.length > 0) {
+         try {
+           const fiatRes = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+           const fiatData = await fiatRes.json();
+           selectedFiats.forEach(fiat => {
+             if (fiat !== baseCurrency) { 
+               const rateToUsd = fiatData.rates[fiat];
+               if(rateToUsd) {
+                 const priceInUsd = 1 / rateToUsd;
+                 const priceInBase = priceInUsd * usdToBase;
+                 newMarketData.push({ 
+                   symbol: fiat, 
+                   type: 'fiat', 
+                   priceUSD: priceInUsd, 
+                   priceBase: priceInBase, 
+                   change: (Math.random() * 0.4 - 0.2) 
+                 });
+               }
+             }
+           });
+         } catch(e) {}
       }
-      return sum + Number(coin.totalBaseValue || coin.investedAmount || coin.finalBaseAmount || 0);
+
+      setMarketData(newMarketData);
+    }
+    setIsMarketLoading(false);
+  }, [cryptoHoldings, selectedCryptos, baseCurrency, fullDatabase, selectedFiats]);
+
+  useEffect(() => {
+    if (!isLoading && fullDatabase.length > 0) { 
+      fetchMarketData(); 
+      const interval = setInterval(fetchMarketData, 60000); 
+      return () => clearInterval(interval); 
+    }
+  }, [isLoading, fullDatabase, fetchMarketData]);
+
+  // 🚀 FIXED: Calculate total crypto net worth based on actual live prices
+  const cryptoTotal = useMemo(() => {
+    if (Object.keys(cryptoHoldings).length === 0) return 0;
+    return Object.entries(cryptoHoldings).reduce((sum, [coin, data]) => {
+      const priceUSD = livePrices[coin.toUpperCase()]?.priceUSD || 0;
+      return sum + (data.total * priceUSD * fiatRate);
     }, 0);
-  }, [cryptoHoldings, marketData]);
+  }, [cryptoHoldings, livePrices, fiatRate]);
 
   const netWorth = bankTotal + cashTotal + onlineTotal + cryptoTotal;
 
@@ -503,27 +612,25 @@ const Dashboard = () => {
           
           {/* EXPANDED NET WORTH BREAKDOWN GRID */}
           <div className="relative z-10 mt-8 bg-white/5 border border-white/10 rounded-[2rem] p-5 md:p-6 backdrop-blur-md">
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Liquid Net Worth</p>
-            {/* 🚀 FIXED: Replaced 'truncate' with 'break-words' to prevent large amounts from getting cut */}
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-2">Total Liquid Net Worth {isMarketLoading && <HiOutlineRefresh className="animate-spin text-blue-400" size={12} />}</p>
             <h2 className="text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-tight mb-8 break-words">
               {currencySymbol}{netWorth.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
             </h2>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
               
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center shrink-0">
+              <div className="flex items-start gap-3 cursor-pointer group" onClick={() => navigate('/dashboard/accounts/bank')}>
+                <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center shrink-0 group-hover:bg-blue-500 group-hover:text-white transition-colors">
                   <FaUniversity size={18} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Bank Vault</p>
-                  {/* 🚀 FIXED: Dynamic text sizing and break-words for long numbers */}
                   <p className="text-[13px] sm:text-sm font-bold text-white break-words leading-tight">{currencySymbol}{bankTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
                 </div>
               </div>
 
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+              <div className="flex items-start gap-3 cursor-pointer group" onClick={() => navigate('/dashboard/accounts/cash')}>
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 group-hover:bg-emerald-500 group-hover:text-white transition-colors">
                   <FaMoneyBillWave size={18} />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -532,8 +639,8 @@ const Dashboard = () => {
                 </div>
               </div>
 
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0">
+              <div className="flex items-start gap-3 cursor-pointer group" onClick={() => navigate('/dashboard/accounts/online')}>
+                <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0 group-hover:bg-purple-500 group-hover:text-white transition-colors">
                   <FaGlobe size={18} />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -542,8 +649,8 @@ const Dashboard = () => {
                 </div>
               </div>
 
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center shrink-0">
+              <div className="flex items-start gap-3 cursor-pointer group" onClick={() => navigate('/dashboard/crypto/wallet')}>
+                <div className="w-10 h-10 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center shrink-0 group-hover:bg-orange-500 group-hover:text-white transition-colors">
                   <FaBitcoin size={18} />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -554,10 +661,9 @@ const Dashboard = () => {
 
             </div>
 
-            {/* 🚀 NEW: Smart Khata Integration Added Right Below Net Worth */}
             <div className="mt-6 pt-5 border-t border-white/10 grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+              <div className="flex items-start gap-3 cursor-pointer group" onClick={() => navigate('/dashboard/parties')}>
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
                   <FaHandHoldingUsd size={18} />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -565,8 +671,8 @@ const Dashboard = () => {
                   <p className="text-[13px] sm:text-sm font-bold text-white break-words leading-tight">{currencySymbol}{khataReceivables.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
                 </div>
               </div>
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+              <div className="flex items-start gap-3 cursor-pointer group" onClick={() => navigate('/dashboard/parties')}>
+                <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
                   <FaHandHoldingHeart size={18} />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -582,8 +688,8 @@ const Dashboard = () => {
 
         {/* KPI Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <StatCard title="Total Income" value={`${currencySymbol}${incomeTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={HiOutlineTrendingUp} gradient={GRADIENTS.income} trend={5.2} subtitle="Lifetime earnings" />
-          <StatCard title="Total Expenses" value={`${currencySymbol}${expenseTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={HiOutlineTrendingDown} gradient={GRADIENTS.expense} trend={-2.1} subtitle="Lifetime spending" />
+          <StatCard title="Total Income" value={`${currencySymbol}${incomeTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={HiOutlineTrendingUp} gradient={GRADIENTS.income} trend={5.2} subtitle="Lifetime earnings" onClick={() => navigate('/dashboard/accounts/income')} />
+          <StatCard title="Total Expenses" value={`${currencySymbol}${expenseTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={HiOutlineTrendingDown} gradient={GRADIENTS.expense} trend={-2.1} subtitle="Lifetime spending" onClick={() => navigate('/dashboard/accounts/expense')} />
           <StatCard title="Net Savings" value={`${currencySymbol}${savingsTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={FaPiggyBank} gradient={GRADIENTS.savings} subtitle={`${savingsRate}% savings rate`} trend={savingsTotal >= 0 ? 3.5 : -1.2} onClick={() => navigate('/dashboard/analytics')} />
         </div>
 
@@ -671,14 +777,14 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Live Market Portfolio */}
+        {/* Live Market Portfolio Widget */}
         <div className="mt-8">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest flex items-center gap-2">
-                <FaBolt className="text-amber-500" /> Live Market Portfolio
+                <FaBolt className="text-amber-500" /> Watchlist & Market Rates
               </h3>
-              <p className="text-[10px] text-slate-500 font-medium mt-0.5">Real-time prices for your watchlist & holdings</p>
+              <p className="text-[10px] text-slate-500 font-medium mt-0.5">Real-time prices for your tracked assets</p>
             </div>
             <div className="flex items-center gap-2">
               {isMarketLoading && <HiOutlineRefresh className="text-slate-400 animate-spin" size={18} />}
