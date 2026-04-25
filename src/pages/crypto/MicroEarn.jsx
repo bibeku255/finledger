@@ -34,7 +34,6 @@ const popularCryptoWallets = [
   "MetaMask", "Phantom", "FaucetPay", "KuCoin", "OKX", "Kraken", "Mexc"
 ];
 
-// 🚀 Safety list to prevent Binance CORS API errors
 const BINANCE_SAFE_COINS = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC', 'BCH', 'ADA', 'XMR', 'XLM', 'DAI', 'ZEC', 'SHIB', 'SUI', 'TON', 'DOT', 'PEPE', 'NEAR', 'POL', 'ATOM', 'ARB', 'BONK', 'CAKE', 'XTZ', 'FLOKI', 'OP', 'TWT', 'BAT', 'DGB', 'KAVA', 'AVAX', 'MEME', 'DASH'];
 
 const defaultCryptoDatabase = [
@@ -74,7 +73,7 @@ const fetchWithRetry = async (url, retries = 2) => {
 const LogoRenderer = ({ symbol, logoUrl, bg, color }) => {
   const [hasError, setHasError] = useState(false);
   useEffect(() => { setHasError(false); }, [logoUrl]);
-  if (!logoUrl || hasError) return <span className={`w-full h-full rounded-full flex items-center justify-center font-black text-[10px] ${bg || 'bg-slate-200 dark:bg-slate-700'} ${color || 'text-slate-600 dark:text-white'}`}>{symbol?.toUpperCase()?.substring(0, 3)}</span>;
+  if (!logoUrl || hasError) return <span className={`w-full h-full flex items-center justify-center font-black text-[10px] ${bg || 'bg-slate-200 dark:bg-slate-700'} ${color || 'text-slate-600 dark:text-white'} rounded-full`}>{symbol?.toUpperCase()?.substring(0, 3)}</span>;
   return <img src={logoUrl} alt={symbol} className="w-full h-full object-contain rounded-full bg-white dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700 shadow-sm" onError={() => setHasError(true)} />;
 };
 
@@ -83,6 +82,12 @@ const hashPIN = async (pinCode) => {
   const data = encoder.encode(pinCode);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+};
+
+// 🚀 FIXED: Local Device Timezone Generator
+const getLocalISOString = () => {
+  const tzOffset = (new Date()).getTimezoneOffset() * 60000;
+  return (new Date(Date.now() - tzOffset)).toISOString().slice(0, 16);
 };
 
 // Premium Platform Leaderboard Card
@@ -142,7 +147,6 @@ const MicroEarn = () => {
   const { user, baseCurrency = 'INR', selectedCryptos = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
 
-  // 🚀 FIXED: Renamed to availableCryptos to prevent crash in Modal
   const availableCryptos = useMemo(() => {
     const customSymbols = selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
     return Array.from(new Set(["USDT", ...customSymbols])).map(s => s.toUpperCase());
@@ -156,6 +160,7 @@ const MicroEarn = () => {
   const [livePrices, setLivePrices] = useState({});
   const [fiatRate, setFiatRate] = useState(1);
   const [isMarketSyncing, setIsMarketSyncing] = useState(true);
+  const [isFetchingLive, setIsFetchingLive] = useState(false);
   const [customUserCoins, setCustomUserCoins] = useState([]); 
   
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -168,11 +173,11 @@ const MicroEarn = () => {
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
 
-  const localTime = new Date().toISOString().substring(0, 16);
+  const localTime = getLocalISOString();
   
   const [formData, setFormData] = useState({
     platform: microEarnPlatforms[0], methods: [], destinationWallet: popularCryptoWallets[0],
-    coin: availableCryptos.length > 0 ? availableCryptos[0] : 'USDT', withdrawnAmount: '', receivedAmount: '', date: localTime, linkedRecordId: ''
+    coin: availableCryptos.length > 0 ? availableCryptos[0] : 'USDT', withdrawnAmount: '', receivedAmount: '', date: localTime, linkedRecordId: '', entryPrice: ''
   });
 
   useEffect(() => {
@@ -261,7 +266,6 @@ const MicroEarn = () => {
           priceUsd = cgJson[searchId]?.usd || 0;
         }
 
-        // 🚀 FIXED: Safety wrap for Binance API to prevent CORS/ERR_FAILED
         if (!priceUsd && BINANCE_SAFE_COINS.includes(upperSym)) {
           try {
             const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${upperSym}USDT`);
@@ -288,6 +292,42 @@ const MicroEarn = () => {
       return () => clearInterval(interval); 
     }
   }, [isLoading, fullDatabase, fetchMarketData]);
+
+  const fetchLivePriceForForm = async () => {
+    if (!formData.coin) return;
+    setIsFetchingLive(true);
+    let usdToBase = 1;
+    try {
+      const forexRes = await fetchWithRetry('https://api.exchangerate-api.com/v4/latest/USD');
+      if (forexRes && forexRes.ok) usdToBase = parseFloat((await forexRes.json()).rates[baseCurrency]) || 1;
+      
+      const upperSym = formData.coin.toUpperCase();
+      const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || { symbol: upperSym, id: formData.coin.toLowerCase() };
+      const searchId = dbCoin.id || upperSym.toLowerCase();
+      const fallback = dbCoin.fallbackPrice ? parseFloat(dbCoin.fallbackPrice) : 0;
+      
+      let priceInUsd = 0;
+      if (['ROX', 'CTC'].includes(upperSym)) priceInUsd = fallback > 0 ? fallback : 1.00;
+      else if (dbCoin.fetchMode === 'contract' && dbCoin.contractAddress) {
+        const dexRes = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${dbCoin.contractAddress}`);
+        if (dexRes && dexRes.ok) { const dexData = await dexRes.json(); if (dexData.pairs?.length > 0) priceInUsd = parseFloat(dexData.pairs[0].priceUsd); }
+      } else {
+        const cgRes = await fetchWithRetry(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
+        if (cgRes && cgRes.ok) { const cgJson = await cgRes.json(); priceInUsd = cgJson[searchId]?.usd || 0; }
+      }
+
+      if (!priceInUsd) {
+        const bRes = await fetchWithRetry(`https://api.binance.com/api/v3/ticker/price?symbol=${upperSym}USDT`);
+        if (bRes && bRes.ok) priceInUsd = parseFloat((await bRes.json()).price);
+      }
+
+      if (!priceInUsd && fallback > 0) priceInUsd = fallback;
+      
+      if (priceInUsd) setFormData(prev => ({ ...prev, entryPrice: (priceInUsd * usdToBase).toFixed(6).replace(/\.?0+$/, '') }));
+    } catch (error) { 
+      alert("Network Error! Could not fetch live price."); 
+    } finally { setIsFetchingLive(false); }
+  };
 
   const platformRankings = useMemo(() => {
     const stats = {};
@@ -366,12 +406,12 @@ const MicroEarn = () => {
     const microRecord = { 
       platform: formData.platform, methods: formData.methods, destinationWallet: formData.destinationWallet, 
       coin: formData.coin, withdrawnAmount: wQty, receivedAmount: rQty, fee: wQty - rQty, 
-      earnedBaseValue: finalBaseValue, date: formattedDate, timestamp, linkedRecordId: uniqueId 
+      earnedBaseValue: finalBaseValue, date: formData.date, timestamp, linkedRecordId: uniqueId 
     };
     
     const cryptoRecord = { 
       type: 'in', coin: formData.coin, quantity: rQty, platform: formData.destinationWallet, 
-      reason: `Withdrawal: ${formData.platform}`, referenceNo: uniqueId, date: formattedDate, 
+      reason: `Withdrawal: ${formData.platform}`, referenceNo: uniqueId, date: formData.date.split('T')[0], 
       timestamp, isMicroEarn: true, linkId: uniqueId 
     };
     
@@ -379,7 +419,7 @@ const MicroEarn = () => {
       title: `Yield: ${formData.platform}`, category: "Crypto APR / Yield", vault: 'crypto', 
       subWallet: formData.destinationWallet, cryptoPlatform: formData.destinationWallet, asset: formData.coin, 
       amount: rQty, exchangeRate: effectiveExchangeRate, finalBaseAmount: finalBaseValue, 
-      date: formattedDate, timestamp, linkId: uniqueId, isSplit: false 
+      date: formData.date.split('T')[0], timestamp, linkId: uniqueId, isSplit: false 
     };
     
     try {
@@ -410,7 +450,7 @@ const MicroEarn = () => {
     setFormData({ 
       platform: rec.platform, methods: rec.methods || [], destinationWallet: rec.destinationWallet, 
       coin: rec.coin, withdrawnAmount: rec.withdrawnAmount, receivedAmount: rec.receivedAmount, 
-      date: rec.date + 'T12:00', linkedRecordId: rec.linkedRecordId || '' 
+      date: rec.date, linkedRecordId: rec.linkedRecordId || '', entryPrice: ''
     }); 
     setEditingId(rec.id); 
     setIsModalOpen(true); 
@@ -442,7 +482,7 @@ const MicroEarn = () => {
 
   const openModal = () => { 
     setEditingId(null); setIsCustomPlatform(false); setIsCustomWallet(false); 
-    setFormData({ platform: microEarnPlatforms[0], methods: [], destinationWallet: popularCryptoWallets[0], coin: availableCryptos[0] || 'USDT', withdrawnAmount: '', receivedAmount: '', date: localTime, linkedRecordId: '' }); 
+    setFormData({ platform: microEarnPlatforms[0], methods: [], destinationWallet: popularCryptoWallets[0], coin: availableCryptos[0] || 'USDT', withdrawnAmount: '', receivedAmount: '', date: getLocalISOString(), linkedRecordId: '', entryPrice: '' }); 
     setIsModalOpen(true); 
   };
   
@@ -515,15 +555,15 @@ const MicroEarn = () => {
                     <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
                       <td className="p-4 pl-6 min-w-[200px]">
                         <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 p-0.5 flex items-center justify-center border"><MarketIcon symbol={rec.coin} apiImage={null} customLogo={coinObj?.logo} /></div>
-                          <div className="min-w-0"><p className="font-black dark:text-white text-sm truncate">{rec.platform}</p><p className="text-[9px] font-bold text-slate-500 mt-0.5">{formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date}</p></div>
+                          <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 p-0.5 flex items-center justify-center border border-slate-200 dark:border-slate-700 shrink-0"><LogoRenderer symbol={rec.coin} apiImage={null} logoUrl={coinObj?.logo} bg={coinObj?.bg} color={coinObj?.color} /></div>
+                          <div className="min-w-0"><p className="font-black dark:text-white text-sm truncate">{rec.platform}</p><p className="text-[9px] font-bold text-slate-500 mt-0.5">{formatGlobalDate && rec.date ? formatGlobalDate(rec.date.split('T')[0], 'short') : rec.date}</p></div>
                         </div>
                       </td>
                       <td className="p-4 min-w-[150px]"><div className="flex flex-wrap gap-1">{(rec.methods || []).map((m, i) => <span key={i} className="text-[8px] px-1.5 py-0.5 bg-yellow-50 dark:bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 font-bold rounded border border-yellow-200/50 dark:border-yellow-500/20">{m}</span>)}</div></td>
                       <td className="p-4">{rec.daysSinceLast !== null ? <p className={`text-xs font-black ${rec.daysSinceLast > 15 ? 'text-rose-500' : 'text-emerald-500'}`}>{rec.daysSinceLast} days</p> : <span className="text-xs font-bold text-slate-400">First Time</span>}</td>
                       <td className="p-4 text-right"><p className="text-sm font-black text-slate-800 dark:text-white">{currencySymbol}{(rec.currentLiveBaseAmount || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p></td>
                       <td className="p-4 text-right"><p className="font-black text-emerald-600 dark:text-emerald-400 text-sm">+{rec.receivedAmount} <span className="text-[10px] text-slate-500">{rec.coin}</span></p><p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">To {rec.destinationWallet}</p></td>
-                      <td className="p-4 pr-6"><div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => handleEdit(rec)} className="p-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-500 hover:bg-blue-100 rounded-xl transition-all shadow-sm border border-blue-200 dark:border-blue-500/30"><HiOutlinePencil size={14}/></button><button onClick={() => initiateDelete(rec)} className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-500 hover:bg-rose-100 rounded-xl transition-all shadow-sm border border-rose-200 dark:border-rose-500/30"><HiOutlineTrash size={14}/></button></div></td>
+                      <td className="p-4 pr-6"><div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => handleEdit(rec)} className="p-2.5 bg-white dark:bg-slate-800 text-slate-500 hover:text-blue-500 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-500 dark:hover:text-blue-400 rounded-xl transition-all shadow-sm"><HiOutlinePencil size={14}/></button><button onClick={() => initiateDelete(rec)} className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-500/20 border border-rose-100 dark:border-rose-500/30 rounded-xl transition-all shadow-sm"><HiOutlineTrash size={14}/></button></div></td>
                     </tr>
                   );
                 })}
@@ -629,9 +669,22 @@ const MicroEarn = () => {
                 </div>
               </div>
 
+              <div className="p-4 bg-blue-50/50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/50 rounded-2xl space-y-3 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-black text-blue-700 dark:text-blue-400 uppercase tracking-widest flex items-center gap-1"><FaCoins/> Entry Price ({currencySymbol})</label>
+                  <button type="button" onClick={fetchLivePriceForForm} disabled={isFetchingLive} className="text-[10px] font-black bg-blue-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-50 hover:bg-blue-700 transition-colors shadow-sm">
+                    <HiOutlineRefresh className={isFetchingLive ? "animate-spin" : ""} size={14} /> Fetch Live
+                  </button>
+                </div>
+                <input type="number" step="any" required value={formData.entryPrice} onChange={(e) => setFormData({...formData, entryPrice: e.target.value})} placeholder="Average buy price..." className="w-full p-4 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-700/50 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm" />
+              </div>
+
               <div>
-                <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Date & Time</label>
-                <input type="datetime-local" required value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none shadow-sm" />
+                <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1 flex justify-between">
+                  <span>Date & Time</span>
+                  <span className="text-amber-600 dark:text-amber-400">{formatGlobalDate && formData.date ? formatGlobalDate(formData.date.split('T')[0], 'short') : ''}</span>
+                </label>
+                <input type="datetime-local" required value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none shadow-sm focus:ring-2 focus:ring-amber-500/50" />
               </div>
 
               <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-2">
@@ -648,7 +701,7 @@ const MicroEarn = () => {
       {/* 🔐 DELETE SECURITY MODAL */}
       {deleteContext && (
         <div className="fixed inset-0 z-[500] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 pt-[100px] md:pt-[120px] animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl p-8 border border-rose-200 dark:border-rose-900/50 relative overflow-hidden animate-in slide-in-from-bottom-10 sm:zoom-in-95">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl p-8 border border-rose-200 dark:border-rose-900/50 relative overflow-hidden max-h-[calc(100dvh-6rem)] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95">
             <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-rose-500 to-pink-500"></div>
             <div className="flex flex-col items-center text-center mb-6">
               <div className="w-16 h-16 bg-rose-100 text-rose-600 dark:bg-rose-500/20 rounded-2xl flex items-center justify-center text-3xl mb-4 shadow-inner border border-rose-200 dark:border-rose-500/30"><HiOutlineLockClosed /></div>
