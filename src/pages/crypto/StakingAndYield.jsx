@@ -80,6 +80,7 @@ const StakingAndYield = () => {
   const [livePrices, setLivePrices] = useState({});
   const [fiatRate, setFiatRate] = useState(1);
   const [isMarketSyncing, setIsMarketSyncing] = useState(true);
+  const [isFetchingLive, setIsFetchingLive] = useState(false);
   
   const [isStakeModalOpen, setIsStakeModalOpen] = useState(false);
   const [isClaimModalOpen, setIsClaimModalOpen] = useState(false);
@@ -91,14 +92,14 @@ const StakingAndYield = () => {
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
 
-  const todayDate = new Date().toISOString().split('T')[0];
+  const localTime = new Date().toISOString().substring(0, 16);
   
   const cryptoSymbols = useMemo(() => selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean), [selectedCryptos]);
   const activeCryptos = cryptoSymbols.length > 0 ? cryptoSymbols : ['USDT', 'BNB', 'FEY', 'BTC'];
   const rewardOptions = Array.from(new Set([...activeCryptos, 'CTC', 'USDT']));
 
-  const [formData, setFormData] = useState({ earningType: 'stake', coin: activeCryptos[0], rewardCoin: rewardOptions[0], poolCoin2: activeCryptos[1] || 'USDT', platform: stakingPlatforms[0], principalAmount: '', poolPrincipal2: '', apr: '', lockPeriod: 'Flexible', customLockDays: '', startDate: todayDate });
-  const [claimData, setClaimData] = useState({ claimCoin: '', amountClaimed: '', platformFeePercent: '10', date: todayDate, multipleClaims: [] });
+  const [formData, setFormData] = useState({ earningType: 'stake', coin: activeCryptos[0], rewardCoin: rewardOptions[0], poolCoin2: activeCryptos[1] || 'USDT', platform: stakingPlatforms[0], principalAmount: '', poolPrincipal2: '', apr: '', lockPeriod: 'Flexible', customLockDays: '', startDate: localTime, entryPrice: '' });
+  const [claimData, setClaimData] = useState({ claimCoin: '', amountClaimed: '', platformFeePercent: '10', date: localTime, multipleClaims: [] });
 
   useEffect(() => { 
     if (!user) return; 
@@ -213,6 +214,42 @@ const StakingAndYield = () => {
     }
   }, [isLoading, fullDatabase, fetchMarketData]);
 
+  const fetchLivePriceForForm = async () => {
+    if (!formData.coin) return;
+    setIsFetchingLive(true);
+    let usdToBase = 1;
+    try {
+      const forexRes = await fetchWithRetry('https://api.exchangerate-api.com/v4/latest/USD');
+      if (forexRes && forexRes.ok) usdToBase = parseFloat((await forexRes.json()).rates[baseCurrency]) || 1;
+      
+      const upperSym = formData.coin.toUpperCase();
+      const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || { symbol: upperSym, id: formData.coin.toLowerCase() };
+      const searchId = dbCoin.id || upperSym.toLowerCase();
+      const fallback = dbCoin.fallbackPrice ? parseFloat(dbCoin.fallbackPrice) : 0;
+      
+      let priceInUsd = 0;
+      if (['ROX', 'CTC'].includes(upperSym)) priceInUsd = fallback > 0 ? fallback : 1.00;
+      else if (dbCoin.fetchMode === 'contract' && dbCoin.contractAddress) {
+        const dexRes = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${dbCoin.contractAddress}`);
+        if (dexRes && dexRes.ok) { const dexData = await dexRes.json(); if (dexData.pairs?.length > 0) priceInUsd = parseFloat(dexData.pairs[0].priceUsd); }
+      } else {
+        const cgRes = await fetchWithRetry(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
+        if (cgRes && cgRes.ok) { const cgJson = await cgRes.json(); priceInUsd = cgJson[searchId]?.usd || 0; }
+      }
+
+      if (!priceInUsd) {
+        const bRes = await fetchWithRetry(`https://api.binance.com/api/v3/ticker/price?symbol=${upperSym}USDT`);
+        if (bRes && bRes.ok) priceInUsd = parseFloat((await bRes.json()).price);
+      }
+
+      if (!priceInUsd && fallback > 0) priceInUsd = fallback;
+      
+      if (priceInUsd) setFormData(prev => ({ ...prev, entryPrice: (priceInUsd * usdToBase).toFixed(6).replace(/\.?0+$/, '') }));
+    } catch (error) { 
+      alert("Network Error! Could not fetch live price."); 
+    } finally { setIsFetchingLive(false); }
+  };
+
   const getLivePrice = (s) => {
       if(!s || s === 'N/A') return 0;
       const price = livePrices[s?.toUpperCase()];
@@ -266,7 +303,7 @@ const StakingAndYield = () => {
       earningType: formData.earningType, platform: formData.platform, 
       apr: formData.earningType === 'affiliate' ? 0 : parseFloat(formData.apr), 
       lockPeriod: formData.lockPeriod === 'Custom' ? formData.customLockDays : formData.lockPeriod, 
-      startDate: formData.startDate, timestamp: editingId ? stakes.find(s=>s.id===editingId)?.timestamp : new Date(formData.startDate).getTime(), 
+      startDate: formData.startDate.split('T')[0], timestamp: editingId ? stakes.find(s=>s.id===editingId)?.timestamp : new Date(formData.startDate).getTime(), 
       coin: formData.earningType === 'affiliate' ? 'N/A' : formData.coin, 
       principalAmount: formData.earningType === 'affiliate' ? 0 : parseFloat(formData.principalAmount), 
       rewardCoin: formData.earningType === 'affiliate' ? 'Variable' : formData.earningType === 'pool' ? 'Dual' : formData.rewardCoin 
@@ -282,6 +319,9 @@ const StakingAndYield = () => {
   const handleClaimReward = async (e) => { 
     e.preventDefault(); if (!user || !activeClaimStake) return; setIsSaving(true); 
     const fee = parseFloat(claimData.platformFeePercent)||0; const ts = new Date(claimData.date).getTime(); 
+    const isAffiliate = activeClaimStake.earningType === 'affiliate';
+    const sourceString = isAffiliate ? 'Affiliate Network' : (activeClaimStake.earningType === 'pool' ? 'Liquidity Pool' : `Staking (${activeClaimStake.apr}%)`);
+
     try { 
       let claims = activeClaimStake.earningType === 'affiliate' ? claimData.multipleClaims.filter(c=>c.amountClaimed>0&&c.claimCoin) : [{ claimCoin: claimData.claimCoin, amountClaimed: parseFloat(claimData.amountClaimed) }]; 
       for (const c of claims) { 
@@ -289,8 +329,8 @@ const StakingAndYield = () => {
         const pr = getLivePrice(c.claimCoin) / fiatRate; // Convert back to USD for proper logging
         const uid = `YIELD_${ts}_${Math.random().toString(36).slice(2,8)}`; 
         await setDoc(doc(db, "users", user.uid, "stakingLogs", activeClaimStake.id), { claimedHistory: arrayUnion({ amount: net, coin: c.claimCoin, date: claimData.date, timestamp: ts }) }, { merge: true }); 
-        await addDoc(collection(db, "users", user.uid, "cryptoWalletLogs"), { type: 'in', coin: c.claimCoin, quantity: net, platform: activeClaimStake.platform, reason: 'Yield Reward', referenceNo: uid, date: claimData.date, timestamp: ts, stakeId: activeClaimStake.id }); 
-        await addDoc(collection(db, "users", user.uid, "incomeLogs"), { title: `Yield: ${c.claimCoin}`, category: "Crypto Staking Rewards", vault: 'crypto', asset: c.claimCoin, amount: net, exchangeRate: pr, finalBaseAmount: net*pr*fiatRate, date: claimData.date, timestamp: ts, linkedIncomeId: uid, stakeId: activeClaimStake.id }); 
+        await addDoc(collection(db, "users", user.uid, "cryptoWalletLogs"), { type: 'in', coin: c.claimCoin, quantity: net, platform: activeClaimStake.platform, reason: `${sourceString} Reward`, referenceNo: uid, date: claimData.date, timestamp: ts, stakeId: activeClaimStake.id, isMicroEarn: true, linkId: uid }); 
+        await addDoc(collection(db, "users", user.uid, "incomeLogs"), { title: `Yield: ${c.claimCoin}`, category: "Crypto Staking Rewards", vault: 'crypto', subWallet: activeClaimStake.platform, cryptoPlatform: activeClaimStake.platform, asset: c.claimCoin, amount: net, exchangeRate: pr, finalBaseAmount: net*pr*fiatRate, date: claimData.date, timestamp: ts, linkedIncomeId: uid, stakeId: activeClaimStake.id, isMicroEarn: true }); 
       } 
       closeClaimModal(); 
     } catch(e) { alert("Failed"); } finally { setIsSaving(false); } 
@@ -299,7 +339,7 @@ const StakingAndYield = () => {
   const executeSecureDelete = async (e) => { 
     e.preventDefault(); if (!pinInput.trim()) return setPinError("Enter PIN."); setIsVerifying(true); 
     try { 
-      const sn = await getDoc(doc(db, "users", user.uid)); const hp = await hashPIN(pinInput.trim()); const sp = sn.data()?.security?.pinHash || sn.data()?.securityPin; 
+      const sn = await getDoc(doc(db, "users", user.uid)); const hp = await hashPIN(pinInput.trim()); const sp = sn.data()?.security?.pinHash || sn.data()?.securityPin || sn.data()?.pin; 
       if (sp && sp !== hp && sp !== pinInput.trim()) { setPinError("Incorrect PIN."); setIsVerifying(false); return; } 
       await deleteDoc(doc(db, "users", user.uid, "stakingLogs", deleteContext.id)); 
       for (const cn of ["cryptoWalletLogs", "incomeLogs"]) { const qs = await getDocs(query(collection(db, "users", user.uid, cn), where("stakeId", "==", deleteContext.id))); qs.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, cn, d.id))); } 
@@ -307,9 +347,9 @@ const StakingAndYield = () => {
     } catch(e) { setPinError("Error."); } finally { setIsVerifying(false); } 
   };
 
-  const closeStakeModal = () => { setIsStakeModalOpen(false); setEditingId(null); setFormData({ earningType: 'stake', coin: activeCryptos[0], rewardCoin: rewardOptions[0], poolCoin2: activeCryptos[1]||'USDT', platform: stakingPlatforms[0], principalAmount: '', poolPrincipal2: '', apr: '', lockPeriod: 'Flexible', customLockDays: '', startDate: todayDate }); };
-  const closeClaimModal = () => { setIsClaimModalOpen(false); setActiveClaimStake(null); setClaimData({ claimCoin: '', amountClaimed: '', platformFeePercent: '10', date: todayDate, multipleClaims: [] }); };
-  const openClaimModalFor = (rec) => { setActiveClaimStake(rec); setClaimData({ claimCoin: rec.earningType==='pool'?rec.coin:(rec.rewardCoin||rec.coin), amountClaimed: '', platformFeePercent: '10', date: todayDate, multipleClaims: rec.earningType==='affiliate'?[{ claimCoin: activeCryptos[0]||'BTC', amountClaimed: '' }]:[] }); setIsClaimModalOpen(true); };
+  const closeStakeModal = () => { setIsStakeModalOpen(false); setEditingId(null); setFormData({ earningType: 'stake', coin: activeCryptos[0], rewardCoin: rewardOptions[0], poolCoin2: activeCryptos[1]||'USDT', platform: stakingPlatforms[0], principalAmount: '', poolPrincipal2: '', apr: '', lockPeriod: 'Flexible', customLockDays: '', startDate: localTime }); };
+  const closeClaimModal = () => { setIsClaimModalOpen(false); setActiveClaimStake(null); setClaimData({ claimCoin: '', amountClaimed: '', platformFeePercent: '10', date: localTime, multipleClaims: [] }); };
+  const openClaimModalFor = (rec) => { setActiveClaimStake(rec); setClaimData({ claimCoin: rec.earningType==='pool'?rec.coin:(rec.rewardCoin||rec.coin), amountClaimed: '', platformFeePercent: '10', date: localTime, multipleClaims: rec.earningType==='affiliate'?[{ claimCoin: activeCryptos[0]||'BTC', amountClaimed: '' }]:[] }); setIsClaimModalOpen(true); };
   const addClaimRow = () => setClaimData(p=>({...p, multipleClaims:[...p.multipleClaims,{claimCoin:activeCryptos[0],amountClaimed:''}]}));
   const updateClaimRow = (i,f,v) => { const u=[...claimData.multipleClaims]; u[i][f]=v; setClaimData(p=>({...p,multipleClaims:u})); };
   const removeClaimRow = (i) => setClaimData(p=>({...p,multipleClaims:p.multipleClaims.filter((_,j)=>j!==i)}));
@@ -323,7 +363,7 @@ const StakingAndYield = () => {
         {/* Premium Header */}
         <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(147,51,234,0.1),transparent_70%)]" />
-          <div className="absolute right-0 top-0 w-64 h-64 bg-purple-500/5 rounded-full blur-3xl" />
+          <div className="absolute right-0 top-0 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl" />
           <div className="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
               <div className="flex items-center gap-3 mb-3">
@@ -347,7 +387,7 @@ const StakingAndYield = () => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <div className="p-8 bg-gradient-to-br from-slate-900 to-slate-800 rounded-[2rem] shadow-xl border border-slate-700/50 relative overflow-hidden md:col-span-2">
             <div className="absolute right-[-5%] top-[-10%] opacity-5 text-white blur-[2px]"><FaPiggyBank size={250}/></div>
-            <p className="text-[11px] font-black text-purple-400 uppercase tracking-widest mb-2 relative z-10">Total Value Locked (TVL)</p>
+            <p className="text-[11px] font-black text-purple-400 uppercase tracking-widest mb-2 relative z-10 flex items-center gap-1">Total Value Locked (TVL) {isMarketSyncing && <HiOutlineRefresh className="animate-spin text-purple-400" size={10} />}</p>
             <h2 className="text-5xl md:text-6xl font-black text-white tracking-tighter relative z-10 break-words">{currencySymbol}{analytics.totalValueLocked.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
             <div className="mt-4 inline-flex items-center gap-2 bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 relative z-10">
               <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
@@ -494,7 +534,7 @@ const StakingAndYield = () => {
                             <HiOutlineGift size={14}/> Harvest
                           </button>
                           <button onClick={() => { 
-                              setFormData({ earningType: rec.earningType || 'stake', coin: rec.coin, rewardCoin: rec.rewardCoin || rec.coin, poolCoin2: rec.poolCoin2 || '', platform: rec.platform, principalAmount: rec.principalAmount, poolPrincipal2: rec.poolPrincipal2 || '', apr: rec.apr, lockPeriod: ['Flexible','15','30','60'].includes(rec.lockPeriod) ? rec.lockPeriod : 'Custom', customLockDays: ['Flexible','15','30','60'].includes(rec.lockPeriod) ? '' : rec.lockPeriod, startDate: rec.startDate }); 
+                              setFormData({ earningType: rec.earningType || 'stake', coin: rec.coin, rewardCoin: rec.rewardCoin || rec.coin, poolCoin2: rec.poolCoin2 || '', platform: rec.platform, principalAmount: rec.principalAmount, poolPrincipal2: rec.poolPrincipal2 || '', apr: rec.apr, lockPeriod: ['Flexible','15','30','60'].includes(rec.lockPeriod) ? rec.lockPeriod : 'Custom', customLockDays: ['Flexible','15','30','60'].includes(rec.lockPeriod) ? '' : rec.lockPeriod, startDate: rec.startDate + 'T12:00' }); 
                               setEditingId(rec.id); setIsStakeModalOpen(true); 
                           }} className="p-2.5 bg-white dark:bg-slate-800 text-slate-500 hover:text-blue-500 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-500 dark:hover:text-blue-400 rounded-xl transition-all shadow-sm"><HiOutlinePencil size={16} /></button>
                           <button onClick={() => { setDeleteContext(rec); setPinInput(''); setPinError(''); }} className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-500/20 border border-rose-100 dark:border-rose-500/30 rounded-xl transition-all shadow-sm"><HiOutlineTrash size={16} /></button>
@@ -609,9 +649,10 @@ const StakingAndYield = () => {
               <div className="space-y-2">
                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex justify-between ml-1">
                    <span>Start Date</span>
-                   <span className="text-purple-600 dark:text-purple-400">{formatGlobalDate ? formatGlobalDate(formData.startDate, 'short') : ''}</span>
+                   <span className="text-purple-600 dark:text-purple-400">{formatGlobalDate && formData.startDate ? formatGlobalDate(formData.startDate.split('T')[0], 'short') : ''}</span>
                  </label>
-                 <input type="date" required value={formData.startDate} onChange={(e) => setFormData({...formData, startDate: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none shadow-sm focus:ring-2 focus:ring-purple-500/50" />
+                 {/* 🚀 FIXED: Reverted to datetime-local for accurate timestamp editing */}
+                 <input type="datetime-local" required value={formData.startDate} onChange={(e) => setFormData({...formData, startDate: e.target.value})} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none shadow-sm focus:ring-2 focus:ring-purple-500/50" />
               </div>
 
               <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-2">
@@ -690,7 +731,8 @@ const StakingAndYield = () => {
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Harvest Date</label>
-                  <input type="date" required value={claimData.date} onChange={(e) => setClaimData({...claimData, date: e.target.value})} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-sm" />
+                  {/* 🚀 FIXED: Reverted to datetime-local for accurate timestamp editing */}
+                  <input type="datetime-local" required value={claimData.date} onChange={(e) => setClaimData({...claimData, date: e.target.value})} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-sm" />
                 </div>
               </div>
 
