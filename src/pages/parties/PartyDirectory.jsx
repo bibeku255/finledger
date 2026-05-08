@@ -15,17 +15,24 @@ import {
   HiOutlineDocumentText, HiOutlineTable, HiOutlinePhone,
   HiOutlineUser
 } from 'react-icons/hi';
+
 import { 
   FaUserCircle, FaPhoneAlt, FaUniversity, 
   FaArrowUp, FaArrowDown, FaUserFriends,
   FaHandHoldingHeart, FaHandHoldingUsd, FaWallet, FaBitcoin
 } from 'react-icons/fa'; 
 
+// 🚀 GLOBALS
+import { fiatFlagMap } from '../../utils/marketConstants';
+
 const cryptoPlatformsList = [
   "CoinDCX", "WazirX", "ZebPay", "Mudrex", "SunCrypto",
   "Binance", "Coinbase", "Bybit", "KuCoin", "OKX", "Kraken", "Mexc", "Gate.io",
   "FaucetPay", "Trust Wallet", "MetaMask", "Phantom", "NC Wallet", "Payeer",
-  "Hardware Wallet (Ledger/Trezor)", "Other Wallet/Site"
+  "Hardware Wallet (Ledger/Trezor)", 
+  "CoinPayU", "Cointiply", "FreeBitcoin", "FireFaucet", "PipeFlare", 
+  "GlobalHive", "AdBTC", "Viefaucet", "DutchyCorp", "LarvelFaucet", 
+  "Coinpot", "RollerCoin", "Other Wallet/Site"
 ];
 
 const hashPIN = async (pinCode) => {
@@ -35,7 +42,6 @@ const hashPIN = async (pinCode) => {
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
-// 🚀 Premium Party Card Component
 const PartyCard = ({ party, onEdit, onDelete, onClick, currencySymbol, formatGlobalDate }) => {
   const getStatusColor = () => {
     if (party.status === 'bad_debt') return 'from-rose-500/20 to-rose-600/20 border-rose-500/30';
@@ -47,13 +53,13 @@ const PartyCard = ({ party, onEdit, onDelete, onClick, currencySymbol, formatGlo
   return (
     <div 
       onClick={onClick}
-      className={`group relative overflow-hidden rounded-2xl p-5 bg-white dark:bg-slate-900 border shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer ${getStatusColor()}`}
+      className={`group relative overflow-hidden rounded-[1.5rem] p-5 bg-white dark:bg-slate-900 border shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer ${getStatusColor()}`}
     >
-      <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 to-cyan-500/0 group-hover:from-blue-500/5 group-hover:to-cyan-500/5 transition-all duration-500" />
+      <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 to-cyan-500/0 group-hover:from-blue-500/5 group-hover:to-cyan-500/5 transition-all duration-500 pointer-events-none" />
       
       <div className="relative z-10">
         <div className="flex items-start justify-between mb-4">
-          <div className="flex items-start gap-3">
+          <div className="flex items-start gap-3 min-w-0">
             <div className={`relative w-12 h-12 rounded-xl flex items-center justify-center shrink-0 shadow-lg group-hover:scale-105 transition-transform duration-300 ${
               party.status === 'bad_debt' ? 'bg-rose-100 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400' : 
               party.accountType === 'loan' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400' : 
@@ -61,34 +67,34 @@ const PartyCard = ({ party, onEdit, onDelete, onClick, currencySymbol, formatGlo
             }`}>
               {party.accountType === 'loan' ? <FaUniversity size={22} /> : <FaUserCircle size={28} />}
             </div>
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 pr-2">
               <h3 className="font-black text-slate-800 dark:text-white text-base leading-tight truncate capitalize">
                 {party.name}
               </h3>
               {party.accountType === 'loan' && (
-                <span className="inline-block bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400 text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded mt-1 shadow-sm">
+                <span className="inline-block bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400 text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded mt-1 shadow-sm border border-indigo-200 dark:border-indigo-500/30">
                   Formal Loan/EMI
                 </span>
               )}
               {party.phone && (
-                <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-1">
-                  <FaPhoneAlt size={8}/> {party.phone}
+                <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-1 truncate">
+                  <FaPhoneAlt className="shrink-0" size={8}/> <span className="truncate">{party.phone}</span>
                 </p>
               )}
             </div>
           </div>
           
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+          <div className="flex items-center gap-1 md:opacity-0 group-hover:opacity-100 transition-opacity duration-300 shrink-0">
             <button 
               onClick={(e) => { e.stopPropagation(); onEdit(party, e); }} 
-              className="p-2 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg transition-all border border-slate-200 dark:border-slate-700 shadow-sm"
+              className="p-2 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg transition-all border border-slate-300 dark:border-slate-700 shadow-sm active:scale-95"
               title="Edit Details"
             >
               <HiOutlinePencil size={16} />
             </button>
             <button 
               onClick={(e) => { e.stopPropagation(); onDelete(party, e); }} 
-              className="p-2 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-lg transition-all border border-slate-200 dark:border-slate-700 shadow-sm"
+              className="p-2 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-lg transition-all border border-slate-300 dark:border-slate-700 shadow-sm active:scale-95"
               title="Delete"
             >
               <HiOutlineTrash size={16} />
@@ -97,37 +103,37 @@ const PartyCard = ({ party, onEdit, onDelete, onClick, currencySymbol, formatGlo
         </div>
 
         <div className={`p-4 rounded-xl mt-2 backdrop-blur-sm border ${
-          party.status === 'bad_debt' ? 'bg-rose-50 dark:bg-rose-900/10 border-rose-200 dark:border-rose-800' : 
-          'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700'
+          party.status === 'bad_debt' ? 'bg-rose-50 dark:bg-rose-900/10 border-rose-300 dark:border-rose-800' : 
+          'bg-slate-50 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700'
         }`}>
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-[9px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+          <div className="flex flex-wrap items-center justify-between mb-1 gap-1">
+            <p className="text-[9px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest shrink-0">
               {party.status === 'bad_debt' ? 'Bad Debt / Defaulter' : 
                party.netBalance > 0 ? 'You will get' : 
                party.netBalance < 0 ? 'You will give' : 'Account Settled'}
             </p>
             {party.accountType === 'loan' && party.emiDueDate && party.netBalance !== 0 && (
-              <span className="text-indigo-600 dark:text-indigo-400 flex items-center gap-0.5 text-[9px] font-black">
+              <span className="text-indigo-700 dark:text-indigo-400 flex items-center gap-0.5 text-[9px] font-black shrink-0">
                 <HiOutlineCalendar size={12}/> 
                 Due: {formatGlobalDate ? formatGlobalDate(party.emiDueDate, 'short') : new Date(party.emiDueDate).getDate()}
               </span>
             )}
           </div>
-          <p className={`text-2xl font-black tracking-tight break-words ${
-            party.status === 'bad_debt' ? 'text-rose-600 dark:text-rose-400' : 
-            party.netBalance > 0 ? 'text-emerald-600 dark:text-emerald-400' : 
-            party.netBalance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500'
-          }`}>
+          <p className={`text-2xl font-black tracking-tight break-words truncate ${
+            party.status === 'bad_debt' ? 'text-rose-700 dark:text-rose-400' : 
+            party.netBalance > 0 ? 'text-emerald-700 dark:text-emerald-400' : 
+            party.netBalance < 0 ? 'text-rose-700 dark:text-rose-400' : 'text-slate-500'
+          }`} title={`${currencySymbol}${Math.abs(party.netBalance).toLocaleString()}`}>
             {currencySymbol}{Math.abs(party.netBalance).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
           </p>
         </div>
 
         <div className="flex items-center justify-between mt-3">
-          <div className="flex items-center gap-1 text-[9px] font-bold text-slate-400">
+          <div className="flex items-center gap-1 text-[9px] font-bold text-slate-500 dark:text-slate-400">
             <HiOutlineUser size={12} />
             {party.accountType === 'loan' ? 'Lender' : 'Contact'}
           </div>
-          <div className="text-blue-500 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0">
+          <div className="text-blue-500 md:opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0">
             <HiOutlineChevronRight size={16} />
           </div>
         </div>
@@ -151,6 +157,8 @@ const PartyDirectory = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('all'); 
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false); 
+  
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isFetchingRate, setIsFetchingRate] = useState(false);
@@ -161,14 +169,15 @@ const PartyDirectory = () => {
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [customUserCoins, setCustomUserCoins] = useState([]); 
+  
   const [existingVaultNames, setExistingVaultNames] = useState([]);
+  const [existingCryptoPlatforms, setExistingCryptoPlatforms] = useState([]);
 
-  // 🚀 FIXED: Added vault linking details to formData state
   const [formData, setFormData] = useState({
     name: '', phone: '', address: '', accountType: 'casual', 
     emiDueDate: '', emiAmount: '', initialBalanceType: 'none', 
     initialAmount: '', currency: baseCurrency, exchangeRate: 1,
-    vault: 'none', subWallet: '', cryptoPlatform: cryptoPlatformsList[0], isCustomPlatform: false
+    vault: 'none', subWallet: '', cryptoPlatform: '' 
   });
 
   useEffect(() => {
@@ -191,7 +200,6 @@ const PartyDirectory = () => {
         setCustomUserCoins(userSnap.data().customCoins);
       }
 
-      // Fetch existing vaults for autocomplete
       const qBank = query(collection(db, "users", user.uid, "bankWallet"));
       const snapBank = await getDocs(qBank);
       const qOnline = query(collection(db, "users", user.uid, "onlineWallet"));
@@ -200,6 +208,12 @@ const PartyDirectory = () => {
       snapBank.docs.forEach(d => { if(d.data().bankName) names.add(d.data().bankName) });
       snapOnline.docs.forEach(d => { if(d.data().walletName) names.add(d.data().walletName) });
       setExistingVaultNames(Array.from(names));
+
+      const qCrypto = query(collection(db, "users", user.uid, "cryptoWalletLogs"));
+      const snapCrypto = await getDocs(qCrypto);
+      const cryptoNames = new Set();
+      snapCrypto.docs.forEach(d => { if(d.data().platform) cryptoNames.add(d.data().platform) });
+      setExistingCryptoPlatforms(Array.from(cryptoNames));
     };
     fetchUserDataAndVaults();
   }, [user]);
@@ -283,11 +297,14 @@ const PartyDirectory = () => {
 
         if (!priceUsd) {
            try {
-              const binanceSymbol = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
-              const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`);
-              if (bRes.ok) {
-                const bData = await bRes.json();
-                priceUsd = searchId === 'tether' ? 1.00 : parseFloat(bData.price);
+              if (['USDT', 'USDC', 'DAI'].includes(upperSym)) {
+                  priceUsd = 1.00;
+              } else {
+                  const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${upperSym}USDT`);
+                  if (bRes.ok) {
+                    const bData = await bRes.json();
+                    priceUsd = parseFloat(bData.price);
+                  }
               }
            } catch(e) {}
         }
@@ -364,7 +381,6 @@ const PartyDirectory = () => {
           const formattedDate = new Date().toISOString().split('T')[0];
           const linkId = `PARTY_INIT_${timestamp}_${Math.floor(Math.random() * 1000)}`;
 
-          // Create Ledger Entry
           await addDoc(collection(db, "users", user.uid, "parties", docRef.id, "ledger"), {
             type: startingBalanceBase > 0 ? 'give' : 'get',
             amount: parseFloat(formData.initialAmount),
@@ -377,9 +393,9 @@ const PartyDirectory = () => {
             linkId: linkId
           });
 
-          // 🚀 SUPER LOGIC: Create Linked Vault Entry if User Opted In
+          // Link Vault Entry
           if (formData.vault !== 'none') {
-            const isOutflow = startingBalanceBase > 0; // Receivable (+): money went OUT to them. Payable (-): money came IN from them.
+            const isOutflow = startingBalanceBase > 0; 
             const typeStr = isOutflow ? 'out' : 'in';
             const actionStr = isOutflow ? 'Lent to' : 'Received from';
 
@@ -438,7 +454,7 @@ const PartyDirectory = () => {
       name: party.name, phone: party.phone || '', address: party.address || '',
       accountType: party.accountType || 'casual', emiDueDate: party.emiDueDate || '',
       emiAmount: party.emiAmount || '', initialBalanceType: 'none', initialAmount: '',
-      currency: baseCurrency, exchangeRate: 1, vault: 'none', subWallet: '', cryptoPlatform: cryptoPlatformsList[0], isCustomPlatform: false
+      currency: baseCurrency, exchangeRate: 1, vault: 'none', subWallet: '', cryptoPlatform: ''
     });
     setShowSuggestions(false);
     setIsModalOpen(true);
@@ -475,7 +491,7 @@ const PartyDirectory = () => {
       const snap = await getDocs(q);
       snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, "parties", deleteContext.id, "ledger", d.id)));
 
-      // 🚀 CRITICAL REVERSE ENGINEERING: Delete ANY linked Vault Entries!
+      // Reverse Linked Vault Entries
       const collectionsToCheck = ['bankWallet', 'cashWallet', 'onlineWallet', 'cryptoWalletLogs', 'expenseLogs', 'incomeLogs'];
       for (const colName of collectionsToCheck) {
         const vQ = query(collection(db, "users", user.uid, colName), where("linkedPartyId", "==", deleteContext.id));
@@ -492,19 +508,21 @@ const PartyDirectory = () => {
   };
 
   const handleDownloadReport = (format) => {
+    setIsExportMenuOpen(false);
     if (filteredParties.length === 0) return alert("No records found to download.");
     
     const reportData = filteredParties.map(p => ({
       name: p.name,
       type: p.accountType === 'loan' ? 'Formal Loan' : 'Casual Khata',
       phone: p.phone || 'N/A',
-      balance: `${p.netBalance > 0 ? '+' : ''}${currencySymbol}${p.netBalance.toFixed(2)}`,
+      balanceValue: Number(p.netBalance || 0), 
       status: p.status === 'bad_debt' ? 'Bad Debt' : p.netBalance === 0 ? 'Settled' : 'Active'
     }));
 
     const columns = [
       { header: 'Name', key: 'name' }, { header: 'Type', key: 'type' },
-      { header: 'Phone', key: 'phone' }, { header: 'Balance', key: 'balance' },
+      { header: 'Phone', key: 'phone' }, 
+      { header: `Net Balance (${currencySymbol})`, key: 'balanceValue', isNumeric: true },
       { header: 'Status', key: 'status' }
     ];
 
@@ -512,7 +530,7 @@ const PartyDirectory = () => {
     const reportTitle = `Smart Khata & Loans - Directory Report`;
 
     if (format === 'pdf') downloadPDFReport(reportData, columns, fileName, reportTitle);
-    else downloadExcelReport(reportData, columns, fileName);
+    else downloadExcelReport(reportData, columns, fileName, reportTitle);
   };
 
   const openModal = () => {
@@ -520,7 +538,7 @@ const PartyDirectory = () => {
     setFormData({ 
       name: '', phone: '', address: '', accountType: 'casual', emiDueDate: '', emiAmount: '', 
       initialBalanceType: 'none', initialAmount: '', currency: baseCurrency, exchangeRate: 1,
-      vault: 'none', subWallet: existingVaultNames[0] || '', cryptoPlatform: cryptoPlatformsList[0], isCustomPlatform: false
+      vault: 'none', subWallet: existingVaultNames[0] || '', cryptoPlatform: existingCryptoPlatforms[0] || ''
     });
     setShowSuggestions(false);
     setIsModalOpen(true);
@@ -536,12 +554,14 @@ const PartyDirectory = () => {
     <div className="w-full h-auto pb-24">
       <div className="pt-8 md:pt-12 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 md:px-6">
         
-        {/* Premium Header */}
-        <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.1),transparent_70%)]" />
-          <div className="absolute right-0 top-0 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl" />
+        {/* Premium Header (Z-Index isolated for Dropdown) */}
+        <div className="relative rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50 z-20">
+          <div className="absolute inset-0 overflow-hidden rounded-[2.5rem] pointer-events-none">
+             <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.1),transparent_70%)]" />
+             <div className="absolute right-0 top-0 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl" />
+          </div>
           
-          <div className="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <div className="relative z-50 flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-2xl flex items-center justify-center shadow-lg">
@@ -554,43 +574,50 @@ const PartyDirectory = () => {
               </div>
             </div>
             
-            <div className="flex items-center gap-3">
-              <div className="relative group hidden sm:block">
-                <button className="flex items-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10">
+            {/* 🚀 FIXED: Mobile Responsive Grid for Buttons */}
+            <div className="grid grid-cols-2 sm:flex sm:flex-nowrap items-center gap-2 w-full md:w-auto mt-4 md:mt-0">
+              {/* EXPORT MENU FIX: High Z-Index, Absolute Positioning */}
+              <div className="relative w-full sm:w-auto z-50">
+                <button 
+                  onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                  onBlur={() => setTimeout(() => setIsExportMenuOpen(false), 200)}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 shadow-sm"
+                >
                   <HiOutlineDownload size={16} /> Export
                 </button>
-                <div className="absolute top-full right-0 mt-2 w-40 bg-slate-800 border border-slate-700 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all flex flex-col p-1 z-50">
-                  <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg">
-                    <HiOutlineDocumentText className="text-rose-400" size={16}/> PDF Document
-                  </button>
-                  <button onClick={() => handleDownloadReport('excel')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg">
-                    <HiOutlineTable className="text-emerald-400" size={16}/> Excel (CSV)
-                  </button>
-                </div>
+                {isExportMenuOpen && (
+                  <div className="absolute top-[110%] right-0 md:left-0 w-full md:w-40 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl flex flex-col p-1.5 z-[100] animate-in fade-in zoom-in-95">
+                    <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg transition-colors">
+                      <HiOutlineDocumentText className="text-rose-400" size={16}/> PDF Document
+                    </button>
+                    <button onClick={() => handleDownloadReport('excel')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg transition-colors">
+                      <HiOutlineTable className="text-emerald-400" size={16}/> Excel (CSV)
+                    </button>
+                  </div>
+                )}
               </div>
               
               <button 
                 onClick={openModal} 
-                className="flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white px-5 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-blue-500/30"
+                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white px-5 py-3.5 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-blue-500/30"
               >
                 <HiOutlineUserAdd size={18} /> Add Account
               </button>
             </div>
           </div>
           
-          {/* Stats Row */}
-          <div className="relative z-10 grid grid-cols-3 gap-3 mt-6">
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
+          <div className="relative z-30 grid grid-cols-2 md:grid-cols-3 gap-3 mt-6">
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 overflow-hidden">
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">To Receive</p>
-              <p className="text-sm md:text-lg font-black text-emerald-400 break-words">{currencySymbol}{totalReceivables.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+              <p className="text-lg md:text-xl font-black text-emerald-400 truncate" title={`${currencySymbol}${totalReceivables.toLocaleString()}`}>{currencySymbol}{totalReceivables.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
             </div>
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 overflow-hidden">
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">To Pay</p>
-              <p className="text-sm md:text-lg font-black text-rose-400 break-words">{currencySymbol}{totalPayables.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+              <p className="text-lg md:text-xl font-black text-rose-400 truncate" title={`${currencySymbol}${totalPayables.toLocaleString()}`}>{currencySymbol}{totalPayables.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
             </div>
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 col-span-2 md:col-span-1 overflow-hidden">
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Active Accounts</p>
-              <p className="text-sm md:text-lg font-black text-white">{activeParties}</p>
+              <p className="text-lg md:text-xl font-black text-white truncate">{activeParties}</p>
             </div>
           </div>
         </div>
@@ -666,7 +693,7 @@ const PartyDirectory = () => {
         )}
       </div>
 
-      {/* 🚀 Add/Edit Modal (With Vault Linking) */}
+      {/* 🚀 Add/Edit Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90dvh] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-300 dark:border-slate-700">
@@ -684,15 +711,15 @@ const PartyDirectory = () => {
             <form onSubmit={handleSaveParty} className="p-6 space-y-5 flex-1 overflow-y-auto custom-scrollbar">
               <div className="flex p-1.5 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
                 <button type="button" onClick={() => setFormData({...formData, accountType: 'casual'})} className={`flex-1 py-2.5 text-xs font-black uppercase tracking-widest rounded-lg transition-all ${
-                  formData.accountType === 'casual' ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                  formData.accountType === 'casual' ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-400 shadow-sm' : 'text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300'
                 }`}>Casual Khata</button>
                 <button type="button" onClick={() => setFormData({...formData, accountType: 'loan'})} className={`flex-1 py-2.5 text-xs font-black uppercase tracking-widest rounded-lg transition-all ${
-                  formData.accountType === 'loan' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                  formData.accountType === 'loan' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300'
                 }`}>Formal Loan/EMI</button>
               </div>
 
               <div className="space-y-2 relative">
-                <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">
+                <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">
                   {formData.accountType === 'loan' ? 'Bank / Lender Name' : 'Person / Company Name'}
                 </label>
                 <input 
@@ -728,7 +755,7 @@ const PartyDirectory = () => {
                   <div>
                     <label className="text-[10px] font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-widest ml-1">EMI Amount</label>
                     <input type="number" required value={formData.emiAmount} onChange={(e) => setFormData({...formData, emiAmount: e.target.value})} placeholder="e.g., 5000" 
-                      className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-sm transition-colors" />
+                      className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-sm transition-colors placeholder-slate-400" />
                   </div>
                   <div>
                     <label className="text-[10px] font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-widest ml-1">Next Due Date</label>
@@ -740,20 +767,20 @@ const PartyDirectory = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Phone (Optional)</label>
+                  <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Phone (Optional)</label>
                   <input type="tel" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} placeholder="e.g., +91 987..." 
-                    className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-colors" />
+                    className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-colors placeholder-slate-400" />
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Notes (Optional)</label>
+                  <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Notes (Optional)</label>
                   <input type="text" value={formData.address} onChange={(e) => setFormData({...formData, address: e.target.value})} placeholder="e.g., Loan A/C 4589" 
-                    className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-colors" />
+                    className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-colors placeholder-slate-400" />
                 </div>
               </div>
 
               {!editingPartyId && (
-                <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-                  <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-3 block ml-1">
+                <div className="pt-4 border-t border-slate-300 dark:border-slate-700">
+                  <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest mb-3 block ml-1">
                     {formData.accountType === 'loan' ? 'Total Loan Principal' : 'Previous Balance (If any)'}
                   </label>
                   
@@ -761,9 +788,9 @@ const PartyDirectory = () => {
                     {['none', 'receivable', 'payable'].map((type) => (
                       <label key={type} className={`p-2.5 sm:p-3 rounded-lg border-2 text-center cursor-pointer font-black text-[9px] sm:text-[10px] uppercase tracking-widest transition-all flex items-center justify-center leading-tight shadow-sm ${
                         formData.initialBalanceType === type 
-                          ? type === 'none' ? 'bg-slate-100 border-slate-400 text-slate-800 dark:bg-slate-700 dark:border-slate-500 dark:text-white' :
-                            type === 'receivable' ? 'bg-emerald-50 border-emerald-400 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500' :
-                            'bg-rose-50 border-rose-400 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400 dark:border-rose-500'
+                          ? type === 'none' ? 'bg-slate-200 border-slate-500 text-slate-800 dark:bg-slate-700 dark:border-slate-500 dark:text-white' :
+                            type === 'receivable' ? 'bg-emerald-50 border-emerald-400 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500' :
+                            'bg-rose-50 border-rose-400 text-rose-800 dark:bg-rose-500/20 dark:text-rose-400 dark:border-rose-500'
                           : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-blue-300 dark:hover:border-blue-600'
                       }`}>
                         <input type="radio" name="balType" className="hidden" checked={formData.initialBalanceType === type} onChange={() => setFormData({...formData, initialBalanceType: type})} />
@@ -773,11 +800,11 @@ const PartyDirectory = () => {
                   </div>
 
                   {formData.initialBalanceType !== 'none' && (
-                    <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
+                    <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-300 dark:border-slate-700 shadow-sm space-y-4">
                       
                       <div className="flex flex-row gap-2 sm:gap-3 w-full">
                         <select value={formData.currency} onChange={(e) => setFormData({...formData, currency: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})} 
-                          className="w-[35%] sm:w-auto min-w-[80px] p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors">
+                          className="w-[35%] sm:w-auto min-w-[80px] p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors focus:border-blue-500">
                           <option value={baseCurrency}>{baseCurrency}</option>
                           <optgroup label="Fiat">
                             {availableFiats.filter(c => c !== baseCurrency).map(c => <option key={c} value={c}>{c}</option>)}
@@ -787,8 +814,8 @@ const PartyDirectory = () => {
                           </optgroup>
                         </select>
                         <input type="number" required value={formData.initialAmount} onChange={(e) => setFormData({...formData, initialAmount: e.target.value})} placeholder="Amount" 
-                          className={`w-[65%] flex-1 min-w-0 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-black outline-none shadow-sm transition-colors ${
-                            formData.initialBalanceType === 'receivable' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                          className={`w-[65%] flex-1 min-w-0 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-black outline-none shadow-sm transition-colors focus:border-blue-500 placeholder-slate-400 dark:placeholder-slate-500 ${
+                            formData.initialBalanceType === 'receivable' ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'
                           }`} />
                       </div>
 
@@ -798,23 +825,23 @@ const PartyDirectory = () => {
                             <HiOutlineRefresh className={isFetchingRate ? 'animate-spin' : ''} size={14} /> <span className="hidden sm:inline">Live</span>
                           </button>
                           <div className="flex items-center gap-2 flex-1 min-w-[150px]">
-                            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 shrink-0">1 {formData.currency} =</span>
+                            <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 shrink-0">1 {formData.currency} =</span>
                             <input type="number" step="any" required value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} 
-                              className="flex-1 w-full min-w-0 p-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg text-sm font-bold text-slate-900 dark:text-white outline-none transition-colors" />
-                            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 shrink-0">{baseCurrency}</span>
+                              className="flex-1 w-full min-w-0 p-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg text-sm font-bold text-slate-900 dark:text-white outline-none transition-colors focus:border-blue-500" />
+                            <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 shrink-0">{baseCurrency}</span>
                           </div>
                         </div>
                       )}
 
-                      {/* 🚀 PREMIUM: Vault Linking Option Added Here */}
-                      <div className="pt-4 border-t border-slate-200 dark:border-slate-700 space-y-3">
-                        <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-1">
+                      {/* Vault Linking Option */}
+                      <div className="pt-4 border-t border-slate-300 dark:border-slate-700 space-y-3">
+                        <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-1">
                           <FaUniversity className="text-blue-500"/> Link to Vault?
                         </label>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="relative">
                             <select value={formData.vault} onChange={(e) => setFormData({...formData, vault: e.target.value, subWallet: ''})} 
-                              className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none cursor-pointer shadow-sm transition-colors">
+                              className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none cursor-pointer shadow-sm transition-colors focus:border-blue-500">
                               <option value="none">No Vault (Khata Only)</option>
                               <option value="bank">Bank Account</option>
                               <option value="cash">Physical Cash</option>
@@ -828,7 +855,7 @@ const PartyDirectory = () => {
                             <div className="animate-in fade-in">
                               <input type="text" list="sub-wallets-party" required value={formData.subWallet} onChange={(e) => setFormData({...formData, subWallet: e.target.value})} 
                                 placeholder={formData.vault === 'bank' ? "e.g., SBI" : "e.g., PayPal"} 
-                                className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm placeholder-slate-400" />
+                                className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm placeholder-slate-400 transition-colors focus:border-blue-500" />
                               <datalist id="sub-wallets-party">
                                 {existingVaultNames.map(b => <option key={b} value={b} />)}
                               </datalist>
@@ -839,12 +866,12 @@ const PartyDirectory = () => {
                             <div className="animate-in fade-in">
                               {formData.isCustomPlatform ? (
                                 <div className="flex gap-2">
-                                  <input type="text" required value={formData.cryptoPlatform} onChange={(e)=>setFormData({...formData, cryptoPlatform: e.target.value})} className="flex-1 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm transition-colors" />
-                                  <button type="button" onClick={()=>setFormData({...formData, isCustomPlatform: false, cryptoPlatform: cryptoPlatformsList[0]})} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors shadow-sm border border-slate-300 dark:border-slate-600"><HiOutlineX size={20}/></button>
+                                  <input type="text" required value={formData.cryptoPlatform} onChange={(e)=>setFormData({...formData, cryptoPlatform: e.target.value})} className="flex-1 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50" />
+                                  <button type="button" onClick={()=>setFormData({...formData, isCustomPlatform: false, cryptoPlatform: cryptoPlatformsList[0]})} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors shadow-sm border border-slate-300 dark:border-slate-600"><HiOutlineX size={20}/></button>
                                 </div>
                               ) : (
                                 <div className="relative">
-                                  <select value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} onChange={(e) => { if(e.target.value==='CUSTOM'){setFormData({...formData, isCustomPlatform: true, cryptoPlatform: ''})} else {setFormData({...formData, cryptoPlatform: e.target.value})} }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none cursor-pointer appearance-none shadow-sm transition-colors">
+                                  <select value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} onChange={(e) => { if(e.target.value==='CUSTOM'){setFormData({...formData, isCustomPlatform: true, cryptoPlatform: ''})} else {setFormData({...formData, cryptoPlatform: e.target.value})} }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none cursor-pointer appearance-none shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50">
                                     {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
                                     <option value="CUSTOM">✨ Custom Platform</option>
                                   </select>
@@ -861,8 +888,8 @@ const PartyDirectory = () => {
                 </div>
               )}
 
-              <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-2">
-                <button type="submit" disabled={isSaving} className="w-full p-4 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg shadow-blue-500/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2 shrink-0">
+              <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-2 z-10">
+                <button type="submit" disabled={isSaving} className="w-full p-4 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg shadow-blue-500/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2 shrink-0 active:scale-95">
                   {isSaving && <HiOutlineRefresh className="animate-spin text-xl" />}
                   {isSaving ? 'Processing...' : (editingPartyId ? 'Update Account' : 'Create Account')}
                 </button>
@@ -882,7 +909,7 @@ const PartyDirectory = () => {
                   <HiOutlineShieldCheck size={24} />
                 </div>
                 <div>
-                  <h3 className="text-lg font-black">Security Verification</h3>
+                  <h3 className="text-xl font-black">Security Verification</h3>
                   <p className="text-xs text-white/70">Enter PIN to confirm deletion</p>
                 </div>
               </div>
@@ -900,20 +927,20 @@ const PartyDirectory = () => {
               </div>
               
               <div>
-                <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Security PIN</label>
+                <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Security PIN</label>
                 <input 
                   type="password" maxLength={6} required autoFocus
                   value={pinInput} onChange={(e) => setPinInput(e.target.value)}
-                  className="w-full text-center tracking-[0.3em] text-xl p-4 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors shadow-sm"
+                  className="w-full text-center tracking-[0.3em] text-xl p-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors shadow-sm focus:border-rose-500"
                 />
-                {pinError && <p className="text-xs font-bold text-rose-600 dark:text-rose-400 mt-2 text-center">{pinError}</p>}
+                {pinError && <p className="text-xs font-bold text-rose-700 dark:text-rose-400 mt-2 text-center">{pinError}</p>}
               </div>
 
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setDeleteContext(null)} className="flex-1 p-4 rounded-xl font-black text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 transition-colors shadow-sm">
+                <button type="button" onClick={() => setDeleteContext(null)} className="flex-1 p-4 rounded-xl font-black text-sm bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 transition-colors shadow-sm">
                   Cancel
                 </button>
-                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-xl font-black text-sm bg-gradient-to-r from-rose-600 to-pink-600 text-white hover:from-rose-700 hover:to-pink-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30">
+                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-xl font-black text-sm bg-gradient-to-r from-rose-600 to-pink-600 text-white hover:from-rose-700 hover:to-pink-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30 active:scale-95">
                   {isVerifying ? <HiOutlineRefresh className="animate-spin" size={18} /> : null}
                   Confirm Delete
                 </button>

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { collection, query, where, onSnapshot } from 'firebase/firestore'; 
+import { db } from '../../firebase/firebaseConfig';
 
 import { 
   HiOutlineChevronDown, HiOutlineLogout, HiOutlineHome, 
@@ -9,10 +11,10 @@ import {
   HiOutlineShieldCheck, HiOutlineDocumentText, HiOutlineQuestionMarkCircle, 
   HiOutlineScale, HiOutlineCog, HiOutlineGlobeAlt, HiOutlineCalendar,
   HiOutlinePencilAlt, HiOutlineArrowRight, HiOutlineStar, HiOutlineSparkles,
-  HiOutlineShieldExclamation, HiOutlineBadgeCheck
+  HiOutlineShieldExclamation, HiOutlineBadgeCheck, HiOutlineBell
 } from 'react-icons/hi';
 import { 
-  FaTelegramPlane, FaRocket, FaUserAstronaut, FaCrown, FaGem 
+  FaTelegramPlane, FaRocket, FaUserAstronaut, FaCrown, FaGem, FaBrain 
 } from 'react-icons/fa';
 
 import Avatar from '../ui/Avatar'; 
@@ -48,6 +50,7 @@ const MobileMenu = ({ isOpen, onClose }) => {
   
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [hoveredItem, setHoveredItem] = useState(null);
+  const [unreadAlerts, setUnreadAlerts] = useState(0); 
   const navigate = useNavigate();
 
   const currentCalendar = dbData?.settings?.baseCalendar || 'gregorian';
@@ -58,6 +61,22 @@ const MobileMenu = ({ isOpen, onClose }) => {
     hijri: 'Hijri',
     jalali: 'Jalali'
   };
+
+  // 🚀 Fetch Live Unread Notifications
+  useEffect(() => {
+    if (!user) {
+      setUnreadAlerts(0);
+      return;
+    }
+    const q = query(
+      collection(db, "users", user.uid, "notifications"),
+      where("isRead", "==", false)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setUnreadAlerts(snapshot.docs.length);
+    });
+    return () => unsubscribe();
+  }, [user]);
 
   useEffect(() => {
     const handleEsc = (e) => {
@@ -81,12 +100,16 @@ const MobileMenu = ({ isOpen, onClose }) => {
     setTimeout(() => navigate(path), 200);
   };
 
+  // 🚀 EXACT PATH MATCHING YOUR APP.JSX
   const menuItems = [
     { name: 'Home', path: '/', icon: <HiOutlineHome size={18} /> },
-    ...(user ? [{ 
-      name: 'Dashboard', path: '/dashboard', icon: <HiOutlineChartBar size={18} />, 
-      featured: true, badge: 'PRO'
-    }] : []),
+    ...(user ? [
+      { 
+        name: 'Dashboard', path: '/dashboard', icon: <HiOutlineChartBar size={18} />, 
+        featured: true, badge: 'PRO'
+      },
+
+    ] : []),
     { name: 'Services', path: '/services', icon: <HiOutlineBriefcase size={18} /> },
     { name: 'Blogs', path: '/blogs', icon: <HiOutlineNewspaper size={18} /> },
     { name: 'About Us', path: '/about', icon: <HiOutlineInformationCircle size={18} /> },
@@ -109,7 +132,7 @@ const MobileMenu = ({ isOpen, onClose }) => {
 
   return (
     <>
-      {/* Premium Backdrop Overlay */}
+      {/* 🚀 FIXED: Restored your ORIGINAL Absolute Positioning! */}
       <div 
         className={`absolute inset-0 z-40 bg-gradient-to-br from-slate-950/90 via-slate-900/85 to-slate-950/90 backdrop-blur-xl transition-all duration-500 md:hidden ${
           isOpen ? 'opacity-100 visible' : 'opacity-0 invisible pointer-events-none'
@@ -118,7 +141,7 @@ const MobileMenu = ({ isOpen, onClose }) => {
         aria-label="Close menu"
       />
 
-      {/* 🚀 COMPACT & LESS BROAD Panel - Reduced max-w to 300px */}
+      {/* 🚀 FIXED: Restored original aside container classes */}
       <aside 
         className={`absolute md:hidden top-0 right-0 bottom-0 z-50 w-[75%] max-w-[300px] bg-white/98 dark:bg-slate-950/98 backdrop-blur-2xl border-l border-slate-200/30 dark:border-slate-800/50 shadow-2xl transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col ${
           isOpen ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0 pointer-events-none'
@@ -146,7 +169,9 @@ const MobileMenu = ({ isOpen, onClose }) => {
                 group relative flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 active:scale-[0.98] overflow-hidden
                 ${isActive 
                   ? 'bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-500/15 dark:to-cyan-500/15 text-blue-700 dark:text-blue-400 border border-blue-200/60 dark:border-blue-500/30 shadow-sm' 
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60 font-medium border border-transparent hover:border-slate-200/60 dark:hover:border-slate-700/50'
+                  : item.isAlert 
+                    ? 'bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-500/30 font-bold'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60 font-medium border border-transparent hover:border-slate-200/60 dark:hover:border-slate-700/50'
                 }
               `}
             >
@@ -155,28 +180,37 @@ const MobileMenu = ({ isOpen, onClose }) => {
                   {isActive && (
                     <div className="absolute left-0 top-2 bottom-2 w-1 bg-gradient-to-b from-blue-500 to-cyan-500 rounded-r-full shadow-sm" />
                   )}
-                  {hoveredItem === item.name && !isActive && (
+                  {hoveredItem === item.name && !isActive && !item.isAlert && (
                     <div className="absolute inset-0 bg-gradient-to-r from-slate-100/50 to-transparent dark:from-white/5 dark:to-transparent" />
                   )}
                   <div className={`relative shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 group-hover:scale-110 ${
                     isActive 
                       ? 'bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-md' 
-                      : 'bg-slate-100 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 border border-slate-200/50 dark:border-slate-700/50 group-hover:bg-slate-200 dark:group-hover:bg-slate-700'
+                      : item.isAlert
+                        ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-md shadow-amber-500/30'
+                        : 'bg-slate-100 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 border border-slate-200/50 dark:border-slate-700/50 group-hover:bg-slate-200 dark:group-hover:bg-slate-700'
                   }`}>
                     {item.icon}
-                    {item.featured && (
+                    {item.featured && !item.isAlert && (
                       <span className="absolute -top-1 -right-1 w-3 h-3 bg-gradient-to-br from-amber-400 to-orange-400 rounded-full flex items-center justify-center shadow-md animate-pulse">
                         <HiOutlineStar size={8} className="text-white" />
                       </span>
                     )}
+                    {item.isAlert && (
+                      <span className="absolute -top-1 -right-1 w-3 h-3 bg-rose-500 rounded-full flex items-center justify-center shadow-md animate-ping" />
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <span className={`text-[13px] ${isActive ? 'font-black' : 'font-bold'} transition-colors duration-300`}>
+                    <span className={`text-[13px] ${isActive || item.isAlert ? 'font-black' : 'font-bold'} transition-colors duration-300 truncate block`}>
                       {item.name}
                     </span>
                   </div>
                   {item.featured && item.badge && (
-                    <span className="shrink-0 px-1.5 py-0.5 bg-gradient-to-r from-amber-400/20 to-orange-400/20 text-amber-600 dark:text-amber-400 text-[8px] font-black rounded-md border border-amber-400/30">
+                    <span className={`shrink-0 px-1.5 py-0.5 text-[8px] font-black rounded-md border ${
+                      item.isAlert 
+                        ? 'bg-rose-500 text-white border-rose-600 shadow-sm animate-pulse'
+                        : 'bg-gradient-to-r from-amber-400/20 to-orange-400/20 text-amber-600 dark:text-amber-400 border-amber-400/30'
+                    }`}>
                       {item.badge}
                     </span>
                   )}
@@ -231,10 +265,10 @@ const MobileMenu = ({ isOpen, onClose }) => {
                       rel="noopener noreferrer" 
                       className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-slate-500 dark:text-slate-400 font-bold text-[11px] hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-800 dark:hover:text-white transition-all group"
                     >
-                      <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center group-hover:scale-110 transition-transform shrink-0">
                         {item.icon}
                       </div>
-                      <span className="flex-1">{item.name}</span>
+                      <span className="flex-1 truncate">{item.name}</span>
                       <HiOutlineArrowRight size={12} className="opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all text-blue-500" />
                     </a>
                   ) : (
@@ -257,7 +291,7 @@ const MobileMenu = ({ isOpen, onClose }) => {
               <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-800 border border-slate-200/60 dark:border-slate-700/50 p-3 shadow-sm group hover:shadow-md transition-all">
                 <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-cyan-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
                 <div className="relative flex items-center gap-3">
-                  <div className="relative">
+                  <div className="relative shrink-0">
                     <div className="ring-2 ring-blue-100 dark:ring-slate-700 rounded-full p-0.5 bg-gradient-to-br from-blue-500 to-cyan-500">
                       <div className="ring-2 ring-white dark:ring-slate-800 rounded-full">
                         <Avatar src={avatar} name={displayName} size={36} />

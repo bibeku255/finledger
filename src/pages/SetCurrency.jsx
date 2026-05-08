@@ -11,30 +11,9 @@ import {
 } from 'react-icons/hi';
 import { FaCrown, FaGlobeAmericas } from 'react-icons/fa';
 
-const currenciesList = [
-  { code: 'USD', symbol: '$', name: 'US Dollar', country: 'United States', flag: '🇺🇸', iconId: 'us', region: 'Americas' },
-  { code: 'CAD', symbol: 'C$', name: 'Canadian Dollar', country: 'Canada', flag: '🇨🇦', iconId: 'ca', region: 'Americas' },
-  { code: 'MXN', symbol: '$', name: 'Mexican Peso', country: 'Mexico', flag: '🇲🇽', iconId: 'mx', region: 'Americas' },
-  { code: 'NPR', symbol: 'रू', name: 'Nepalese Rupee', country: 'Nepal', flag: '🇳🇵', iconId: 'np', region: 'Asia' },
-  { code: 'INR', symbol: '₹', name: 'Indian Rupee', country: 'India', flag: '🇮🇳', iconId: 'in', region: 'Asia' },
-  { code: 'PKR', symbol: '₨', name: 'Pakistani Rupee', country: 'Pakistan', flag: '🇵🇰', iconId: 'pk', region: 'Asia' },
-  { code: 'BDT', symbol: '৳', name: 'Bangladeshi Taka', country: 'Bangladesh', flag: '🇧🇩', iconId: 'bd', region: 'Asia' },
-  { code: 'LKR', symbol: 'රු', name: 'Sri Lankan Rupee', country: 'Sri Lanka', flag: '🇱🇰', iconId: 'lk', region: 'Asia' },
-  { code: 'AED', symbol: 'د.إ', name: 'UAE Dirham', country: 'United Arab Emirates', flag: '🇦🇪', iconId: 'ae', region: 'Middle East' },
-  { code: 'SAR', symbol: 'ر.س', name: 'Saudi Riyal', country: 'Saudi Arabia', flag: '🇸🇦', iconId: 'sa', region: 'Middle East' },
-  { code: 'QAR', symbol: 'ر.ق', name: 'Qatari Riyal', country: 'Qatar', flag: '🇶🇦', iconId: 'qa', region: 'Middle East' },
-  { code: 'KWD', symbol: 'د.ك', name: 'Kuwaiti Dinar', country: 'Kuwait', flag: '🇰🇼', iconId: 'kw', region: 'Middle East' },
-  { code: 'OMR', symbol: 'ر.ع.', name: 'Omani Rial', country: 'Oman', flag: '🇴🇲', iconId: 'om', region: 'Middle East' },
-  { code: 'BHD', symbol: 'ب.د', name: 'Bahraini Dinar', country: 'Bahrain', flag: '🇧🇭', iconId: 'bh', region: 'Middle East' },
-  { code: 'EUR', symbol: '€', name: 'Euro', country: 'Eurozone', flag: '🇪🇺', iconId: 'eu', region: 'Europe' },
-  { code: 'GBP', symbol: '£', name: 'British Pound', country: 'United Kingdom', flag: '🇬🇧', iconId: 'gb', region: 'Europe' },
-  { code: 'JPY', symbol: '¥', name: 'Japanese Yen', country: 'Japan', flag: '🇯🇵', iconId: 'jp', region: 'Asia' },
-  { code: 'AUD', symbol: 'A$', name: 'Australian Dollar', country: 'Australia', flag: '🇦🇺', iconId: 'au', region: 'Oceania' },
-];
+import { currenciesList, regions } from '../utils/marketConstants';
 
-const regions = ['All', 'Americas', 'Europe', 'Asia', 'Middle East', 'Oceania'];
-
-// 🚀 Premium Currency Card Component
+// Premium Currency Card Component
 const CurrencyCard = ({ currency, isSelected, isDisabled, onClick, mode }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
@@ -53,14 +32,12 @@ const CurrencyCard = ({ currency, isSelected, isDisabled, onClick, mode }) => {
         ${isDisabled ? 'opacity-50 cursor-not-allowed grayscale' : 'cursor-pointer'}
       `}
     >
-      {/* Background Glow Effect */}
       {!isDisabled && (
         <div className={`absolute inset-0 bg-gradient-to-r opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none
           ${mode === 'base' ? 'from-blue-500/5 to-cyan-500/5' : 'from-emerald-500/5 to-teal-500/5'}`} 
         />
       )}
 
-      {/* Flag Container */}
       <div className="relative shrink-0">
         <div className={`absolute inset-0 rounded-full blur-xl opacity-0 group-hover:opacity-30 transition-opacity duration-500
           ${mode === 'base' ? 'bg-blue-500' : 'bg-emerald-500'}`} 
@@ -85,7 +62,6 @@ const CurrencyCard = ({ currency, isSelected, isDisabled, onClick, mode }) => {
         </div>
       </div>
 
-      {/* Currency Info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
           <h3 className={`font-black text-lg tracking-tight truncate ${isSelected ? 'text-white' : 'text-slate-800 dark:text-white'}`}>
@@ -107,7 +83,6 @@ const CurrencyCard = ({ currency, isSelected, isDisabled, onClick, mode }) => {
         </p>
       </div>
 
-      {/* Selection Indicator */}
       <div className="shrink-0">
         {isSelected ? (
           <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
@@ -131,7 +106,6 @@ const CurrencyCard = ({ currency, isSelected, isDisabled, onClick, mode }) => {
         )}
       </div>
 
-      {/* Decorative Corner */}
       {isSelected && (
         <div className="absolute -top-1 -right-1 w-6 h-6 bg-white/20 rounded-full blur-md" />
       )}
@@ -139,7 +113,7 @@ const CurrencyCard = ({ currency, isSelected, isDisabled, onClick, mode }) => {
   );
 };
 
-// 🚀 Premium Stat Badge Component
+// Premium Stat Badge
 const StatBadge = ({ icon: Icon, label, value, color }) => (
   <div className={`flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r ${color}`}>
     <Icon size={16} className="text-white/80" />
@@ -151,7 +125,7 @@ const StatBadge = ({ icon: Icon, label, value, color }) => (
 );
 
 const SetCurrency = () => {
-  const { user, baseCurrency, updateBaseCurrency, selectedFiats = ['USD', 'INR'], updateSelectedFiats } = useAuth();
+  const { user, baseCurrency, updateBaseCurrency, selectedFiats = [], updateSelectedFiats } = useAuth();
   
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('base'); 
@@ -165,7 +139,7 @@ const SetCurrency = () => {
     const checkLedgerData = async () => {
       if (!user) return;
       try {
-        const vaults = ['cashWallet', 'bankWallet', 'onlineWallet', 'capitalShifts', 'holdAndSwap'];
+        const vaults = ['cashWallet', 'bankWallet', 'onlineWallet', 'capitalShifts', 'expenseLogs', 'incomeLogs', 'cryptoWalletLogs'];
         let hasData = false;
 
         for (const vault of vaults) {
@@ -198,12 +172,15 @@ const SetCurrency = () => {
     if(updateSelectedFiats) await updateSelectedFiats(newList);
   };
 
+  // 🚀 STRICT LOCK RETAINED
   const handleBaseCurrencyChange = async (newBaseCode) => {
+    if (newBaseCode === baseCurrency) return; 
+    
     if (isLocked) {
-      alert("⚠️ Base Currency is locked because you have active transactions in your ledger. Delete all transactions to unlock.");
+      alert("⚠️ SYSTEM LOCKED: Base Currency cannot be changed because you have active transactions in your ledger. To change your currency, please delete all existing transactions first.");
       return;
     }
-    if (newBaseCode === baseCurrency) return; 
+    
     await updateBaseCurrency(newBaseCode);
   };
 
@@ -270,24 +247,9 @@ const SetCurrency = () => {
           
           {/* Stats Row */}
           <div className="relative z-10 flex flex-wrap gap-3 mt-6">
-            <StatBadge 
-              icon={HiOutlineGlobeAlt} 
-              label="Available Currencies" 
-              value={currenciesList.length} 
-              color="from-blue-500/30 to-cyan-500/30"
-            />
-            <StatBadge 
-              icon={HiOutlineEye} 
-              label="Watchlist Items" 
-              value={selectedFiats.length} 
-              color="from-emerald-500/30 to-teal-500/30"
-            />
-            <StatBadge 
-              icon={HiOutlineShieldCheck} 
-              label="Status" 
-              value={isLocked ? 'Locked' : 'Editable'} 
-              color={isLocked ? 'from-rose-500/30 to-pink-500/30' : 'from-amber-500/30 to-orange-500/30'}
-            />
+            <StatBadge icon={HiOutlineGlobeAlt} label="Available Currencies" value={currenciesList.length} color="from-blue-500/30 to-cyan-500/30" />
+            <StatBadge icon={HiOutlineEye} label="Watchlist Items" value={selectedFiats.length} color="from-emerald-500/30 to-teal-500/30" />
+            <StatBadge icon={HiOutlineShieldCheck} label="Status" value={isLocked ? 'Locked' : 'Editable'} color={isLocked ? 'from-rose-500/30 to-pink-500/30' : 'from-amber-500/30 to-orange-500/30'} />
           </div>
         </div>
 
@@ -297,9 +259,7 @@ const SetCurrency = () => {
             <button 
               onClick={() => setActiveTab('base')} 
               className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all duration-300 ${
-                activeTab === 'base' 
-                  ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-lg shadow-blue-500/30' 
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                activeTab === 'base' ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-lg shadow-blue-500/30' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
               <FaCrown size={16} /> Primary Base
@@ -307,25 +267,20 @@ const SetCurrency = () => {
             <button 
               onClick={() => setActiveTab('watchlist')} 
               className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all duration-300 ${
-                activeTab === 'watchlist' 
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-500/30' 
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                activeTab === 'watchlist' ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-500/30' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
               <HiOutlineEye size={16} /> Watchlist
             </button>
           </div>
           
-          {/* Region Filter */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar">
             {regions.map(region => (
               <button
                 key={region}
                 onClick={() => setSelectedRegion(region)}
                 className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider whitespace-nowrap transition-all border ${
-                  selectedRegion === region
-                    ? 'bg-slate-800 dark:bg-slate-700 text-white shadow-md border-transparent'
-                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 shadow-sm'
+                  selectedRegion === region ? 'bg-slate-800 dark:bg-slate-700 text-white shadow-md border-transparent' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 shadow-sm'
                 }`}
               >
                 {region}
@@ -340,15 +295,11 @@ const SetCurrency = () => {
           <input 
             type="text" 
             placeholder={`Search ${activeTab === 'base' ? 'base currency' : 'watchlist'} options...`}
-            value={searchQuery} 
-            onChange={(e) => setSearchQuery(e.target.value)} 
+            value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} 
             className="w-full bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-blue-500 dark:focus:border-blue-500 rounded-2xl py-4 pl-14 pr-12 text-sm font-bold outline-none transition-all text-slate-900 dark:text-white shadow-sm placeholder-slate-400 dark:placeholder-slate-500" 
           />
           {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-            >
+            <button onClick={() => setSearchQuery('')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
               <HiOutlineXCircle size={18} />
             </button>
           )}
@@ -376,16 +327,14 @@ const SetCurrency = () => {
             }`}>
               {activeTab === 'base' && isLocked ? 'Security Lock Active' : 'Important Information'}
             </p>
-            <p className={`text-sm font-bold ${
+            <p className={`text-sm font-bold leading-relaxed ${
               activeTab === 'base' && isLocked 
                 ? 'text-rose-800 dark:text-rose-300' 
                 : 'text-blue-800 dark:text-blue-300'
             }`}>
               {activeTab === 'base' 
-                ? (isLocked 
-                    ? "Your Base Currency is locked because you have active transactions in your ledger. To change it, you must first delete all transactions across all vaults." 
-                    : "Choose your primary accounting currency carefully! Once you log your first transaction, this setting will be permanently locked to maintain financial integrity.")
-                : "Add currencies to your watchlist to track them in the NewsTicker and Live Market Portfolio. You can modify this list at any time."}
+                ? "Your Base Currency is STRICTLY LOCKED because you have active transactions in your ledger. To change your primary currency, you must first delete all transactions across all vaults to maintain financial integrity."
+                : "Add currencies to your watchlist to track them in the Live Market Portfolio. You can modify this list at any time."}
             </p>
           </div>
         </div>
@@ -398,7 +347,7 @@ const SetCurrency = () => {
               <HiOutlineRefresh className="animate-spin text-4xl text-blue-500 relative" />
             </div>
             <p className="text-sm font-black text-slate-400 uppercase tracking-widest mt-4 animate-pulse">
-              Checking Security Status...
+              Checking Ledger Status...
             </p>
           </div>
         ) : filteredCurrencies.length === 0 ? (

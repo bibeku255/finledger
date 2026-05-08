@@ -11,8 +11,7 @@ export const useAIVoice = () => {
     return false;
   });
 
-  // 🚀 FIXED: Web Speech API loads voices asynchronously. 
-  // This useEffect ensures we have the premium voices ready before speaking.
+  // 🚀 Load Voices Asynchronously
   useEffect(() => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
 
@@ -35,7 +34,8 @@ export const useAIVoice = () => {
     };
   }, []);
 
-  const toggleMute = () => {
+  // 🚀 Memoized Toggle for Performance
+  const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
       const newState = !prev;
       if (typeof window !== 'undefined') {
@@ -44,27 +44,40 @@ export const useAIVoice = () => {
       }
       return newState;
     });
-  };
+  }, []);
+
+  // 🚀 Memoized Stop Function
+  const stop = useCallback(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsSpeaking(false);
+  }, []);
 
   const speak = useCallback((text) => {
     if (isMuted || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
 
-    // Stop any ongoing speech before starting a new one
-    window.speechSynthesis.cancel();
+    // 🚀 Safety Check: Clear stuck browser speech queues
+    if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+      window.speechSynthesis.cancel();
+    }
 
     const utterance = new SpeechSynthesisUtterance(text);
     
-    // Optional: Make it sound professional
-    utterance.rate = 0.95; // Slightly slower for clarity and premium feel
+    // 🚀 Professional J.A.R.V.I.S Tuning
+    utterance.rate = 0.95; // Slightly slower for a calm, premium assistant feel
     utterance.pitch = 1.0; 
 
-    // 🚀 ENHANCED VOICE SELECTION LOGIC
-    // Try to find a premium English voice
+    // 🚀 Premium Voice Matching Algorithm
+    // Priority: UK Male (JARVIS feel) -> Premium Female -> Default English
     const preferredVoice = voices.find(v => 
+      v.name.includes('Daniel') || // Premium Mac UK Male (Very JARVIS)
+      v.name.includes('Google UK English Male') ||
+      v.name.includes('Samantha') || // Premium Mac US Female
       v.name.includes('Google UK English Female') || 
       v.name.includes('Google US English') ||
-      v.name.includes('Samantha') || // iOS/Mac premium voice
-      (v.name.includes('Female') && v.lang.startsWith('en'))
+      (v.lang === 'en-GB') || 
+      (v.lang === 'en-US')
     ) || voices.find(v => v.lang.startsWith('en')) || voices[0];
     
     if (preferredVoice) {
@@ -73,18 +86,19 @@ export const useAIVoice = () => {
 
     // State management for UI syncing
     utterance.onstart = () => setIsSpeaking(true);
+    
     utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
+    
+    utterance.onerror = (event) => {
+      // Ignore 'interrupted' errors caused by user clicking stop/mute
+      if (event.error !== 'interrupted' && event.error !== 'canceled') {
+        console.warn('J.A.R.V.I.S Engine: Voice synthesis error', event);
+      }
+      setIsSpeaking(false);
+    };
 
     window.speechSynthesis.speak(utterance);
   }, [isMuted, voices]); 
-
-  const stop = () => {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-    setIsSpeaking(false);
-  };
 
   return { speak, stop, isSpeaking, isMuted, toggleMute };
 };

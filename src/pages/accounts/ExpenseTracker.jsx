@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { collection, addDoc, doc, setDoc, deleteDoc, updateDoc, onSnapshot, query, orderBy, where, getDocs, getDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, deleteDoc, updateDoc, onSnapshot, query, orderBy, where, getDocs, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
 
@@ -13,13 +14,15 @@ import {
   HiOutlineTrendingDown, HiOutlineCash
 } from 'react-icons/hi';
 
+// 🚀 FIXED: Added FaTags, FaCreditCard, and FaLock here!
 import { 
   FaMoneyBillWave, FaArrowUp, FaUniversity, FaWallet, 
   FaExchangeAlt, FaRandom, FaBitcoin, FaUserFriends,
-  FaGem, FaChartLine, FaPiggyBank, FaArrowDown
+  FaGem, FaChartLine, FaPiggyBank, FaArrowDown, FaTags, FaCreditCard, FaLock
 } from 'react-icons/fa';
 
-const fiatCurrencies = ["USD", "EUR", "GBP", "AUD", "CAD", "SGD", "AED", "SAR", "JPY", "CNY", "INR", "NPR", "PKR", "BDT"];
+// 🚀 IMPORT SINGLE SOURCE OF TRUTH
+import { fiatFlagMap } from '../../utils/marketConstants';
 
 const cryptoPlatformsList = [
   "CoinDCX", "WazirX", "ZebPay", "Mudrex", "SunCrypto",
@@ -38,12 +41,6 @@ const expenseCategories = [
   "Forex & Bank Charges", "Health & Wellness", "Other Expenses"
 ];
 
-const fiatFlagMap = {
-  USD: 'us', INR: 'in', NPR: 'np', EUR: 'eu', GBP: 'gb', CAD: 'ca', AUD: 'au', 
-  JPY: 'jp', AED: 'ae', SAR: 'sa', QAR: 'qa', KWD: 'kw', OMR: 'om', BHD: 'bh',
-  PKR: 'pk', BDT: 'bd', SGD: 'sg', CNY: 'cn'
-};
-
 const hashPIN = async (pinCode) => {
   const encoder = new TextEncoder();
   const data = encoder.encode(pinCode);
@@ -51,36 +48,37 @@ const hashPIN = async (pinCode) => {
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
-const BINANCE_SAFE_COINS = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC', 'BCH', 'ADA', 'XMR', 'XLM', 'DAI', 'ZEC', 'SHIB', 'SUI', 'TON', 'DOT', 'PEPE', 'NEAR', 'POL', 'ATOM', 'ARB', 'BONK', 'CAKE', 'XTZ', 'FLOKI', 'OP', 'TWT', 'BAT', 'DGB', 'KAVA', 'AVAX', 'MEME', 'DASH'];
+// 🚀 Helper: Get local Date & Time string for datetime-local input
+const getLocalDateTimeString = () => {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  return now.toISOString().slice(0, 16); 
+};
 
+// Premium Stat Card
 const StatCard = ({ title, value, icon: Icon, color, subtitle, trend }) => (
-  <div className={`relative overflow-hidden rounded-2xl p-5 bg-gradient-to-br ${color} text-white shadow-xl group hover:scale-[1.02] transition-all duration-300`}>
+  <div className={`relative overflow-hidden rounded-2xl p-5 sm:p-6 bg-gradient-to-br ${color} text-white shadow-xl group hover:scale-[1.02] transition-all duration-300`}>
     <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(255,255,255,0.15),transparent_70%)]" />
-    <Icon className="absolute right-[-10%] bottom-[-10%] text-7xl opacity-10 group-hover:scale-110 transition-transform duration-500" />
-    <div className="relative z-10">
-      <p className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-1">{title}</p>
-      <h3 className="text-2xl font-black tracking-tight">{value}</h3>
+    <Icon className="absolute right-[-10%] bottom-[-10%] text-7xl sm:text-8xl opacity-10 group-hover:scale-110 transition-transform duration-500" />
+    <div className="relative z-10 flex flex-col h-full">
+      <p className="text-[10px] sm:text-xs font-black uppercase tracking-widest opacity-80 mb-2">{title}</p>
+      <h3 className="text-2xl sm:text-3xl font-black tracking-tight truncate" title={value}>{value}</h3>
       {trend !== undefined && (
-        <div className={`flex items-center gap-1 mt-2 text-[10px] font-bold ${trend >= 0 ? 'text-emerald-200' : 'text-rose-200'}`}>
-          {trend >= 0 ? <HiOutlineTrendingUp size={14} /> : <HiOutlineTrendingDown size={14} />}
+        <div className={`flex items-center gap-1 mt-3 text-[10px] sm:text-xs font-bold w-fit px-2 py-1 rounded-lg backdrop-blur-sm bg-white/10 ${trend <= 0 ? 'text-emerald-100' : 'text-rose-100'}`}>
+          {trend <= 0 ? <HiOutlineTrendingDown size={14} /> : <HiOutlineTrendingUp size={14} />}
           {Math.abs(trend)}% from last month
         </div>
       )}
-      {subtitle && <p className="text-[9px] font-medium opacity-70 mt-1">{subtitle}</p>}
+      {subtitle && <p className="text-[10px] font-medium opacity-70 mt-2">{subtitle}</p>}
     </div>
   </div>
 );
 
 const ExpenseTracker = () => {
-  // 🚀 FIXED: Extracted selectedFiats from useAuth
   const { user, baseCurrency = 'INR', selectedCryptos = [], selectedFiats = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
 
-  // 🚀 FIXED: Defined availableFiats and availableCryptos to prevent crashes
-  const availableFiats = useMemo(() => {
-    return Array.from(new Set([baseCurrency, ...selectedFiats]));
-  }, [baseCurrency, selectedFiats]);
-
+  const availableFiats = useMemo(() => Array.from(new Set([baseCurrency, ...selectedFiats])), [baseCurrency, selectedFiats]);
   const availableCryptos = useMemo(() => {
     const customSymbols = selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
     return Array.from(new Set(["USDT", ...customSymbols])).map(s => s.toUpperCase());
@@ -92,17 +90,18 @@ const ExpenseTracker = () => {
   const [isFetchingRate, setIsFetchingRate] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [deleteContext, setDeleteContext] = useState(null); 
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
+  
   const [customUserCoins, setCustomUserCoins] = useState([]); 
   const [bankWalletLogs, setBankWalletLogs] = useState([]);
   const [existingParties, setExistingParties] = useState([]); 
-
-  const todayDate = new Date().toISOString().split('T')[0];
 
   const defaultSplitSource = { 
     vault: 'bank', subWallet: '', asset: baseCurrency, 
@@ -112,7 +111,7 @@ const ExpenseTracker = () => {
   const defaultKhataSplit = { partyName: '', amount: '' };
 
   const [formData, setFormData] = useState({
-    title: '', category: expenseCategories[0], date: todayDate, linkedExpenseId: '', 
+    title: '', category: expenseCategories[0], date: getLocalDateTimeString(), linkedExpenseId: '', 
     isSplit: false, vault: 'bank', subWallet: '', asset: baseCurrency, cryptoPlatform: cryptoPlatformsList[12], 
     amount: '', exchangeRate: 1, isCustomSingle: false,
     splitSources: [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ],
@@ -158,7 +157,13 @@ const ExpenseTracker = () => {
      const fetchBanksAndParties = async () => {
         const qBank = query(collection(db, "users", user.uid, "bankWallet"));
         const snapBank = await getDocs(qBank);
-        setBankWalletLogs(snapBank.docs.map(d => d.data().bankName).filter(Boolean));
+        const qOnline = query(collection(db, "users", user.uid, "onlineWallet"));
+        const snapOnline = await getDocs(qOnline);
+
+        const names = new Set();
+        snapBank.docs.forEach(d => { if(d.data().bankName) names.add(d.data().bankName) });
+        snapOnline.docs.forEach(d => { if(d.data().walletName) names.add(d.data().walletName) });
+        setBankWalletLogs(Array.from(names));
         
         const qParty = query(collection(db, "users", user.uid, "parties"));
         const snapParty = await getDocs(qParty);
@@ -203,38 +208,44 @@ const ExpenseTracker = () => {
     return expenses.filter(i => i.date?.startsWith(thisMonth)).reduce((acc, i) => acc + (Number(i.finalBaseAmount) || 0), 0);
   }, [expenses]);
 
+  // 🚀 SMART EXPORT LOGIC FOR EXCEL MATH
   const handleDownloadReport = (format) => {
-    const filteredForReport = expenses.filter(exp => {
-      const matchSearch = exp.title.toLowerCase().includes(searchTerm.toLowerCase()) || (exp.asset && exp.asset.toLowerCase().includes(searchTerm.toLowerCase()));
-      const matchCategory = filterCategory === 'all' || exp.category === filterCategory;
-      return matchSearch && matchCategory;
-    }).sort((a, b) => new Date(b.date) - new Date(a.date));
+    setIsExportMenuOpen(false);
+    const filteredForReport = processedExpenses.flatMap(month => month.records);
 
-    if (filteredForReport.length === 0) return alert("No records found to download.");
+    if (filteredForReport.length === 0) return alert("No records found to download based on filters.");
 
     const reportData = filteredForReport.map(rec => {
       const cleanTitle = (rec.title || 'N/A').replace(/(\r\n|\n|\r)/gm, " ");
-      const sourceText = rec.isSplit ? 'Split Payment' : `${rec.vault} Vault${rec.subWallet ? ` (${rec.subWallet})` : ''}`;
+      const sourceText = rec.isSplit ? 'Split Payment' : `${rec.vault.charAt(0).toUpperCase() + rec.vault.slice(1)} Vault${rec.subWallet ? ` (${rec.subWallet})` : ''}`;
+      const rawDate = rec.date ? rec.date.split('T')[0] : 'N/A';
+
       return {
-        date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rec.date,
+        date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rawDate,
         payee: cleanTitle,
         category: rec.category,
         source: sourceText,
-        baseValue: `${currencySymbol}${Math.abs(rec.finalBaseAmount || 0).toFixed(2)}`
+        nativeAmount: `${(Number(rec.amount) || 0).toLocaleString()} ${rec.asset}`,
+        baseValue: Number(rec.finalBaseAmount || 0) // 🚀 Raw numeric value for math engine
       };
     });
 
     const columns = [
-      { header: 'Date', key: 'date' }, { header: 'Payee', key: 'payee' }, 
-      { header: 'Category', key: 'category' }, { header: 'Source', key: 'source' }, 
-      { header: 'Amount', key: 'baseValue' }
+      { header: 'Date', key: 'date' }, 
+      { header: 'Payee / Item', key: 'payee' }, 
+      { header: 'Category', key: 'category' }, 
+      { header: 'Deducted From', key: 'source' }, 
+      { header: 'Native Amount', key: 'nativeAmount' },
+      { header: `Base Value (${currencySymbol})`, key: 'baseValue', isNumeric: true }
     ];
 
-    const fileName = `Expense_Tracker_Report`;
-    const reportTitle = `Expense Tracker - ${filterCategory !== 'all' ? filterCategory : 'Complete Ledger'}`;
+    const fileName = `Expense_Tracker_Ledger`;
+    const filterTitle = filterCategory !== 'all' ? ` - ${filterCategory}` : ``;
+    const searchTitle = searchTerm ? ` (Filtered)` : ``;
+    const reportTitle = `Expense Ledger${filterTitle}${searchTitle}`;
 
     if (format === 'pdf') downloadPDFReport(reportData, columns, fileName, reportTitle);
-    else downloadExcelReport(reportData, columns, fileName);
+    else downloadExcelReport(reportData, columns, fileName, reportTitle);
   };
 
   const fetchLiveRate = async (index = null) => {
@@ -250,7 +261,7 @@ const ExpenseTracker = () => {
       const usdToBase = fiatData.rates[baseCurrency] || 1;
       let finalRate = 1;
 
-      if (availableFiats.includes(assetToCheck) || fiatCurrencies.includes(assetToCheck)) {
+      if (availableFiats.includes(assetToCheck)) {
         const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${assetToCheck}`);
         const data = await res.json();
         finalRate = data.rates[baseCurrency] || 1;
@@ -273,11 +284,14 @@ const ExpenseTracker = () => {
                if (cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
            } catch(e) {}
         }
-        if (!priceUsd && BINANCE_SAFE_COINS.includes(upperSym)) {
+        if (!priceUsd) {
             try {
-                const binanceSymbol = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
-                const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`);
-                if (bRes.ok) { const bData = await bRes.json(); priceUsd = searchId === 'tether' ? 1.00 : parseFloat(bData.price); }
+                if (['USDT', 'USDC', 'DAI'].includes(upperSym)) {
+                    priceUsd = 1.00;
+                } else {
+                    const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${upperSym}USDT`);
+                    if (bRes.ok) { const bData = await bRes.json(); priceUsd = parseFloat(bData.price); }
+                }
             } catch(e) {}
         }
         const finalPrice = priceUsd || (coinObj?.fallbackPrice || 0);
@@ -524,8 +538,9 @@ const ExpenseTracker = () => {
 
   const executeSecureDelete = async (e) => {
     e.preventDefault();
-    if (!pinInput.trim()) return setPinError("Please enter your Security PIN.");
-    setIsVerifying(true);
+    if (!pinInput.trim()) return setPinError("Please enter your PIN.");
+    setIsVerifying(true); setPinError('');
+
     try {
       const userDoc = await getDoc(doc(db, "users", user.uid));
       const userData = userDoc.data();
@@ -533,9 +548,7 @@ const ExpenseTracker = () => {
       const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin; 
       
       if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) {
-        setPinError("Incorrect PIN.");
-        setIsVerifying(false);
-        return;
+        setPinError("Incorrect PIN."); setIsVerifying(false); return;
       }
       
       await deleteDoc(doc(db, "users", user.uid, "expenseLogs", deleteContext.id));
@@ -565,14 +578,24 @@ const ExpenseTracker = () => {
         }
       }
       setDeleteContext(null); 
-    } catch (error) {
-      setPinError("System error during verification.");
-    } finally {
-      setIsVerifying(false);
-    }
+    } catch (e) { setPinError("System error during deletion."); } finally { setIsVerifying(false); }
   };
 
-  const handleEdit = (rec) => {
+  const openModal = () => { 
+    setEditingId(null); setIsModalOpen(true); 
+    const lastBank = existingBanks.length > 0 ? existingBanks[0] : '';
+    setFormData({ 
+      title: '', category: expenseCategories[0], date: getLocalDateTimeString(), linkedExpenseId: '', 
+      vault: 'bank', subWallet: lastBank, cryptoPlatform: cryptoPlatformsList[12], asset: baseCurrency, 
+      amount: '', exchangeRate: 1, isCustomSingle: false, isSynced: false,
+      splitSources: [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ],
+      isKhataSplit: false, khataSplits: [ { ...defaultKhataSplit } ]
+    }); 
+  };
+  
+  const closeModal = () => setIsModalOpen(false);
+  
+  const handleEdit = (rec) => { 
     const isSplit = rec.isSplit || false;
     let mappedSplits = [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ];
     if (isSplit && rec.splitDetails) {
@@ -589,7 +612,7 @@ const ExpenseTracker = () => {
     const isSyncedEntry = !!(rec.linkedExpenseId && !rec.linkedExpenseId.startsWith('EXP_'));
 
     setFormData({
-      title: rec.title, category: rec.category, date: rec.date, linkedExpenseId: rec.linkedExpenseId || '', 
+      title: rec.title, category: rec.category, date: rec.date || getLocalDateTimeString(), linkedExpenseId: rec.linkedExpenseId || '', 
       isSplit: isSplit, vault: isSplit ? 'bank' : (rec.vault || 'bank'), subWallet: isSplit ? '' : (rec.subWallet || rec.bankName || rec.walletName || ''),
       asset: isSplit ? baseCurrency : (rec.asset || baseCurrency), amount: isSplit ? '' : (rec.amount || ''),
       exchangeRate: isSplit ? 1 : (rec.exchangeRate || 1), cryptoPlatform: isSplit ? cryptoPlatformsList[12] : (rec.cryptoPlatform || cryptoPlatformsList[12]),
@@ -602,26 +625,12 @@ const ExpenseTracker = () => {
     setIsModalOpen(true);
   };
 
-  const openModal = () => {
-    setEditingId(null);
-    setFormData({ 
-      title: '', category: expenseCategories[0], date: todayDate, linkedExpenseId: '', isSplit: false,
-      vault: 'bank', subWallet: existingBanks[0] || '', asset: baseCurrency, amount: '', exchangeRate: 1, cryptoPlatform: cryptoPlatformsList[12], isCustomSingle: false,
-      splitSources: [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ],
-      isKhataSplit: false, khataSplits: [ { ...defaultKhataSplit } ],
-      isSynced: false
-    });
-    setIsModalOpen(true);
-  };
-  
-  const closeModal = () => setIsModalOpen(false);
-
   const getVaultIcon = (v) => {
     if (v === 'bank') return <FaUniversity className="text-blue-500" />;
     if (v === 'cash') return <HiOutlineCash className="text-emerald-500" />;
     if (v === 'crypto') return <FaBitcoin className="text-orange-500" />;
     if (v === 'online') return <FaWallet className="text-purple-500" />;
-    return <FaRandom className="text-amber-500" />;
+    return <FaCreditCard className="text-slate-500" />;
   };
 
   const updateSplit = (index, field, value) => {
@@ -648,12 +657,14 @@ const ExpenseTracker = () => {
     <div className="w-full h-auto pb-24">
       <div className="pt-8 md:pt-12 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 md:px-6">
         
-        {/* Premium Header */}
-        <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(244,63,94,0.1),transparent_70%)]" />
-          <div className="absolute right-0 top-0 w-64 h-64 bg-rose-500/5 rounded-full blur-3xl" />
+        {/* 🚀 FIXED: Mobile Export Box Clipping Issue */}
+        <div className="relative rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50 z-20">
+          <div className="absolute inset-0 overflow-hidden rounded-[2.5rem] pointer-events-none">
+             <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(244,63,94,0.1),transparent_70%)]" />
+             <div className="absolute right-0 top-0 w-64 h-64 bg-rose-500/5 rounded-full blur-3xl" />
+          </div>
           
-          <div className="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <div className="relative z-50 flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-12 h-12 bg-gradient-to-br from-rose-500 to-pink-600 rounded-2xl flex items-center justify-center shadow-lg">
@@ -666,24 +677,32 @@ const ExpenseTracker = () => {
               </div>
             </div>
             
-            <div className="flex items-center gap-3">
-              <div className="relative group">
-                <button className="flex items-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10">
-                  <HiOutlineDownload size={16} /> Report
+            <div className="grid grid-cols-2 md:flex items-center gap-3 w-full md:w-auto mt-4 md:mt-0">
+              
+              {/* 🚀 EXPORT MENU FIX: High Z-Index, Absolute Positioning */}
+              <div className="relative w-full md:w-auto">
+                <button 
+                  onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                  onBlur={() => setTimeout(() => setIsExportMenuOpen(false), 200)}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 shadow-sm"
+                >
+                  <HiOutlineDownload size={16} /> Export
                 </button>
-                <div className="absolute top-full right-0 mt-2 w-40 bg-slate-800 border border-slate-700 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all flex flex-col p-1 z-50">
-                  <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg">
-                    <HiOutlineDocumentText className="text-rose-400" size={16}/> PDF Document
-                  </button>
-                  <button onClick={() => handleDownloadReport('excel')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg">
-                    <HiOutlineTable className="text-emerald-400" size={16}/> Excel (CSV)
-                  </button>
-                </div>
+                {isExportMenuOpen && (
+                  <div className="absolute top-[110%] right-0 w-full md:w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl flex flex-col p-1.5 z-[100] animate-in fade-in zoom-in-95">
+                    <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg transition-colors">
+                      <HiOutlineDocumentText className="text-rose-400" size={16}/> PDF Document
+                    </button>
+                    <button onClick={() => handleDownloadReport('excel')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg transition-colors">
+                      <HiOutlineTable className="text-emerald-400" size={16}/> Excel (CSV)
+                    </button>
+                  </div>
+                )}
               </div>
               
               <button 
                 onClick={openModal} 
-                className="flex items-center justify-center gap-2 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 text-white px-5 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-rose-500/30"
+                className="w-full md:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 text-white px-5 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-rose-500/30"
               >
                 <HiOutlinePlus size={18} /> Log Expense
               </button>
@@ -691,36 +710,36 @@ const ExpenseTracker = () => {
           </div>
           
           {/* Stats Row */}
-          <div className="relative z-10 grid grid-cols-3 gap-3 mt-6">
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total Expenses</p>
-              <p className="text-lg font-black text-white">{currencySymbol}{totalExpenseBase.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+          <div className="relative z-30 grid grid-cols-2 md:grid-cols-3 gap-3 mt-6">
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 overflow-hidden">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><HiOutlineTrendingDown size={14}/> Total Spent</p>
+              <p className="text-lg md:text-xl font-black text-white truncate" title={`${currencySymbol}${totalExpenseBase.toLocaleString()}`}>{currencySymbol}{totalExpenseBase.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
             </div>
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">This Month</p>
-              <p className="text-lg font-black text-rose-400">{currencySymbol}{thisMonthExpense.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 overflow-hidden">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><HiOutlineCalendar size={12}/> This Month</p>
+              <p className="text-lg md:text-xl font-black text-rose-400 truncate" title={`${currencySymbol}${thisMonthExpense.toLocaleString()}`}>{currencySymbol}{thisMonthExpense.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
             </div>
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total Entries</p>
-              <p className="text-lg font-black text-white">{expenses.length}</p>
+            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 col-span-2 md:col-span-1 overflow-hidden">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><FaTags size={12}/> Total Entries</p>
+              <p className="text-lg md:text-xl font-black text-white truncate">{expenses.length}</p>
             </div>
           </div>
         </div>
 
         {/* Search & Filter */}
-        <div className="flex flex-col md:flex-row gap-4">
+        <div className="flex flex-col md:flex-row gap-4 bg-white dark:bg-slate-900 p-4 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="relative flex-1">
-            <HiOutlineSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+            <HiOutlineSearch className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
             <input 
               type="text" placeholder="Search by payee or category..."
               value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-12 pr-4 py-3.5 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:border-rose-500 transition-all placeholder-slate-400 shadow-sm"
+              className="w-full pl-14 pr-4 py-3.5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none focus:border-rose-500 transition-all placeholder-slate-400 dark:placeholder-slate-500 shadow-sm"
             />
           </div>
           <div className="flex gap-2">
             <select 
               value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
-              className="px-4 py-3.5 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:border-rose-500 cursor-pointer transition-all shadow-sm"
+              className="w-full sm:w-auto px-5 py-3.5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-700 dark:text-slate-300 outline-none focus:border-rose-500 cursor-pointer transition-all shadow-sm"
             >
               <option value="all">All Categories</option>
               {expenseCategories.map(c => <option key={c} value={c}>{c}</option>)}
@@ -729,115 +748,129 @@ const ExpenseTracker = () => {
         </div>
 
         {/* Ledger */}
-        <div className="space-y-6">
+        <div className="space-y-6 sm:space-y-8">
           {isLoading ? (
-            <div className="flex flex-col items-center justify-center py-16">
+            <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm">
               <div className="relative">
-                <div className="absolute inset-0 bg-rose-500 rounded-full blur-xl opacity-30 animate-pulse" />
-                <HiOutlineRefresh className="animate-spin text-4xl text-rose-500 relative" />
+                <div className="absolute inset-0 bg-rose-500 rounded-full blur-2xl opacity-20 animate-pulse scale-150" />
+                <HiOutlineRefresh className="animate-spin text-5xl text-rose-500 relative" />
               </div>
-              <p className="text-sm font-black text-slate-500 uppercase tracking-widest mt-4 animate-pulse">Loading Expenses...</p>
+              <p className="text-xs font-black text-slate-500 uppercase tracking-widest mt-6 animate-pulse">Loading Expenses...</p>
             </div>
           ) : processedExpenses.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 bg-white dark:bg-slate-900 rounded-3xl border border-slate-300 dark:border-slate-800 shadow-sm">
-              <div className="w-20 h-20 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center mb-4">
-                <HiOutlineShoppingCart className="text-4xl text-slate-400" />
+            <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm px-4">
+              <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-[2rem] flex items-center justify-center mb-5 shadow-inner">
+                <HiOutlineShoppingCart className="text-5xl text-slate-300 dark:text-slate-600" />
               </div>
-              <p className="text-sm font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">No expenses found</p>
-              <p className="text-xs text-slate-500 mt-1">Log your first expense to get started</p>
+              <p className="text-lg font-black text-slate-700 dark:text-slate-300">No expense records found</p>
+              <p className="text-sm font-medium text-slate-500 mt-2 text-center max-w-sm">{searchTerm || filterCategory !== 'all' ? 'Adjust your search filters.' : 'Log your first expense to track spending.'}</p>
+              {!searchTerm && filterCategory === 'all' && (
+                <button onClick={openModal} className="mt-6 bg-rose-600 hover:bg-rose-700 text-white font-black px-6 py-3 rounded-xl shadow-lg shadow-rose-500/30 transition-all active:scale-95">Log Expense Now</button>
+              )}
             </div>
           ) : (
             processedExpenses.map((month) => (
-              <div key={month.monthName} className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm">
-                <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50">
-                  <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-                    <HiOutlineCalendar className="text-rose-500" size={18} />
+              <div key={month.monthName} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[2rem] overflow-hidden shadow-sm">
+                <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50">
+                  <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2.5">
+                    <div className="p-2 bg-rose-100 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-lg">
+                      <HiOutlineCalendar size={18} />
+                    </div>
                     {month.monthName}
                   </h2>
                   <div className="text-right">
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Opening</p>
-                    <p className="font-bold text-slate-800 dark:text-slate-200">{currencySymbol}{month.openingBalance.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Month Total</p>
+                    <p className="text-sm font-black text-rose-600 dark:text-rose-400">-{currencySymbol}{month.monthTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
                   </div>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead className="bg-slate-100/50 dark:bg-slate-800/30 text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest border-b border-slate-200 dark:border-slate-700">
+                <div className="overflow-x-auto custom-scrollbar">
+                  <table className="w-full text-left min-w-[900px]">
+                    <thead className="bg-white dark:bg-slate-900 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
                       <tr>
-                        <th className="p-4 pl-6">Date</th>
+                        <th className="p-4 pl-6 w-32">Date</th>
                         <th className="p-4">Payee & Category</th>
                         <th className="p-4">Paid From</th>
-                        <th className="p-4 text-right">Amount</th>
+                        <th className="p-4 text-right">Native Amount</th>
+                        <th className="p-4 text-right">Base Spent</th>
                         <th className="p-4 pr-6 text-right">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                      {month.records.map((rec) => (
-                        <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors group">
-                          <td className="p-4 pl-6">
-                            <p className="font-bold text-slate-700 dark:text-slate-300 text-sm">
-                              {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date}
-                            </p>
-                          </td>
-                          <td className="p-4">
-                            <p className="font-black text-slate-900 dark:text-white text-sm">{rec.title}</p>
-                            <div className="flex gap-1 flex-wrap mt-1">
-                              <span className="inline-block px-2 py-0.5 bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400 text-[9px] font-black uppercase tracking-wider rounded border border-rose-200 dark:border-rose-500/20 shadow-sm">
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
+                      {month.records.map((rec) => {
+                        const dateObj = new Date(rec.date);
+                        const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                        return (
+                          <tr key={rec.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors group ${rec.isSplit ? 'bg-amber-50/30 dark:bg-amber-900/10' : ''}`}>
+                            <td className="p-4 pl-6 align-top">
+                              <p className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2 mt-1">
+                                {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]}
+                                <span className="opacity-50 mx-1 border-l border-slate-300 dark:border-slate-600 pl-2 text-[10px]">{timeStr}</span>
+                              </p>
+                            </td>
+                            <td className="p-4 align-top">
+                              <p className="font-black text-slate-900 dark:text-white text-sm mt-0.5 max-w-[200px] truncate" title={rec.title}>{rec.title}</p>
+                              <span className="inline-block px-2 py-0.5 bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400 text-[8px] font-black uppercase tracking-wider rounded mt-1.5 border border-rose-200 dark:border-rose-500/20 shadow-sm truncate max-w-[180px]">
                                 {rec.category}
                               </span>
                               {rec.khataDetails && rec.khataDetails.length > 0 && (
-                                <span className="inline-block px-2 py-0.5 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 text-[9px] font-black uppercase tracking-wider rounded border border-blue-200 dark:border-blue-500/20 shadow-sm">
+                                <span className="inline-block ml-1 px-2 py-0.5 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 text-[8px] font-black uppercase tracking-wider rounded border border-blue-200 dark:border-blue-500/20 shadow-sm">
                                   <FaUserFriends className="inline mr-1" size={10} /> Shared
                                 </span>
                               )}
-                            </div>
-                          </td>
-                          <td className="p-4">
-                            <div className={`flex items-center gap-2 ${rec.isSplit ? 'bg-amber-100/50 dark:bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-200 dark:border-amber-500/20 w-max' : ''}`}>
-                              {rec.isSplit ? (
-                                <><FaRandom className="text-amber-600 dark:text-amber-500" /> <span className="text-xs font-bold text-amber-700 dark:text-amber-400">Split Expense</span></>
-                              ) : (
-                                <>{getVaultIcon(rec.vault)} <span className="text-xs font-bold text-slate-700 dark:text-slate-300 capitalize">{rec.vault}</span></>
+                            </td>
+                            <td className="p-4 align-top">
+                              <div className={`flex items-center gap-2 mt-1 ${rec.isSplit ? 'bg-amber-100/50 dark:bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-500/30 w-max shadow-sm' : ''}`}>
+                                {rec.isSplit ? (
+                                  <><FaRandom className="text-amber-600 dark:text-amber-500" /> <span className="text-xs font-bold text-amber-800 dark:text-amber-400">Split Expense</span></>
+                                ) : (
+                                  <>{getVaultIcon(rec.vault)} <span className="text-xs font-bold text-slate-700 dark:text-slate-300 capitalize">{rec.vault}</span></>
+                                )}
+                                {!rec.isSplit && rec.subWallet && (
+                                  <span className="text-[9px] text-slate-700 dark:text-slate-300 bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded font-bold border border-slate-300 dark:border-slate-700 shadow-sm">
+                                    {rec.subWallet}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-4 text-right align-top">
+                              <p className="font-black text-slate-800 dark:text-slate-200 text-sm mt-1">{rec.amount.toLocaleString()} <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold ml-0.5">{rec.asset}</span></p>
+                              {rec.asset !== baseCurrency && <p className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-widest">Rate: {rec.exchangeRate}</p>}
+                            </td>
+                            <td className="p-4 text-right align-top">
+                              <p className="text-base font-black text-rose-600 dark:text-rose-400 tracking-tight mt-0.5">
+                                -{currencySymbol}{rec.finalBaseAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                              </p>
+                              {rec.friendsShare > 0 && (
+                                <p className="text-[9px] text-blue-600 dark:text-blue-400 font-bold mt-1">Friends: {currencySymbol}{rec.friendsShare.toLocaleString()}</p>
                               )}
-                              {!rec.isSplit && rec.subWallet && (
-                                <span className="text-[9px] text-slate-600 dark:text-slate-400 bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded font-bold border border-slate-300 dark:border-slate-700">
-                                  {rec.subWallet}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-4 text-right">
-                            <p className="text-base font-black text-rose-600 dark:text-rose-400 tracking-tight">
-                              -{currencySymbol}{rec.finalBaseAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}
-                            </p>
-                            {rec.friendsShare > 0 && (
-                              <p className="text-[9px] text-blue-600 dark:text-blue-400 font-bold mt-1">Friends: {currencySymbol}{rec.friendsShare.toLocaleString()}</p>
-                            )}
-                          </td>
-                          <td className="p-4 pr-6">
-                            <div className="flex items-center justify-end gap-2">
-                              {rec.linkedExpenseId && !rec.linkedExpenseId.startsWith('EXP_') && (
-                                <span className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[8px] font-black rounded border border-amber-200 dark:border-amber-500/30">SYNCED</span>
-                              )}
-                              <button onClick={() => handleEdit(rec)} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-xl transition-all border border-slate-300 dark:border-slate-700 shadow-sm">
-                                <HiOutlinePencil size={16} />
-                              </button>
-                              <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-xl transition-all border border-slate-300 dark:border-slate-700 shadow-sm">
-                                <HiOutlineTrash size={16} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td className="p-4 pr-6 align-top">
+                              <div className="flex items-center justify-end gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity mt-0.5">
+                                {rec.linkedExpenseId && !rec.linkedExpenseId.startsWith('EXP_') && (
+                                  <span className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[8px] font-black rounded border border-amber-300 dark:border-amber-500/30 shadow-sm mr-1"><FaLock className="inline mb-0.5 mr-0.5" />SYNCED</span>
+                                )}
+                                <button onClick={() => handleEdit(rec)} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-500/20 rounded-xl transition-all border border-slate-300 dark:border-slate-700 shadow-sm active:scale-95">
+                                  <HiOutlinePencil size={14} />
+                                </button>
+                                <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-200 dark:hover:bg-rose-500/20 rounded-xl transition-all border border-slate-300 dark:border-slate-700 shadow-sm active:scale-95">
+                                  <HiOutlineTrash size={14} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
 
-                <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex justify-end bg-slate-50/80 dark:bg-slate-800/50">
-                  <div className="text-right">
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Closing Balance</p>
-                    <p className="text-xl font-black text-rose-700 dark:text-rose-400">
-                      {currencySymbol}{(month.closingBalance || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                <div className="px-6 py-5 border-t border-slate-200 dark:border-slate-800 flex justify-end bg-slate-50/50 dark:bg-slate-800/30">
+                  <div className="text-right bg-white dark:bg-slate-900 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Closing Balance</p>
+                    <p className="text-lg font-black text-rose-700 dark:text-rose-400">
+                      {currencySymbol}{(month.closingBalance || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                     </p>
                   </div>
                 </div>
@@ -849,44 +882,44 @@ const ExpenseTracker = () => {
 
       {/* Add/Edit Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90dvh] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-300 dark:border-slate-700">
             
-            <div className={`px-6 py-5 bg-gradient-to-r text-white flex justify-between items-center sticky top-0 z-10 shrink-0 ${formData.isSplit ? 'from-amber-600 to-orange-600' : 'from-rose-600 to-pink-600'}`}>
+            <div className={`px-6 sm:px-8 py-5 flex justify-between items-center sticky top-0 z-10 shrink-0 text-white ${formData.isSplit ? 'bg-gradient-to-r from-amber-600 to-orange-600' : 'bg-gradient-to-r from-rose-600 to-pink-600'}`}>
               <h3 className="text-xl font-black flex items-center gap-2">
-                {formData.isSplit ? <FaRandom /> : <HiOutlineShoppingCart />} 
+                {formData.isSplit ? <FaRandom size={20} /> : <HiOutlineShoppingCart size={24} />} 
                 {editingId ? 'Edit Expense' : 'Log Expense'}
               </h3>
-              <button onClick={closeModal} className="p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors">
+              <button onClick={closeModal} className="p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors active:scale-90">
                 <HiOutlineX size={20} />
               </button>
             </div>
             
-            <form onSubmit={handleSaveEntry} className="p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
+            <form onSubmit={handleSaveEntry} className="p-6 sm:p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
               {formData.isSynced && (
-                <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 p-4 rounded-xl text-xs font-bold leading-relaxed border border-amber-200 dark:border-amber-500/30">
+                <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 p-4 rounded-xl text-xs font-bold leading-relaxed border border-amber-300 dark:border-amber-500/30 shadow-sm">
                   <p className="flex items-center gap-1 mb-1"><HiOutlineExclamationCircle size={16}/> Auto-Synced Entry</p>
-                  This entry is linked to an expense or shift log. You can only update the <span className="underline">Vault/Bank Name</span> here. To change the amount, please edit the source transaction.
+                  This entry is securely linked to a bill or system transaction. To maintain accuracy, you can only update the <span className="underline decoration-amber-400">Deduction Vault</span> here.
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                <div>
-                  <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Payee / Item</label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Payee / Item *</label>
                   <input 
                     disabled={formData.isSynced} type="text" required value={formData.title} 
                     onChange={(e) => setFormData({...formData, title: e.target.value})} 
                     placeholder="e.g., Dinner, Rent"
-                    className="w-full p-4 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 transition-colors placeholder-slate-400 shadow-sm"
+                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 transition-colors shadow-sm"
                   />
                 </div>
-                <div>
-                  <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Category</label>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Category</label>
                   <div className="relative">
                     <select 
                       disabled={formData.isSynced} value={formData.category} 
                       onChange={(e) => setFormData({...formData, category: e.target.value})}
-                      className="w-full p-4 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 appearance-none cursor-pointer transition-colors shadow-sm"
+                      className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 appearance-none cursor-pointer transition-colors shadow-sm"
                     >
                       {expenseCategories.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
@@ -896,37 +929,36 @@ const ExpenseTracker = () => {
               </div>
 
               {!formData.isSynced && (
-                <div className="p-4 bg-slate-50 dark:bg-slate-800/30 rounded-xl border border-slate-300 dark:border-slate-700 shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="font-black text-sm text-slate-900 dark:text-white">Split Payment</h4>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Pay using multiple sources</p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" className="sr-only peer" checked={formData.isSplit} onChange={(e) => setFormData({...formData, isSplit: e.target.checked})} />
-                      <div className="w-11 h-6 bg-slate-300 rounded-full peer dark:bg-slate-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
-                    </label>
+                <label className="flex justify-between items-center p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 transition-colors">
+                  <div>
+                    <h4 className="font-black text-sm text-slate-900 dark:text-white flex items-center gap-2"><FaRandom className="text-amber-500"/> Split Payment</h4>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 font-bold">Pay this bill using multiple vaults</p>
                   </div>
-                </div>
+                  <div className="relative inline-flex items-center shrink-0 ml-4">
+                    <input type="checkbox" className="sr-only peer" checked={formData.isSplit} onChange={(e) => setFormData({...formData, isSplit: e.target.checked})} />
+                    <div className="w-11 h-6 bg-slate-300 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500 shadow-inner"></div>
+                  </div>
+                </label>
               )}
 
               {!formData.isSplit ? (
-                <div className="space-y-5 p-5 bg-rose-50/50 dark:bg-slate-800/80 rounded-2xl border border-rose-200 dark:border-slate-700 shadow-sm">
+                <div className="p-5 sm:p-6 bg-rose-50/50 dark:bg-slate-800/80 rounded-[2rem] border border-rose-200 dark:border-slate-700 shadow-sm space-y-5 animate-in fade-in zoom-in-95">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                    <div>
-                      <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Vault</label>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Deduct From</label>
                       <div className="relative">
                         <select 
                           value={formData.vault} 
                           onChange={(e) => {
                             const v = e.target.value;
+                            const cList = availableCryptos.length > 0 ? availableCryptos : ['BTC'];
                             setFormData({
                               ...formData, vault: v, 
-                              asset: v === 'crypto' ? (availableCryptos[0] || 'BTC') : baseCurrency, 
+                              asset: v === 'crypto' ? cList[0] : baseCurrency, 
                               exchangeRate: 1, subWallet: ''
                             });
                           }} 
-                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 cursor-pointer appearance-none shadow-sm transition-colors"
+                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 appearance-none cursor-pointer transition-colors shadow-sm"
                         >
                           <option value="bank">Bank Account</option>
                           <option value="cash">Physical Cash</option>
@@ -938,14 +970,12 @@ const ExpenseTracker = () => {
                     </div>
                     
                     {(formData.vault === 'bank' || formData.vault === 'online') && (
-                      <div className="animate-in fade-in">
-                        <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">
-                          {formData.vault === 'bank' ? 'Bank' : 'Wallet'}
-                        </label>
+                      <div className="space-y-1.5 animate-in fade-in">
+                        <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">{formData.vault === 'bank' ? 'Bank Name *' : 'Wallet Name *'}</label>
                         <input 
                           type="text" list="sub-wallets-exp" required value={formData.subWallet} 
                           onChange={(e) => setFormData({...formData, subWallet: e.target.value})} 
-                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 placeholder-slate-400 shadow-sm transition-colors"
+                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 placeholder-slate-400 shadow-sm transition-colors"
                           placeholder={formData.vault === 'bank' ? "e.g. SBI" : "e.g. PayPal"}
                         />
                         <datalist id="sub-wallets-exp">{existingBanks.map(b => <option key={b} value={b} />)}</datalist>
@@ -953,18 +983,17 @@ const ExpenseTracker = () => {
                     )}
                     
                     {formData.vault === 'crypto' && (
-                      <div className="animate-in fade-in">
-                        <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Platform</label>
+                      <div className="space-y-1.5 animate-in fade-in">
+                        <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Platform *</label>
                         {formData.isCustomSingle ? (
                           <div className="flex gap-2">
-                            <input type="text" required value={formData.cryptoPlatform} onChange={(e)=>setFormData({...formData, cryptoPlatform: e.target.value})} className="flex-1 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm transition-colors" />
-                            <button type="button" onClick={()=>setFormData({...formData, isCustomSingle: false, cryptoPlatform: cryptoPlatformsList[0]})} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors border border-slate-300 dark:border-slate-600 shadow-sm"><HiOutlineX size={20}/></button>
+                            <input type="text" required value={formData.cryptoPlatform} onChange={(e)=>setFormData({...formData, cryptoPlatform: e.target.value})} className="flex-1 p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none shadow-sm transition-colors focus:ring-2 focus:ring-rose-500/50" />
+                            <button type="button" onClick={()=>setFormData({...formData, isCustomSingle: false, cryptoPlatform: cryptoPlatformsList[0]})} className="p-4 bg-slate-100 dark:bg-slate-800 rounded-2xl text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors border border-slate-200 dark:border-slate-700 shadow-sm active:scale-95"><HiOutlineX size={20}/></button>
                           </div>
                         ) : (
                           <div className="relative">
-                            <select value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} onChange={(e) => { if(e.target.value==='CUSTOM'){setFormData({...formData, isCustomSingle: true, cryptoPlatform: ''})} else {setFormData({...formData, cryptoPlatform: e.target.value})} }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none cursor-pointer appearance-none shadow-sm transition-colors">
-                              {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
-                              <option value="CUSTOM">✨ Custom Platform</option>
+                            <select value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} onChange={(e) => { if(e.target.value==='CUSTOM'){setFormData({...formData, isCustomSingle: true, cryptoPlatform: ''})} else {setFormData({...formData, cryptoPlatform: e.target.value})} }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none cursor-pointer appearance-none shadow-sm transition-colors focus:ring-2 focus:ring-rose-500/50">
+                              {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}<option value="CUSTOM">✨ Custom Platform</option>
                             </select>
                             <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
                           </div>
@@ -974,13 +1003,13 @@ const ExpenseTracker = () => {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                    <div>
-                      <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Asset</label>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Asset Paid In</label>
                       <div className="relative">
                         <select 
                           disabled={formData.isSynced} value={formData.asset} 
                           onChange={(e) => setFormData({...formData, asset: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})}
-                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 appearance-none cursor-pointer shadow-sm transition-colors"
+                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 appearance-none cursor-pointer shadow-sm transition-colors"
                         >
                           {formData.vault === 'crypto' ? (
                             availableCryptos.map(c => <option key={c} value={c}>{c}</option>)
@@ -994,166 +1023,180 @@ const ExpenseTracker = () => {
                         <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
                       </div>
                     </div>
-                    <div>
-                      <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Amount ({formData.asset})</label>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Amount Spent ({formData.asset}) *</label>
                       <input 
                         disabled={formData.isSynced} type="number" step="any" required value={formData.amount} 
                         onChange={(e) => setFormData({...formData, amount: e.target.value})} 
                         placeholder="0.00"
-                        className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 text-lg shadow-sm placeholder-slate-400 transition-colors"
+                        className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-lg text-rose-600 dark:text-rose-400 outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 shadow-sm placeholder-rose-300 dark:placeholder-slate-600 transition-colors"
                       />
                     </div>
                   </div>
 
                   {formData.asset !== baseCurrency && (
-                    <div className="p-4 bg-rose-100/50 dark:bg-slate-900/50 border border-rose-200 dark:border-slate-700 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
-                      <div className="flex items-center gap-3 w-full md:w-auto">
-                        <span className="text-xs font-black text-slate-600 dark:text-slate-400">Rate: 1 {formData.asset} =</span>
-                        <input 
-                          disabled={formData.isSynced} type="number" step="any" required value={formData.exchangeRate} 
-                          onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} 
-                          className="flex-1 w-28 p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none text-sm disabled:opacity-60 shadow-sm transition-colors"
-                        />
-                        <span className="text-xs font-black text-slate-600 dark:text-slate-400">{baseCurrency}</span>
+                    <div className="p-4 sm:p-5 bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800/50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm animate-in fade-in">
+                      <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 shrink-0"><FaExchangeAlt className="text-rose-500" /> Exchange Rate:</span>
+                      <div className="flex items-center gap-2 flex-1 w-full">
+                        <span className="text-sm font-black text-slate-700 dark:text-slate-300 whitespace-nowrap">1 {formData.asset} =</span>
+                        <input disabled={formData.isSynced} type="number" step="any" required value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} className="flex-1 w-full min-w-0 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none disabled:opacity-60 shadow-sm focus:border-rose-500 transition-colors text-center" />
+                        <span className="text-sm font-black text-slate-700 dark:text-slate-300 whitespace-nowrap">{baseCurrency}</span>
                       </div>
-                      <button type="button" onClick={()=>fetchLiveRate(null)} disabled={isFetchingRate === 'single' || formData.isSynced} className="w-full md:w-auto bg-rose-600 hover:bg-rose-700 text-white px-4 py-3 md:py-2 rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center justify-center gap-1 shadow-sm transition-colors">
-                        <HiOutlineRefresh className={isFetchingRate === 'single' ? "animate-spin" : ""} size={14} /> Live
+                      <button type="button" onClick={()=>fetchLiveRate(null)} disabled={isFetchingRate === 'single' || formData.isSynced} className="w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white px-4 py-3 sm:py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center justify-center gap-1.5 shadow-sm transition-colors shrink-0 active:scale-95">
+                        <HiOutlineRefresh className={isFetchingRate === 'single' ? "animate-spin" : ""} size={14} /> Live Rate
                       </button>
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-4 animate-in fade-in zoom-in-95">
                   {formData.splitSources.map((split, index) => (
-                    <div key={index} className="p-5 border border-amber-300 dark:border-amber-500/30 bg-amber-50/40 dark:bg-amber-900/10 rounded-2xl space-y-4 shadow-sm">
+                    <div key={index} className="p-5 sm:p-6 border-2 border-amber-200 dark:border-amber-700/50 bg-amber-50/50 dark:bg-amber-900/10 rounded-[2rem] space-y-5 shadow-sm">
                       <div className="flex justify-between items-center">
-                        <span className="text-xs font-black text-amber-800 dark:text-amber-400 uppercase tracking-widest">Source {index + 1}</span>
+                        <span className="text-xs font-black text-amber-700 dark:text-amber-400 uppercase tracking-widest flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-full bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200 flex items-center justify-center shadow-sm">{index + 1}</span> Source
+                        </span>
                         {formData.splitSources.length > 2 && (
-                          <button type="button" onClick={() => removeSplitSource(index)} className="text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-900/30 p-1.5 rounded-lg border border-transparent hover:border-rose-200 dark:hover:border-rose-800 transition-colors">
-                            <HiOutlineTrash size={16}/>
-                          </button>
+                          <button type="button" onClick={() => removeSplitSource(index)} className="text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-900/30 p-2 rounded-xl border border-transparent hover:border-rose-200 dark:hover:border-rose-800 transition-colors active:scale-90 shadow-sm"><HiOutlineTrash size={16}/></button>
                         )}
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <select value={split.vault} onChange={(e) => updateSplit(index, 'vault', e.target.value)} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors">
-                          <option value="bank">Bank Account</option><option value="cash">Physical Cash</option><option value="online">Online Wallet</option><option value="crypto">Crypto Engine</option>
-                        </select>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Vault</label>
+                          <div className="relative">
+                            <select value={split.vault} onChange={(e) => updateSplit(index, 'vault', e.target.value)} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors focus:ring-2 focus:ring-amber-500/50 appearance-none">
+                              <option value="bank">Bank Account</option><option value="cash">Physical Cash</option><option value="online">Online Wallet</option><option value="crypto">Crypto Engine</option>
+                            </select>
+                            <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18} />
+                          </div>
+                        </div>
                         {(split.vault === 'bank' || split.vault === 'online') && (
-                          <input type="text" list={`split-banks-${index}`} required value={split.subWallet} onChange={(e) => updateSplit(index, 'subWallet', e.target.value)} placeholder={split.vault === 'bank' ? "Bank Name" : "Wallet Name"} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400 transition-colors" />
+                          <div className="space-y-1.5 animate-in fade-in"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Bank / Wallet</label><input type="text" list={`split-banks-${index}`} required value={split.subWallet} onChange={(e) => updateSplit(index, 'subWallet', e.target.value)} placeholder={split.vault === 'bank' ? "Bank Name" : "Wallet Name"} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400 transition-colors focus:ring-2 focus:ring-amber-500/50" /></div>
                         )}
                         {split.vault === 'crypto' && (
-                          <select value={split.cryptoPlatform} onChange={(e) => updateSplit(index, 'cryptoPlatform', e.target.value)} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors">
-                            {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
-                          </select>
+                          <div className="space-y-1.5 animate-in fade-in">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Platform</label>
+                            <div className="relative">
+                              <select value={split.cryptoPlatform} onChange={(e) => updateSplit(index, 'cryptoPlatform', e.target.value)} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors focus:ring-2 focus:ring-amber-500/50 appearance-none">
+                                {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
+                              </select>
+                              <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18} />
+                            </div>
+                          </div>
                         )}
-                        <select value={split.asset} onChange={(e) => { updateSplit(index, 'asset', e.target.value); updateSplit(index, 'exchangeRate', 1); }} className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors">
-                          {split.vault === 'crypto' 
-                            ? availableCryptos.map(c => <option key={c} value={c}>{c}</option>) 
-                            : [baseCurrency, ...availableFiats.filter(c => c !== baseCurrency)].map(c => <option key={c} value={c}>{c}</option>)
-                          }
-                        </select>
-                        <input type="number" step="any" required value={split.amount} onChange={(e) => updateSplit(index, 'amount', e.target.value)} placeholder="Amount" className="p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400 transition-colors" />
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Asset</label>
+                          <div className="relative">
+                            <select value={split.asset} onChange={(e) => { updateSplit(index, 'asset', e.target.value); updateSplit(index, 'exchangeRate', 1); }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors focus:ring-2 focus:ring-amber-500/50 appearance-none">
+                              {split.vault === 'crypto' ? availableCryptos.map(c => <option key={c} value={c}>{c}</option>) : [baseCurrency, ...availableFiats.filter(c => c !== baseCurrency)].map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18} />
+                          </div>
+                        </div>
+                        <div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Amount ({split.asset})</label><input type="number" step="any" required value={split.amount} onChange={(e) => updateSplit(index, 'amount', e.target.value)} placeholder="0.00" className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-amber-700 dark:text-amber-500 outline-none shadow-sm placeholder-slate-400 transition-colors focus:ring-2 focus:ring-amber-500/50 text-lg" /></div>
                       </div>
                       
                       {split.asset !== baseCurrency && (
-                        <div className="flex flex-col md:flex-row items-center gap-3 pt-2">
-                          <button type="button" onClick={()=>fetchLiveRate(index)} disabled={isFetchingRate === index} className="w-full md:w-auto text-[10px] font-black bg-amber-500 hover:bg-amber-600 text-white px-4 py-3 md:py-2 rounded-lg flex items-center justify-center gap-1 uppercase tracking-widest transition-colors shadow-sm">
-                            <HiOutlineRefresh className={isFetchingRate === index ? "animate-spin" : ""} size={14}/> Rate
-                          </button>
-                          <div className="flex items-center gap-3 w-full md:w-auto flex-1">
-                            <span className="text-xs font-black text-slate-600 dark:text-slate-400">1 {split.asset} =</span>
-                            <input type="number" step="any" required value={split.exchangeRate} onChange={(e) => updateSplit(index, 'exchangeRate', e.target.value)} className="flex-1 p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-sm font-bold text-slate-900 dark:text-white outline-none shadow-sm transition-colors" />
+                        <div className="p-4 bg-white dark:bg-slate-800 border border-amber-200 dark:border-amber-800/50 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
+                          <span className="text-xs font-black text-slate-700 dark:text-slate-400 flex items-center gap-2 shrink-0"><FaExchangeAlt className="text-amber-500"/> Rate:</span>
+                          <div className="flex items-center gap-2 flex-1 w-full">
+                            <span className="text-sm font-black text-slate-700 dark:text-slate-400 whitespace-nowrap">1 {split.asset} =</span>
+                            <input type="number" step="any" required value={split.exchangeRate} onChange={(e) => updateSplit(index, 'exchangeRate', e.target.value)} className="flex-1 w-full min-w-0 p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-bold text-slate-900 dark:text-white outline-none shadow-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-500/50 transition-colors" />
+                            <span className="text-sm font-black text-slate-700 dark:text-slate-400 whitespace-nowrap">{baseCurrency}</span>
                           </div>
+                          <button type="button" onClick={()=>fetchLiveRate(index)} disabled={isFetchingRate === index} className="w-full md:w-auto text-[10px] font-black bg-amber-500 hover:bg-amber-600 text-white px-4 py-3 md:py-2 rounded-lg flex items-center justify-center gap-1 uppercase tracking-widest transition-colors shadow-sm shrink-0"><HiOutlineRefresh className={isFetchingRate === index ? "animate-spin" : ""} size={14}/> Live Rate</button>
                         </div>
                       )}
                     </div>
                   ))}
-                  <button type="button" onClick={addSplitSource} className="w-full py-4 border-2 border-dashed border-amber-400 dark:border-amber-700/50 text-amber-700 dark:text-amber-500 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors flex items-center justify-center gap-2">
-                    <HiOutlinePlus size={18}/> Add Another Source
-                  </button>
+                  <button type="button" onClick={addSplitSource} className="w-full py-4 border-2 border-dashed border-amber-300 dark:border-amber-700/50 text-amber-700 dark:text-amber-500 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors flex items-center justify-center gap-2 active:scale-95 shadow-sm"><HiOutlinePlus size={18}/> Add Payment Source</button>
                 </div>
               )}
 
               {!formData.isSynced && (
-                <div className="p-4 bg-blue-50 dark:bg-blue-900/10 rounded-xl border border-blue-200 dark:border-blue-800/50 shadow-sm">
+                <div className="p-5 sm:p-6 bg-blue-50/50 dark:bg-blue-900/10 rounded-[2rem] border border-blue-200 dark:border-blue-800/50 shadow-sm animate-in fade-in">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h4 className="font-black text-sm text-blue-700 dark:text-blue-400 flex items-center gap-2"><FaUserFriends/> Split with Friends</h4>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Auto-log their share into Smart Khata</p>
+                      <h4 className="font-black text-sm text-blue-700 dark:text-blue-400 flex items-center gap-2"><FaUserFriends size={18}/> Split with Friends</h4>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 font-bold">Auto-log their share into your Smart Khata ledger</p>
                     </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
                       <input type="checkbox" className="sr-only peer" checked={formData.isKhataSplit} onChange={(e) => setFormData({...formData, isKhataSplit: e.target.checked})} />
-                      <div className="w-11 h-6 bg-slate-300 rounded-full peer dark:bg-slate-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                      <div className="w-11 h-6 bg-slate-300 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500 shadow-inner"></div>
                     </label>
                   </div>
 
                   {formData.isKhataSplit && (
-                    <div className="mt-4 space-y-3">
-                      {/* 🚀 FIXED: Mobile Responsive Flex Fix for Khata Splits */}
+                    <div className="mt-5 space-y-4 animate-in fade-in">
                       {formData.khataSplits.map((ks, index) => (
-                        <div key={index} className="flex items-center gap-2 w-full">
-                          <div className="flex-1 min-w-0">
+                        <div key={index} className="flex flex-col sm:flex-row items-center gap-3 w-full bg-white dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                          <div className="flex-1 w-full min-w-0">
                             <input 
-                              type="text" list={`khata-${index}`} required placeholder="Name" 
+                              type="text" list={`khata-${index}`} required placeholder="Friend's Name" 
                               value={ks.partyName} 
                               onChange={(e) => updateKhataSplit(index, 'partyName', e.target.value)} 
-                              className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400 transition-colors" 
+                              className="w-full p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none placeholder-slate-400 transition-colors focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50" 
                             />
                             <datalist id={`khata-${index}`}>{existingParties.map(p => <option key={p} value={p} />)}</datalist>
                           </div>
-                          <div className="w-24 sm:w-32 shrink-0">
+                          <div className="w-full sm:w-32 shrink-0 flex items-center gap-2">
                             <input 
-                              type="number" step="any" required placeholder="Amount" 
+                              type="number" step="any" required placeholder="Amt Owed" 
                               value={ks.amount} 
                               onChange={(e) => updateKhataSplit(index, 'amount', e.target.value)} 
-                              className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400 transition-colors" 
+                              className="w-full p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none placeholder-slate-400 transition-colors focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 text-center" 
                             />
+                            {formData.khataSplits.length > 1 && (
+                              <button 
+                                type="button" 
+                                onClick={() => removeKhataSplit(index)} 
+                                className="shrink-0 text-rose-500 bg-rose-50 dark:bg-rose-900/30 hover:bg-rose-100 dark:hover:bg-rose-800/50 p-3 rounded-lg transition-colors border border-rose-200 dark:border-rose-800 active:scale-95"
+                              >
+                                <HiOutlineTrash size={16}/>
+                              </button>
+                            )}
                           </div>
-                          {formData.khataSplits.length > 1 && (
-                            <button 
-                              type="button" 
-                              onClick={() => removeKhataSplit(index)} 
-                              className="shrink-0 text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-900/30 p-2.5 rounded-lg transition-colors border border-transparent hover:border-rose-200 dark:hover:border-rose-800"
-                            >
-                              <HiOutlineX size={16}/>
-                            </button>
-                          )}
                         </div>
                       ))}
-                      <button type="button" onClick={addKhataSplit} className="text-[10px] font-black text-blue-600 dark:text-blue-400 flex items-center gap-1 hover:underline"><HiOutlinePlus size={14}/> Add Friend</button>
+                      <button type="button" onClick={addKhataSplit} className="text-[10px] font-black text-blue-600 dark:text-blue-400 flex items-center gap-1.5 hover:underline mt-2 bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 rounded-lg w-max active:scale-95 transition-all"><HiOutlinePlus size={14}/> Add Friend</button>
                     </div>
                   )}
                 </div>
               )}
 
-              <div className="flex flex-col sm:flex-row items-start sm:items-end justify-between pt-4 border-t border-slate-200 dark:border-slate-700 gap-4">
-                <div className="w-full sm:w-1/3">
-                  <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Date</label>
-                  <input 
-                    disabled={formData.isSynced} type="date" required value={formData.date} 
-                    onChange={(e) => setFormData({...formData, date: e.target.value})} 
-                    className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none disabled:opacity-60 shadow-sm transition-colors" 
-                  />
-                  <p className="text-[9px] text-rose-600 dark:text-rose-400 mt-1 ml-1 font-bold">{formatGlobalDate ? formatGlobalDate(formData.date, 'short') : ''}</p>
-                </div>
-                <div className="text-left sm:text-right w-full sm:w-auto">
-                  <p className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">Total Expense</p>
-                  <p className="text-2xl md:text-3xl font-black text-rose-600 dark:text-rose-400 tracking-tight mt-1">
-                    -{currencySymbol}{(formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, formData.asset !== baseCurrency, formData.exchangeRate)).toLocaleString(undefined, {minimumFractionDigits: 2})}
-                  </p>
-                  {formData.isKhataSplit && (
-                    <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 mt-1">Net Personal: {currencySymbol}{Math.max(0, (formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, formData.asset !== baseCurrency, formData.exchangeRate)) - getBaseAmount(getKhataTotal(), formData.asset !== baseCurrency, formData.exchangeRate)).toLocaleString()}</p>
-                  )}
+              <div className="p-5 sm:p-6 bg-slate-100 dark:bg-slate-800/80 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-inner mt-2">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-5">
+                  <div className="w-full sm:w-1/2">
+                    <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">Date & Time *</label>
+                    <input 
+                      disabled={formData.isSynced} type="datetime-local" required value={formData.date} 
+                      onChange={(e) => setFormData({...formData, date: e.target.value})} 
+                      className="w-full mt-1.5 p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none disabled:opacity-60 shadow-sm transition-colors focus:border-rose-500 focus:ring-2 focus:ring-rose-500/50 cursor-pointer" 
+                    />
+                    <p className="text-[10px] text-rose-600 dark:text-rose-400 mt-2 ml-1 font-bold">{formatGlobalDate ? formatGlobalDate(formData.date, 'full') : ''}</p>
+                  </div>
+                  
+                  <div className="text-left sm:text-right w-full sm:w-auto sm:border-l border-slate-300 dark:border-slate-700 sm:pl-6">
+                    <p className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Total Expense Deduction</p>
+                    <p className="text-3xl sm:text-4xl font-black text-rose-600 dark:text-rose-400 tracking-tight mt-1 truncate">
+                      -{currencySymbol}{(formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, formData.asset !== baseCurrency, formData.exchangeRate)).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                    </p>
+                    {formData.isKhataSplit && (
+                      <p className="text-xs font-black text-blue-600 dark:text-blue-400 mt-2 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded inline-block">
+                        Net Personal Expense: {currencySymbol}{Math.max(0, (formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, formData.asset !== baseCurrency, formData.exchangeRate)) - getBaseAmount(getKhataTotal(), formData.asset !== baseCurrency, formData.exchangeRate)).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-2">
+              <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-4 z-10">
                 <button 
                   type="submit" disabled={isSaving} 
-                  className={`w-full p-4 rounded-2xl font-black text-white text-lg transition-all shadow-xl flex items-center justify-center gap-2 shrink-0 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'active:scale-95'} ${formData.isSplit ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 shadow-amber-500/30' : 'bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 shadow-rose-500/30'}`}
+                  className={`w-full p-4 sm:p-5 rounded-[2rem] font-black text-sm sm:text-base uppercase tracking-widest text-white transition-all shadow-xl flex items-center justify-center gap-2 shrink-0 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'active:scale-95'} ${formData.isSplit ? 'bg-gradient-to-r from-amber-600 to-orange-600 shadow-amber-500/30 hover:from-amber-700 hover:to-orange-700' : 'bg-gradient-to-r from-rose-600 to-pink-600 shadow-rose-500/30 hover:from-rose-700 hover:to-pink-700'}`}
                 >
-                  {isSaving && <HiOutlineRefresh className="animate-spin text-2xl" />}
-                  {isSaving ? 'Processing...' : (editingId ? 'Update Expense' : (formData.isKhataSplit ? 'Save & Sync Khata' : 'Save Expense'))}
+                  {isSaving ? <HiOutlineRefresh className="animate-spin text-2xl" /> : <HiOutlineShoppingCart size={20} />}
+                  {isSaving ? 'Processing...' : (editingId ? 'Update Ledger' : (formData.isKhataSplit ? 'Save & Sync Khata' : 'Secure Payment'))}
                 </button>
               </div>
             </form>
@@ -1163,50 +1206,51 @@ const ExpenseTracker = () => {
 
       {/* Delete Confirmation Modal */}
       {deleteContext && (
-        <div className="fixed inset-0 z-[500] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden border border-slate-300 dark:border-slate-700">
-            <div className="px-6 py-5 bg-gradient-to-r from-rose-600 to-pink-600 text-white">
+        <div className="fixed inset-0 z-[600] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2rem] shadow-2xl overflow-hidden border border-slate-300 dark:border-slate-700 flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95">
+            <div className="px-6 py-5 bg-gradient-to-r from-rose-600 to-pink-600 text-white shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center shadow-inner">
                   <HiOutlineShieldCheck size={24} />
                 </div>
                 <div>
-                  <h3 className="text-lg font-black">Security Verification</h3>
-                  <p className="text-xs text-white/70">Enter PIN to confirm deletion</p>
+                  <h3 className="text-xl font-black">Security Verification</h3>
+                  <p className="text-[10px] font-bold text-rose-100 uppercase tracking-widest">Permanent Ledger Deletion</p>
                 </div>
               </div>
             </div>
             
-            <form onSubmit={executeSecureDelete} className="p-6 space-y-5">
-              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-500/30 rounded-xl">
-                <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
+            <form onSubmit={executeSecureDelete} className="p-6 sm:p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
+              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-500/30 rounded-2xl shadow-sm">
+                <p className="text-xs font-bold text-amber-800 dark:text-amber-300 leading-relaxed">
                   You are deleting <span className="font-black">"{deleteContext.title}"</span> worth 
                   <span className="font-black"> {currencySymbol}{deleteContext.finalBaseAmount?.toLocaleString()}</span>
                 </p>
                 {deleteContext.linkedExpenseId && !deleteContext.linkedExpenseId.startsWith('EXP_') && (
-                  <p className="text-[10px] text-rose-600 dark:text-rose-400 mt-2 font-bold flex items-center gap-1">
-                    <HiOutlineExclamationCircle size={14}/> Auto-synced entry - deletion will affect vault balances
+                  <p className="text-[10px] text-rose-600 dark:text-rose-400 mt-2 font-bold flex items-center gap-1.5 bg-rose-50 dark:bg-rose-900/20 p-2 rounded-lg border border-rose-200 dark:border-rose-800/50">
+                    <HiOutlineExclamationCircle size={14} className="shrink-0"/> Auto-synced entry. Deletion will automatically reverse the original transaction in your vault!
                   </p>
                 )}
               </div>
               
-              <div>
-                <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Security PIN</label>
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1 text-center block">Security PIN</label>
                 <input 
                   type="password" maxLength={6} required autoFocus
                   value={pinInput} onChange={(e) => setPinInput(e.target.value)}
-                  className="w-full text-center tracking-[0.3em] text-xl p-4 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors"
+                  className="w-full text-center tracking-[0.4em] text-2xl p-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-2xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors shadow-sm"
+                  placeholder="••••"
                 />
-                {pinError && <p className="text-xs font-bold text-rose-600 dark:text-rose-400 mt-2 text-center">{pinError}</p>}
+                {pinError && <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-2 text-center animate-bounce">{pinError}</p>}
               </div>
 
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setDeleteContext(null)} className="flex-1 p-4 rounded-xl font-black text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 transition-colors">
+                <button type="button" onClick={() => setDeleteContext(null)} className="flex-1 p-4 rounded-xl font-black text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 transition-colors shadow-sm active:scale-95 uppercase tracking-widest">
                   Cancel
                 </button>
-                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-xl font-black text-sm bg-gradient-to-r from-rose-600 to-pink-600 text-white hover:from-rose-700 hover:to-pink-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30">
-                  {isVerifying ? <HiOutlineRefresh className="animate-spin" size={18} /> : null}
-                  Confirm Delete
+                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-xl font-black text-sm bg-gradient-to-r from-rose-600 to-pink-600 text-white hover:from-rose-700 hover:to-pink-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30 active:scale-95 uppercase tracking-widest">
+                  {isVerifying ? <HiOutlineRefresh className="animate-spin" size={18} /> : <HiOutlineTrash size={18} />}
+                  Confirm
                 </button>
               </div>
             </form>

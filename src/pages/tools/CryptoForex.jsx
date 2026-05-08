@@ -1,345 +1,258 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '../../hooks/useAuth';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../firebase/firebaseConfig';
 import { 
   HiOutlineRefresh, HiOutlineSwitchVertical, HiOutlineCalculator, 
-  HiOutlineTrendingUp 
+  HiOutlineTrendingUp
 } from 'react-icons/hi';
-import { FaExchangeAlt, FaBitcoin } from 'react-icons/fa';
+import { FaExchangeAlt } from 'react-icons/fa';
 
-// 🚀 Mapping for Forex Flags & Names
-const fiatCurrencies = [
-  { symbol: 'USD', name: 'US Dollar', flag: 'us' },
-  { symbol: 'EUR', name: 'Euro', flag: 'eu' },
-  { symbol: 'GBP', name: 'British Pound', flag: 'gb' },
-  { symbol: 'INR', name: 'Indian Rupee', flag: 'in' },
-  { symbol: 'NPR', name: 'Nepalese Rupee', flag: 'np' },
-  { symbol: 'AED', name: 'UAE Dirham', flag: 'ae' },
-  { symbol: 'SAR', name: 'Saudi Riyal', flag: 'sa' },
-  { symbol: 'AUD', name: 'Australian Dollar', flag: 'au' },
-  { symbol: 'CAD', name: 'Canadian Dollar', flag: 'ca' },
-  { symbol: 'SGD', name: 'Singapore Dollar', flag: 'sg' },
-  { symbol: 'JPY', name: 'Japanese Yen', flag: 'jp' },
-  { symbol: 'CNY', name: 'Chinese Yuan', flag: 'cn' },
-  { symbol: 'PKR', name: 'Pakistani Rupee', flag: 'pk' },
-  { symbol: 'BDT', name: 'Bangladeshi Taka', flag: 'bd' }
-];
+// 🚀 MASTER IMPORT FROM CONSTANTS
+import { currenciesList } from '../../utils/marketConstants';
 
-// 🚀 Fallback Database for Crypto
+// Fallback Database for Crypto Icons & Default Prices
 const defaultCryptoDatabase = {
-  BTC: { id: 'bitcoin', fallbackPrice: 65000 },
-  ETH: { id: 'ethereum', fallbackPrice: 3000 },
-  USDT: { id: 'tether', fallbackPrice: 1.00 },
-  BNB: { id: 'binancecoin', fallbackPrice: 500 },
-  SOL: { id: 'solana', fallbackPrice: 140 },
-  XRP: { id: 'ripple', fallbackPrice: 0.60 },
-  DOGE: { id: 'dogecoin', fallbackPrice: 0.15 },
-  TRX: { id: 'tron', fallbackPrice: 0.12 },
-  LTC: { id: 'litecoin', fallbackPrice: 80 },
-  FEY: { id: 'feyorra', fallbackPrice: 0.0091 },
-  FLT: { id: 'fluenc', fallbackPrice: 0.05 },
-  CTC: { id: 'tether', fallbackPrice: 1.00 },
-  ROX: { id: 'tether', fallbackPrice: 1.00 }
+  BTC: { id: 'bitcoin', fallbackPrice: 65000, color: 'text-orange-500', bg: 'bg-orange-500/10' },
+  ETH: { id: 'ethereum', fallbackPrice: 3000, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+  USDT: { id: 'tether', fallbackPrice: 1.00, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+  BNB: { id: 'binancecoin', fallbackPrice: 500, color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
+  SOL: { id: 'solana', fallbackPrice: 140, color: 'text-purple-500', bg: 'bg-purple-500/10' },
 };
 
-const binanceSafeCoins = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC'];
+const fetchWithRetry = async (url, retries = 2) => {
+  for (let i = 0; i <= retries; i++) {
+    try { const res = await fetch(url); if (res.status !== 429) return res; if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1))); } catch (e) { if (i === retries) return null; }
+  }
+  return null;
+};
 
 const CryptoForex = () => {
-  const { selectedCryptos = [], baseCurrency = 'USD', formatGlobalDate } = useAuth();
+  const { user, selectedCryptos = [], baseCurrency = 'USD', formatGlobalDate } = useAuth();
   
   const [ratesUSD, setRatesUSD] = useState({}); 
   const [isFetching, setIsFetching] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(new Date());
+  const [customUserCoins, setCustomUserCoins] = useState([]);
 
-  // Extracted Cryptos from User Context
+  useEffect(() => {
+    const fetchUserData = async () => { if (!user) return; const sn = await getDoc(doc(db, "users", user.uid)); if (sn.exists() && sn.data().customCoins) setCustomUserCoins(sn.data().customCoins); };
+    fetchUserData();
+  }, [user]);
+
+  const fullDatabase = useMemo(() => {
+    const m = new Map();
+    selectedCryptos.forEach(c => { if (typeof c === 'object') m.set(c.symbol.toUpperCase(), c); else m.set(c.toUpperCase(), { symbol: c.toUpperCase(), id: c.toLowerCase() }); });
+    customUserCoins.forEach(c => { const e = m.get(c.symbol.toUpperCase()); m.set(c.symbol.toUpperCase(), { ...e, ...c }); });
+    return Array.from(m.values());
+  }, [customUserCoins, selectedCryptos]);
+
   const activeCryptos = useMemo(() => {
-    const list = selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
+    const list = fullDatabase.map(c => c.symbol.toUpperCase());
     if (!list.includes('USDT')) list.push('USDT');
     if (!list.includes('BTC')) list.push('BTC');
     return [...new Set(list)];
-  }, [selectedCryptos]);
+  }, [fullDatabase]);
 
-  // Calculator State
   const [assetFrom, setAssetFrom] = useState(activeCryptos[0] || 'BTC');
   const [assetTo, setAssetTo] = useState(baseCurrency);
   const [amountFrom, setAmountFrom] = useState('1');
   const [amountTo, setAmountTo] = useState('0');
 
-  const fetchAllRates = async () => {
+  const fetchAllRates = useCallback(async () => {
     setIsFetching(true);
     try {
-      const newRates = { USD: 1 }; 
+      const newRates = { USD: 1 };
+      
+      // 1. Fetch Fiat Rates (Using global currenciesList)
+      try { 
+        const fr = await fetchWithRetry('https://api.exchangerate-api.com/v4/latest/USD'); 
+        if (fr && fr.ok) { 
+          const fd = await fr.json(); 
+          currenciesList.forEach(f => { 
+            if (fd.rates[f.code]) newRates[f.code] = 1 / fd.rates[f.code]; 
+          }); 
+        } 
+      } catch (e) {}
 
-      // 1. Fetch Fiat Rates (Base USD)
-      const fiatRes = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
-      if (fiatRes.ok) {
-         const fiatData = await fiatRes.json();
-         fiatCurrencies.forEach(fiat => {
-           if (fiatData.rates[fiat.symbol]) {
-             newRates[fiat.symbol] = 1 / fiatData.rates[fiat.symbol]; 
-           }
-         });
-      }
-
-      // 2. Fetch Crypto Rates (Hybrid CG + GeckoTerminal)
-      const normalCoins = [];
-      const contractCoins = [];
-
-      activeCryptos.forEach(sym => {
-        const obj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === sym.toUpperCase()) || {};
-        if (obj.fetchMode === 'contract' && obj.network && obj.contractAddress) {
-           contractCoins.push({ ...obj, symbol: sym.toUpperCase() });
-        } else {
-           normalCoins.push({ symbol: sym.toUpperCase(), id: obj.id || defaultCryptoDatabase[sym.toUpperCase()]?.id || sym.toLowerCase(), fallbackPrice: obj.fallbackPrice || defaultCryptoDatabase[sym.toUpperCase()]?.fallbackPrice || 0 });
-        }
-      });
-
+      // 2. Fetch Crypto Rates
+      const normalCoins = activeCryptos.filter(s => !fullDatabase.find(c => c.symbol === s.toUpperCase())?.fetchMode).map(s => fullDatabase.find(c => c.symbol === s.toUpperCase())?.id || s.toLowerCase());
       let cgJson = {};
-      let geckoTerminalData = {};
-
-      if (normalCoins.length > 0) {
-        const cgIds = [...new Set(normalCoins.map(c => c.id))].join(',');
-        try {
-          const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${cgIds}&vs_currencies=usd`);
-          if (cgRes.ok) cgJson = await cgRes.json();
-        } catch (e) { console.warn("CoinGecko API limit, utilizing fallbacks."); }
-      }
-
-      for (const c of contractCoins) {
-        try {
-           const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${c.network}/tokens/${c.contractAddress}`);
-           if (gtRes.ok) {
-              const gtJson = await gtRes.json();
-              geckoTerminalData[c.id || c.symbol.toLowerCase()] = parseFloat(gtJson.data.attributes.price_usd);
-           }
-        } catch (error) {}
+      if (normalCoins.length > 0) { 
+        try { 
+          const r = await fetchWithRetry(`https://api.coingecko.com/api/v3/simple/price?ids=${normalCoins.join(',')}&vs_currencies=usd`); 
+          if (r && r.ok) cgJson = await r.json(); 
+        } catch (e) {} 
       }
 
       await Promise.all(activeCryptos.map(async (sym) => {
         const upperSym = sym.toUpperCase();
-        const obj = selectedCryptos.find(c => (typeof c === 'string' ? c : c.symbol).toUpperCase() === upperSym) || {};
-        const fallback = defaultCryptoDatabase[upperSym] || {};
-        const searchId = obj.id || fallback.id || sym.toLowerCase();
-
-        let priceUsd = null;
-
-        if (obj.fetchMode === 'contract') {
-           priceUsd = geckoTerminalData[searchId];
-        } else {
-           if (cgJson[searchId]?.usd) priceUsd = parseFloat(cgJson[searchId].usd);
-        }
-
-        // Binance Fallback
-        if (!priceUsd && binanceSafeCoins.includes(upperSym)) {
-          try {
-            const bSym = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
-            const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
-            if (bRes.ok) {
-              const bData = await bRes.json();
-              priceUsd = searchId === 'tether' ? 1.00 : parseFloat(bData.price);
-            }
+        const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || { symbol: upperSym, id: sym.toLowerCase() };
+        let priceUsd = cgJson[dbCoin.id || upperSym.toLowerCase()]?.usd || 0;
+        
+        if (!priceUsd && dbCoin.fetchMode === 'contract' && dbCoin.contractAddress) {
+          try { 
+            const dr = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${dbCoin.contractAddress}`); 
+            if (dr && dr.ok) { 
+              const dd = await dr.json(); 
+              if (dd.pairs?.length > 0) priceUsd = parseFloat(dd.pairs[0].priceUsd); 
+            } 
           } catch(e) {}
         }
-
-        if (!priceUsd) {
-          priceUsd = parseFloat(obj.fallbackPrice || fallback.fallbackPrice || 0);
+        
+        if (!priceUsd) { 
+          try { 
+            if (['USDT','USDC','DAI'].includes(upperSym)) priceUsd = 1.00; 
+            else { 
+              const br = await fetchWithRetry(`https://api.binance.com/api/v3/ticker/price?symbol=${upperSym}USDT`); 
+              if (br && br.ok) priceUsd = parseFloat((await br.json()).price); 
+            } 
+          } catch(e) {} 
         }
-
-        newRates[upperSym] = priceUsd;
+        
+        if (!priceUsd) priceUsd = parseFloat(dbCoin.fallbackPrice || defaultCryptoDatabase[upperSym]?.fallbackPrice || 0);
+        if (priceUsd > 0) newRates[upperSym] = priceUsd;
       }));
 
       setRatesUSD(newRates);
       setLastUpdated(new Date());
-    } catch (error) {
-      console.error("Rates fetch error", error);
-    } finally {
-      setIsFetching(false);
-    }
-  };
+    } catch (error) { console.error(error); } finally { setIsFetching(false); }
+  }, [activeCryptos, fullDatabase]);
 
-  useEffect(() => {
-    fetchAllRates();
-    const interval = setInterval(fetchAllRates, 60000); // Fast 60s refresh
-    return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCryptos, baseCurrency]);
+  useEffect(() => { fetchAllRates(); const i = setInterval(fetchAllRates, 60000); return () => clearInterval(i); }, [fetchAllRates]);
 
-  // Handle Conversion Math
   useEffect(() => {
     if (Object.keys(ratesUSD).length === 0) return;
-    
-    const rateFrom = ratesUSD[assetFrom] || 0;
-    const rateTo = ratesUSD[assetTo] || 0;
-
-    if (rateFrom > 0 && rateTo > 0 && amountFrom !== '') {
-      const valueInUSD = parseFloat(amountFrom) * rateFrom;
-      const convertedValue = valueInUSD / rateTo;
-      
-      if (convertedValue < 0.0001) {
-        setAmountTo(convertedValue.toFixed(8));
-      } else if (convertedValue < 1) {
-        setAmountTo(convertedValue.toFixed(4));
-      } else {
-        setAmountTo(convertedValue.toFixed(2));
-      }
-    } else {
-      setAmountTo('');
-    }
+    const rf = ratesUSD[assetFrom] || 0, rt = ratesUSD[assetTo] || 0;
+    if (rf > 0 && rt > 0 && amountFrom !== '') {
+      const v = parseFloat(amountFrom) * rf / rt;
+      setAmountTo(v < 0.0001 ? v.toFixed(8) : v < 1 ? v.toFixed(4) : v.toFixed(2));
+    } else setAmountTo('');
   }, [amountFrom, assetFrom, assetTo, ratesUSD]);
 
-  const handleSwapAssets = () => {
-    setAssetFrom(assetTo);
-    setAssetTo(assetFrom);
-  };
+  const handleSwapAssets = () => { setAssetFrom(assetTo); setAssetTo(assetFrom); };
 
   return (
-    <div className="pt-24 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 max-w-4xl mx-auto px-4 md:px-0">
-      
-      {/* 🚀 HEADER */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-3.5 bg-indigo-500/10 text-indigo-600 rounded-3xl ring-1 ring-indigo-500/20 shadow-lg">
-              <HiOutlineCalculator size={28} />
-            </div>
-            <div>
-              <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Smart Converter</h1>
-              <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">
-                Live Global Rates for Crypto & Fiat Currencies.
-              </p>
-            </div>
-          </div>
-        </div>
-        <button onClick={fetchAllRates} disabled={isFetching} className="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-white px-5 py-3 rounded-xl font-black text-xs transition-all active:scale-95 border border-slate-200 dark:border-slate-700 shadow-sm disabled:opacity-50">
-          <HiOutlineRefresh className={isFetching ? 'animate-spin text-blue-500' : ''} size={18} />
-          {isFetching ? 'Syncing...' : 'Refresh Rates'}
-        </button>
-      </div>
-
-      {/* 🧮 CALCULATOR CARD */}
-      <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 md:p-10 relative overflow-hidden">
+    <div className="h-full min-h-screen overflow-y-auto pb-24">
+      <div className="pt-24 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-5xl mx-auto px-4 md:px-6">
         
-        {/* Background Gradients */}
-        <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none"></div>
-
-        <div className="relative z-10 flex flex-col md:flex-row items-center gap-4 md:gap-8">
-          
-          {/* FROM SECTION */}
-          <div className="flex-1 w-full bg-slate-50 dark:bg-slate-800/50 p-5 sm:p-6 rounded-[2rem] border border-slate-100 dark:border-slate-700 focus-within:border-blue-500/50 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all">
-            <label className="text-[10px] sm:text-[11px] font-black text-slate-400 uppercase tracking-widest mb-3 sm:mb-4 block">You Send</label>
-            <div className="flex items-center justify-between gap-3 sm:gap-4">
-              {/* 🚀 FIXED: Mobile responsive text sizes and min-w-0 prevents blowout */}
-              <input 
-                type="number" 
-                value={amountFrom}
-                onChange={(e) => setAmountFrom(e.target.value)}
-                placeholder="0.00"
-                className="w-full min-w-0 flex-1 bg-transparent text-2xl sm:text-3xl md:text-5xl font-black tracking-tighter text-slate-900 dark:text-white outline-none placeholder:text-slate-300 dark:placeholder:text-slate-700"
-              />
-              <select 
-                value={assetFrom}
-                onChange={(e) => setAssetFrom(e.target.value)}
-                className="shrink-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white font-black text-sm sm:text-lg py-2 sm:py-3 px-3 sm:px-4 rounded-xl sm:rounded-2xl cursor-pointer outline-none shadow-sm w-[100px] sm:w-[120px] appearance-none text-center"
-              >
-                <optgroup label="Fiat Currencies">
-                  {fiatCurrencies.map(f => <option key={`from-fiat-${f.symbol}`} value={f.symbol}>{f.symbol}</option>)}
-                </optgroup>
-                <optgroup label="Cryptocurrencies">
-                  {activeCryptos.map(c => <option key={`from-crypto-${c}`} value={c}>{c}</option>)}
-                </optgroup>
-              </select>
-            </div>
-            {ratesUSD[assetFrom] && (
-              <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 mt-3 sm:mt-4 tracking-wider">
-                1 {assetFrom} ≈ ${ratesUSD[assetFrom].toLocaleString(undefined, {maximumFractionDigits: 6})}
-              </p>
-            )}
-          </div>
-
-          {/* SWAP BUTTON */}
-          <button 
-            onClick={handleSwapAssets}
-            className="w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-full bg-blue-600 text-white flex items-center justify-center text-xl sm:text-2xl shadow-xl shadow-blue-500/30 hover:scale-110 active:scale-95 transition-all z-10 -my-6 md:my-0 md:-mx-8 border-4 border-white dark:border-slate-900"
-          >
-            <HiOutlineSwitchVertical className="md:hidden" />
-            <FaExchangeAlt className="hidden md:block" />
-          </button>
-
-          {/* TO SECTION */}
-          <div className="flex-1 w-full bg-slate-50 dark:bg-slate-800/50 p-5 sm:p-6 rounded-[2rem] border border-slate-100 dark:border-slate-700 focus-within:border-indigo-500/50 focus-within:ring-4 focus-within:ring-indigo-500/10 transition-all">
-            <label className="text-[10px] sm:text-[11px] font-black text-slate-400 uppercase tracking-widest mb-3 sm:mb-4 block">You Get</label>
-            <div className="flex items-center justify-between gap-3 sm:gap-4">
-              {/* 🚀 FIXED: Mobile responsive text sizes and min-w-0 prevents blowout */}
-              <input 
-                type="text" 
-                readOnly
-                value={amountTo}
-                placeholder="0.00"
-                className="w-full min-w-0 flex-1 bg-transparent text-2xl sm:text-3xl md:text-5xl font-black tracking-tighter text-emerald-500 outline-none placeholder:text-slate-300 dark:placeholder:text-slate-700"
-              />
-              <select 
-                value={assetTo}
-                onChange={(e) => setAssetTo(e.target.value)}
-                className="shrink-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white font-black text-sm sm:text-lg py-2 sm:py-3 px-3 sm:px-4 rounded-xl sm:rounded-2xl cursor-pointer outline-none shadow-sm w-[100px] sm:w-[120px] appearance-none text-center"
-              >
-                <optgroup label="Fiat Currencies">
-                  {fiatCurrencies.map(f => <option key={`to-fiat-${f.symbol}`} value={f.symbol}>{f.symbol}</option>)}
-                </optgroup>
-                <optgroup label="Cryptocurrencies">
-                  {activeCryptos.map(c => <option key={`to-crypto-${c}`} value={c}>{c}</option>)}
-                </optgroup>
-              </select>
-            </div>
-            {ratesUSD[assetTo] && (
-              <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 mt-3 sm:mt-4 tracking-wider">
-                1 {assetTo} ≈ ${ratesUSD[assetTo].toLocaleString(undefined, {maximumFractionDigits: 6})}
-              </p>
-            )}
-          </div>
-
-        </div>
-
-        {/* INFO FOOTER */}
-        <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
-           {ratesUSD[assetFrom] && ratesUSD[assetTo] && (
-             <div className="flex items-center gap-2 text-xs sm:text-sm font-black text-slate-700 dark:text-slate-300">
-               <HiOutlineTrendingUp className="text-emerald-500 text-lg"/> 
-               1 {assetFrom} = {(ratesUSD[assetFrom] / ratesUSD[assetTo]).toLocaleString(undefined, {maximumFractionDigits: 6})} {assetTo}
-             </div>
-           )}
-           
-           <div className="text-[9px] sm:text-[10px] font-bold text-slate-400 flex items-center gap-1 uppercase tracking-widest bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg">
-              <HiOutlineRefresh className={isFetching ? 'animate-spin' : ''} />
-              Rates updated: {formatGlobalDate ? formatGlobalDate(lastUpdated, 'short') : lastUpdated.toLocaleTimeString()}
-           </div>
-        </div>
-      </div>
-
-      {/* QUICK MARKET GLANCE */}
-      <div>
-        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 ml-2">Quick Market Reference</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {['BTC', 'ETH', 'SOL', 'USDT'].filter(sym => activeCryptos.includes(sym)).map(sym => {
-            const usdRate = ratesUSD[sym];
-            const targetRate = ratesUSD[assetTo];
-            const localVal = usdRate && targetRate ? (usdRate / targetRate) : 0;
-            
-            return (
-              <div key={sym} className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between cursor-pointer hover:border-blue-500/50 transition-colors" onClick={() => setAssetFrom(sym)}>
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-slate-400"><FaBitcoin /></div>
-                  <span className="font-black text-slate-800 dark:text-white">{sym}</span>
+        {/* Premium Header */}
+        <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(99,102,241,0.1),transparent_70%)]" />
+          <div className="absolute right-0 top-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl" />
+          <div className="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shrink-0">
+                  <HiOutlineCalculator size={24} className="text-white" />
                 </div>
-                <div className="text-right">
-                  <p className="text-xs font-bold text-emerald-500">{localVal > 1 ? localVal.toLocaleString(undefined, {maximumFractionDigits: 2}) : localVal.toFixed(4)}</p>
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{assetTo}</p>
+                <div className="min-w-0">
+                  <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight truncate">Smart Converter</h1>
+                  <p className="text-sm font-medium text-slate-400 truncate">Live global rates for crypto & fiat</p>
                 </div>
               </div>
-            );
-          })}
+            </div>
+            <button onClick={fetchAllRates} disabled={isFetching} className="w-full md:w-auto flex items-center justify-center gap-2 px-6 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 disabled:opacity-50 active:scale-95 shadow-sm">
+              <HiOutlineRefresh className={isFetching ? 'animate-spin text-blue-400' : ''} size={16} />
+              {isFetching ? 'Syncing...' : 'Refresh Rates'}
+            </button>
+          </div>
+          <div className="relative z-10 mt-4">
+            <p className="text-[9px] font-bold text-slate-400 flex items-center gap-1.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${isFetching ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
+              {isFetching ? 'Updating rates...' : `Updated: ${formatGlobalDate ? formatGlobalDate(lastUpdated, 'short') : lastUpdated.toLocaleTimeString()}`}
+            </p>
+          </div>
+        </div>
+
+        {/* 🧮 Calculator Card (Highly Optimized for Mobile) */}
+        <div className="relative overflow-hidden rounded-[2rem] bg-white dark:bg-slate-900 shadow-xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 md:p-8">
+          <div className="absolute top-0 right-0 w-48 h-48 bg-blue-500/3 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute bottom-0 left-0 w-48 h-48 bg-indigo-500/3 rounded-full blur-3xl pointer-events-none" />
+
+          <div className="relative flex flex-col md:flex-row items-center gap-4 md:gap-6">
+            
+            {/* FROM BOX */}
+            <div className="flex-1 w-full bg-slate-50 dark:bg-slate-800/40 p-4 sm:p-5 rounded-2xl border border-slate-200/60 dark:border-slate-700/50 focus-within:border-blue-400/60 focus-within:ring-2 focus-within:ring-blue-500/10 transition-all shadow-sm flex flex-col">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block">You Send</label>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <input 
+                  type="number" 
+                  value={amountFrom} 
+                  onChange={(e) => setAmountFrom(e.target.value)} 
+                  placeholder="0.00" 
+                  className="w-full min-w-0 bg-transparent text-3xl sm:text-4xl md:text-5xl font-black text-slate-900 dark:text-white outline-none placeholder:text-slate-300 dark:placeholder:text-slate-600 transition-all" 
+                />
+                <select 
+                  value={assetFrom} 
+                  onChange={(e) => setAssetFrom(e.target.value)} 
+                  className="w-full sm:w-[110px] shrink-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white font-black text-sm py-3 px-3 rounded-xl cursor-pointer outline-none shadow-sm appearance-none text-center"
+                >
+                  <optgroup label="Fiat Currencies">
+                    {currenciesList.map(f => <option key={`from-${f.code}`} value={f.code}>{f.code}</option>)}
+                  </optgroup>
+                  <optgroup label="Cryptocurrencies">
+                    {activeCryptos.map(c => <option key={`from-${c}`} value={c}>{c}</option>)}
+                  </optgroup>
+                </select>
+              </div>
+              {ratesUSD[assetFrom] > 0 && (
+                <p className="text-[10px] font-bold text-slate-400 mt-3 pt-3 border-t border-slate-200 dark:border-slate-700/50">
+                  1 {assetFrom} ≈ ${ratesUSD[assetFrom].toLocaleString(undefined, {maximumFractionDigits: 6})}
+                </p>
+              )}
+            </div>
+
+            {/* SWAP BUTTON */}
+            <button 
+              onClick={handleSwapAssets} 
+              className="w-12 h-12 sm:w-14 sm:h-14 shrink-0 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center text-xl shadow-xl shadow-blue-500/30 hover:scale-110 active:scale-95 transition-all z-10 -my-7 md:my-0 md:-mx-8 border-4 border-white dark:border-slate-900"
+            >
+              <HiOutlineSwitchVertical className="md:hidden" size={20} />
+              <FaExchangeAlt className="hidden md:block" size={20} />
+            </button>
+
+            {/* TO BOX */}
+            <div className="flex-1 w-full bg-slate-50 dark:bg-slate-800/40 p-4 sm:p-5 rounded-2xl border border-slate-200/60 dark:border-slate-700/50 focus-within:border-emerald-400/60 focus-within:ring-2 focus-within:ring-emerald-500/10 transition-all shadow-sm flex flex-col">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block">You Get</label>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <input 
+                  type="text" 
+                  readOnly 
+                  value={amountTo} 
+                  placeholder="0.00" 
+                  className="w-full min-w-0 bg-transparent text-3xl sm:text-4xl md:text-5xl font-black text-emerald-500 outline-none placeholder:text-slate-300 dark:placeholder:text-slate-600 transition-all" 
+                />
+                <select 
+                  value={assetTo} 
+                  onChange={(e) => setAssetTo(e.target.value)} 
+                  className="w-full sm:w-[110px] shrink-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white font-black text-sm py-3 px-3 rounded-xl cursor-pointer outline-none shadow-sm appearance-none text-center"
+                >
+                  <optgroup label="Fiat Currencies">
+                    {currenciesList.map(f => <option key={`to-${f.code}`} value={f.code}>{f.code}</option>)}
+                  </optgroup>
+                  <optgroup label="Cryptocurrencies">
+                    {activeCryptos.map(c => <option key={`to-${c}`} value={c}>{c}</option>)}
+                  </optgroup>
+                </select>
+              </div>
+              {ratesUSD[assetTo] > 0 && (
+                <p className="text-[10px] font-bold text-slate-400 mt-3 pt-3 border-t border-slate-200 dark:border-slate-700/50">
+                  1 {assetTo} ≈ ${ratesUSD[assetTo].toLocaleString(undefined, {maximumFractionDigits: 6})}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Rate Info Footer */}
+          {ratesUSD[assetFrom] > 0 && ratesUSD[assetTo] > 0 && (
+            <div className="mt-6 pt-5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-2 text-xs sm:text-sm font-black text-slate-700 dark:text-slate-300">
+              <HiOutlineTrendingUp className="text-emerald-500 shrink-0" size={18} />
+              <span className="truncate">1 {assetFrom} = {(ratesUSD[assetFrom] / ratesUSD[assetTo]).toLocaleString(undefined, {maximumFractionDigits: 6})} {assetTo}</span>
+            </div>
+          )}
         </div>
       </div>
-
     </div>
   );
 };

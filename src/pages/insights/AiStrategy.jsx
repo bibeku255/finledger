@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
@@ -7,27 +7,126 @@ import { useNavigate } from 'react-router-dom';
 import { 
   HiOutlineLightBulb, HiOutlineShieldCheck, HiOutlineTrendingUp, 
   HiOutlineExclamation, HiOutlineChartPie, HiOutlineRefresh,
-  HiOutlineArrowRight, HiOutlineAdjustments
+  HiOutlineArrowRight, HiOutlineScale, HiOutlineEye, HiOutlineLightningBolt,
+  HiOutlineSparkles // 🚀 FIXED: Added missing import here
 } from 'react-icons/hi';
-import { FaBrain, FaRobot, FaLeaf, FaWallet, FaChartLine } from 'react-icons/fa';
+import { 
+  FaBrain, FaRobot, FaLeaf, FaWallet, FaChartLine
+} from 'react-icons/fa';
+
+// Animated Circular Gauge
+const ScoreGauge = ({ score, riskLevel }) => {
+  const [animatedScore, setAnimatedScore] = useState(0);
+  
+  useEffect(() => {
+    const timer = setTimeout(() => setAnimatedScore(score), 300);
+    return () => clearTimeout(timer);
+  }, [score]);
+
+  const getScoreColor = (s) => {
+    if (s >= 80) return { stroke: '#10b981', glow: 'rgba(16, 185, 129, 0.3)', label: 'Excellent' };
+    if (s >= 60) return { stroke: '#3b82f6', glow: 'rgba(59, 130, 246, 0.3)', label: 'Good' };
+    if (s >= 40) return { stroke: '#f59e0b', glow: 'rgba(245, 158, 11, 0.3)', label: 'Fair' };
+    return { stroke: '#ef4444', glow: 'rgba(239, 68, 68, 0.3)', label: 'Needs Work' };
+  };
+
+  const scoreColor = getScoreColor(animatedScore);
+  const circumference = 2 * Math.PI * 80;
+  const strokeDashoffset = circumference - (animatedScore / 100) * circumference;
+
+  return (
+    <div className="relative w-48 h-48 mx-auto">
+      <div className="absolute inset-0 rounded-full blur-2xl opacity-40 transition-colors duration-500" style={{ background: scoreColor.glow }} />
+      <svg className="w-full h-full transform -rotate-90" viewBox="0 0 180 180">
+        <circle cx="90" cy="90" r="80" fill="none" stroke="currentColor" strokeWidth="12" className="text-slate-200 dark:text-slate-700/50" />
+        <circle cx="90" cy="90" r="80" fill="none" stroke={scoreColor.stroke} strokeWidth="12" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={strokeDashoffset} className="transition-all duration-1500 ease-out" style={{ filter: `drop-shadow(0 0 8px ${scoreColor.stroke})` }} />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-5xl font-black text-slate-900 dark:text-white tracking-tighter tabular-nums transition-colors duration-500">{animatedScore}</span>
+        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">out of 100</span>
+        <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-lg mt-2 transition-colors duration-500 shadow-sm" style={{ color: scoreColor.stroke, background: `${scoreColor.stroke}20`, border: `1px solid ${scoreColor.stroke}40` }}>{scoreColor.label}</span>
+      </div>
+    </div>
+  );
+};
+
+// Progress Bar with animation
+const ProgressBar = ({ label, icon: Icon, value, color, bgColor, amount }) => {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const timer = setTimeout(() => setWidth(value), 200);
+    return () => clearTimeout(timer);
+  }, [value]);
+
+  return (
+    <div className="group">
+      <div className="flex justify-between items-end mb-2 gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className={`p-2 rounded-xl ${bgColor} transition-transform group-hover:scale-110 duration-300 shrink-0`}>
+            <Icon size={14} className={color} />
+          </div>
+          <span className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-300 truncate">{label}</span>
+        </div>
+        <div className="text-right shrink-0">
+          <span className="text-sm font-black text-slate-900 dark:text-white">{value}%</span>
+          {amount !== undefined && <p className="text-[9px] font-bold text-slate-400 truncate max-w-[80px] sm:max-w-none">≈ {amount}</p>}
+        </div>
+      </div>
+      <div className="w-full h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden shadow-inner">
+        <div className={`h-full rounded-full transition-all duration-1500 ease-out ${color}`} style={{ width: `${width}%` }}>
+          <div className="h-full w-full bg-white/20 rounded-full animate-shimmer" />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Strategy Card
+const StrategyCard = ({ action, index }) => {
+  const navigate = useNavigate();
+  const typeIcons = { opportunity: HiOutlineLightningBolt, risk: HiOutlineExclamation, health: HiOutlineShieldCheck, growth: HiOutlineTrendingUp };
+  const typeStyles = {
+    opportunity: { card: 'from-emerald-50 to-teal-50 dark:from-emerald-900/10 dark:to-teal-900/10 border-emerald-200 dark:border-emerald-500/20', icon: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400', dot: 'bg-emerald-400', btn: 'hover:bg-emerald-100 dark:hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400' },
+    risk: { card: 'from-rose-50 to-pink-50 dark:from-rose-900/10 dark:to-pink-900/10 border-rose-200 dark:border-rose-500/20', icon: 'bg-rose-500/10 text-rose-600 dark:text-rose-400', badge: 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400', dot: 'bg-rose-400', btn: 'hover:bg-rose-100 dark:hover:bg-rose-500/20 text-rose-700 dark:text-rose-400' },
+    health: { card: 'from-blue-50 to-cyan-50 dark:from-blue-900/10 dark:to-cyan-900/10 border-blue-200 dark:border-blue-500/20', icon: 'bg-blue-500/10 text-blue-600 dark:text-blue-400', badge: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400', dot: 'bg-blue-400', btn: 'hover:bg-blue-100 dark:hover:bg-blue-500/20 text-blue-700 dark:text-blue-400' },
+    growth: { card: 'from-purple-50 to-violet-50 dark:from-purple-900/10 dark:to-violet-900/10 border-purple-200 dark:border-purple-500/20', icon: 'bg-purple-500/10 text-purple-600 dark:text-purple-400', badge: 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-400', dot: 'bg-purple-400', btn: 'hover:bg-purple-100 dark:hover:bg-purple-500/20 text-purple-700 dark:text-purple-400' }
+  };
+  const styles = typeStyles[action.type] || typeStyles.health;
+  const TypeIcon = typeIcons[action.type] || HiOutlineShieldCheck;
+
+  return (
+    <div className={`group relative p-6 rounded-[2rem] border bg-gradient-to-br backdrop-blur-sm shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 overflow-hidden flex flex-col ${styles.card}`} style={{ transitionDelay: `${index * 100}ms` }}>
+      <div className={`absolute top-4 right-4 w-2 h-2 rounded-full animate-pulse ${styles.dot}`} />
+      <div className="relative z-10 flex flex-col flex-1">
+        <div className="flex items-start gap-4 mb-5">
+          <div className={`p-3.5 rounded-2xl ${styles.icon} ring-1 ring-current/20 shadow-sm transition-transform duration-300 shrink-0`}><TypeIcon size={22} /></div>
+          <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border border-current/20 shadow-sm ${styles.badge}`}>{action.type}</span>
+        </div>
+        <h3 className="text-base sm:text-lg font-black text-slate-800 dark:text-white mb-2 leading-tight">{action.title}</h3>
+        <p className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-400 leading-relaxed mb-6 flex-1">{action.desc}</p>
+        <button onClick={() => navigate(action.link)} className={`w-full py-3.5 bg-white dark:bg-slate-800 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700 shadow-sm group/btn active:scale-95 ${styles.btn}`}>{action.actionText} <HiOutlineArrowRight size={16} className="group-hover/btn:translate-x-1 transition-transform" /></button>
+      </div>
+    </div>
+  );
+};
 
 const AiStrategy = () => {
-  // 🚀 ENGINE CONNECTED: Global Date Formatter
   const { user, baseCurrency = 'INR', formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
   const navigate = useNavigate();
   
   const [isAnalyzing, setIsAnalyzing] = useState(true);
+  const [analysisProgress, setAnalysisProgress] = useState(0);
 
-  // 🚀 REAL DATA STATES
+  // Real data states
   const [bankBalance, setBankBalance] = useState(0);
   const [cashBalance, setCashBalance] = useState(0);
   const [onlineBalance, setOnlineBalance] = useState(0);
-  const [cryptoBalance, setCryptoBalance] = useState(0);
+  const [cryptoBalance, setCryptoBalance] = useState(0); 
+  const [dataLoaded, setDataLoaded] = useState(false);
   
   const [strategyData, setStrategyData] = useState(null);
 
-  // 📥 FETCH REAL VAULT BALANCES
   useEffect(() => {
     if (!user) return;
 
@@ -35,318 +134,288 @@ const AiStrategy = () => {
       return snapshot.docs.reduce((acc, doc) => {
         const data = doc.data();
         let finalAmount = Number(data.finalBaseAmount || data.amount || 0);
-        let feeAmount = 0;
-        
-        if (data.fee && data.feeExchangeRate) {
-            feeAmount = Number(data.fee) * Number(data.feeExchangeRate);
-        } else if (data.fee && data.exchangeRate) { 
-            feeAmount = Number(data.fee) * Number(data.exchangeRate);
-        } else if (data.fee) {
-            feeAmount = Number(data.fee);
-        }
-
-        const netChange = data.type === 'in' ? finalAmount : -(finalAmount + feeAmount);
-        return acc + netChange;
+        let feeAmount = data.fee ? (data.feeExchangeRate ? Number(data.fee) * Number(data.feeExchangeRate) : data.exchangeRate ? Number(data.fee) * Number(data.exchangeRate) : Number(data.fee)) : 0;
+        return acc + (data.type === 'in' ? finalAmount : -(finalAmount + feeAmount));
       }, 0);
     };
 
-    const unsubBank = onSnapshot(collection(db, "users", user.uid, "bankWallet"), snap => setBankBalance(calcVaultBalance(snap)));
-    const unsubCash = onSnapshot(collection(db, "users", user.uid, "cashWallet"), snap => setCashBalance(calcVaultBalance(snap)));
-    const unsubOnline = onSnapshot(collection(db, "users", user.uid, "onlineWallet"), snap => setOnlineBalance(calcVaultBalance(snap)));
-    const unsubCrypto = onSnapshot(collection(db, "users", user.uid, "cryptoWalletLogs"), snap => {
-        // Simple aggregate for crypto base value if saved (this might need complex API logic if live price is needed, using saved base for now)
-        setCryptoBalance(calcVaultBalance(snap)); 
-    });
+    const fetchCryptoFiatValue = async (cryptoSnapshot) => {
+      const holdings = {};
+      cryptoSnapshot.docs.forEach(doc => {
+         const d = doc.data();
+         const coin = d.coin?.toUpperCase();
+         if(!coin) return;
+         const qty = parseFloat(d.quantity) || 0;
+         const fee = parseFloat(d.networkFee) || 0;
+         
+         if(d.type === 'in') holdings[coin] = (holdings[coin] || 0) + qty;
+         else if(d.type === 'out') holdings[coin] = (holdings[coin] || 0) - qty;
+         else if(d.type === 'transfer') holdings[coin] = (holdings[coin] || 0) - fee;
+      });
 
-    return () => { unsubBank(); unsubCash(); unsubOnline(); unsubCrypto(); };
-  }, [user]);
+      let usdToFiatRate = 1;
+      try {
+         const forex = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+         usdToFiatRate = (await forex.json()).rates[baseCurrency] || 1;
+      } catch(e) {}
 
-  // 🧠 THE J.A.R.V.I.S ALGORITHM (Dynamic Calculation)
+      let totalFiatValueOfCrypto = 0;
+      const coinsToFetch = Object.keys(holdings);
+
+      for (const sym of coinsToFetch) {
+         let priceUsd = 0;
+         try {
+            if (['USDT', 'USDC', 'DAI'].includes(sym)) {
+                priceUsd = 1;
+            } else {
+                const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${sym}USDT`);
+                if (bRes.ok) priceUsd = parseFloat((await bRes.json()).price);
+            }
+         } catch(e) {}
+
+         if (!priceUsd) {
+            if (sym === 'FEY') priceUsd = 0.0091;
+            if (sym === 'CTC' || sym === 'ROX') priceUsd = 1.0;
+            if (sym === 'ICE') priceUsd = 0.0035;
+            if (sym === 'PI') priceUsd = 36.50;
+            if (sym === 'JMPT') priceUsd = 0.95;
+         }
+
+         if (holdings[sym] > 0) {
+            totalFiatValueOfCrypto += (holdings[sym] * priceUsd * usdToFiatRate);
+         }
+      }
+      setCryptoBalance(totalFiatValueOfCrypto);
+    };
+
+    const unsubs = [
+      onSnapshot(collection(db, "users", user.uid, "bankWallet"), snap => setBankBalance(calcVaultBalance(snap))),
+      onSnapshot(collection(db, "users", user.uid, "cashWallet"), snap => setCashBalance(calcVaultBalance(snap))),
+      onSnapshot(collection(db, "users", user.uid, "onlineWallet"), snap => setOnlineBalance(calcVaultBalance(snap))),
+      onSnapshot(collection(db, "users", user.uid, "cryptoWalletLogs"), snap => fetchCryptoFiatValue(snap))
+    ];
+
+    const timeout = setTimeout(() => setDataLoaded(true), 1200);
+
+    return () => { 
+      unsubs.forEach(unsub => unsub()); 
+      clearTimeout(timeout);
+    };
+  }, [user, baseCurrency]);
+
   useEffect(() => {
-    if (bankBalance === 0 && cashBalance === 0 && cryptoBalance === 0 && onlineBalance === 0) {
-        // Default Wait
-        const timer = setTimeout(() => {
-          setStrategyData(generateEmptyStrategy());
-          setIsAnalyzing(false);
-        }, 1500);
-        return () => clearTimeout(timer);
-    }
+    if (!isAnalyzing) return;
+    const interval = setInterval(() => {
+      setAnalysisProgress(prev => {
+        if (prev >= 100) { clearInterval(interval); return 100; }
+        return prev + Math.random() * 18;
+      });
+    }, 200);
+    return () => clearInterval(interval);
+  }, [isAnalyzing]);
+
+  useEffect(() => {
+    const hasData = bankBalance !== 0 || cashBalance !== 0 || cryptoBalance !== 0 || onlineBalance !== 0;
+    
+    if (!dataLoaded) return; 
 
     const timer = setTimeout(() => {
-      
+      if (!hasData) {
+        setStrategyData(generateEmptyStrategy());
+        setIsAnalyzing(false);
+        return;
+      }
+
       const totalFiat = bankBalance + cashBalance + onlineBalance;
       const totalPortfolio = totalFiat + cryptoBalance;
       
-      // Prevent division by zero
       if(totalPortfolio <= 0) {
-         setStrategyData(generateEmptyStrategy());
-         setIsAnalyzing(false);
-         return;
+        setStrategyData(generateEmptyStrategy());
+        setIsAnalyzing(false);
+        return;
       }
 
-      // Calculate Percentages
       let fiatPct = Math.round((totalFiat / totalPortfolio) * 100);
       let cryptoPct = Math.round((cryptoBalance / totalPortfolio) * 100);
-      let yieldPct = 0; // Hardcoded for now until we build a yield farm tracker
+      let yieldPct = Math.max(0, 100 - fiatPct - cryptoPct); 
 
-      // Determine Risk Level
       let risk = 'Safe';
       let score = 85;
       
-      if (cryptoPct > 70) {
-          risk = 'High';
-          score = 65;
-      } else if (cryptoPct > 35) {
-          risk = 'Moderate';
-          score = 80;
-      } else if (cryptoPct < 5 && totalFiat > 10000) {
-          // Too much idle fiat, losing to inflation
-          risk = 'Low Yield';
-          score = 70;
-      }
+      if (cryptoPct > 70) { risk = 'High'; score = 55; } 
+      else if (cryptoPct > 50) { risk = 'Medium-High'; score = 65; } 
+      else if (cryptoPct > 35) { risk = 'Moderate'; score = 78; } 
+      else if (cryptoPct < 5 && totalFiat > 10000) { risk = 'Conservative'; score = 72; } 
+      else if (cryptoPct >= 5 && cryptoPct <= 35 && fiatPct >= 40) { score = 88; }
 
-      // Generate Smart Action Plan based on Real Balances
       const plan = [];
 
-      // 1. Fiat Strategy
       if (fiatPct > 70) {
-          plan.push({
-            id: 1, type: 'opportunity', icon: <HiOutlineTrendingUp className="text-emerald-500" />,
-            title: "Rebalance Idle Cash",
-            desc: `You have ${currencySymbol}${totalFiat.toLocaleString()} sitting in fiat vaults. Inflation is eating your purchasing power. Consider shifting 20% to fixed deposits or stablecoins.`,
-            actionText: "Capital Shift", link: "/dashboard/shifting",
-            color: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400', borderColor: 'border-emerald-200 dark:border-emerald-800'
-          });
+        plan.push({ id: 1, type: 'opportunity', icon: <HiOutlineTrendingUp className="text-emerald-500" size={24}/>, title: "Idle Cash Alert", desc: `${currencySymbol}${totalFiat.toLocaleString(undefined, {maximumFractionDigits:0})} in fiat vaults. Inflation at ~5-7% erodes value. Shift 20-30% to stablecoins or high-yield deposits.`, actionText: "Rebalance Capital", link: "/dashboard/accounts/capital-shifting" });
+      } else if (fiatPct < 20 && totalFiat <= 5000) {
+        plan.push({ id: 1, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" size={24}/>, title: "Low Emergency Fund", desc: "Emergency fund below recommended 3-6 months expenses. Prioritize building cash reserves before aggressive investing.", actionText: "Add Emergency Fund", link: "/dashboard/accounts/bank" });
       } else {
-          plan.push({
-            id: 1, type: 'health', icon: <HiOutlineShieldCheck className="text-blue-500" />,
-            title: "Good Fiat Reserves",
-            desc: `Your fiat balance is ${fiatPct}% of your portfolio. This provides an excellent safety net for emergencies and sudden expenses.`,
-            actionText: "View Bank Ledger", link: "/dashboard/accounts/bank",
-            color: 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400', borderColor: 'border-blue-200 dark:border-blue-800'
-          });
+        plan.push({ id: 1, type: 'health', icon: <HiOutlineShieldCheck className="text-blue-500" size={24}/>, title: "Healthy Cash Position", desc: `Fiat reserves at ${fiatPct}% — strong safety net for emergencies while maintaining investment exposure.`, actionText: "View Bank Vault", link: "/dashboard/accounts/bank" });
       }
 
-      // 2. Crypto Strategy
       if (cryptoPct > 50) {
-          plan.push({
-            id: 2, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" />,
-            title: "High Crypto Volatility Risk",
-            desc: `Your portfolio is heavily weighted (${cryptoPct}%) in digital assets. Consider booking profits and shifting some capital to secure Bank Vaults.`,
-            actionText: "Crypto Dashboard", link: "/dashboard/crypto/hold-profit",
-            color: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400', borderColor: 'border-rose-200 dark:border-rose-800'
-          });
-      } else if (cryptoPct > 0) {
-          plan.push({
-            id: 2, type: 'opportunity', icon: <FaLeaf className="text-emerald-500" />,
-            title: "Optimize Crypto Assets",
-            desc: "You have a balanced crypto portfolio. Explore Staking or Yield Farming to generate passive income on your idle tokens.",
-            actionText: "Explore Staking", link: "/dashboard/crypto/staking",
-            color: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400', borderColor: 'border-emerald-200 dark:border-emerald-800'
-          });
+        plan.push({ id: 2, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" size={24}/>, title: "Overexposed to Crypto", desc: `${cryptoPct}% in volatile assets. Consider profit-booking 15-25% into stablecoins or fiat to reduce drawdown risk.`, actionText: "Book Profits", link: "/dashboard/crypto/hold-and-swap" });
+      } else if (cryptoPct > 0 && cryptoPct <= 35) {
+        plan.push({ id: 2, type: 'growth', icon: <FaLeaf className="text-purple-500" size={24}/>, title: "Optimize Crypto Holdings", desc: "Balanced exposure. Explore staking (4-12% APY) or DeFi yield opportunities on idle tokens for passive income.", actionText: "Explore Yield Options", link: "/dashboard/crypto/staking-yield" });
+      } else if (cryptoPct === 0) {
+        plan.push({ id: 2, type: 'opportunity', icon: <FaChartLine className="text-emerald-500" size={24}/>, title: "Zero Crypto Exposure", desc: "2-5% in BTC/ETH hedges against fiat inflation & currency devaluation. Start small with dollar-cost averaging.", actionText: "Start Crypto Journey", link: "/dashboard/crypto/hold-and-swap" });
       } else {
-          plan.push({
-            id: 2, type: 'opportunity', icon: <FaChartLine className="text-orange-500" />,
-            title: "Missing Digital Assets",
-            desc: "You currently hold 0% in crypto. Diversifying a small amount (2-5%) into Bitcoin or Ethereum could hedge against fiat inflation.",
-            actionText: "Add Crypto", link: "/dashboard/crypto/hold-profit",
-            color: 'bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400', borderColor: 'border-orange-200 dark:border-orange-800'
-          });
+        plan.push({ id: 2, type: 'health', icon: <HiOutlineScale className="text-blue-500" size={24}/>, title: "Balanced Crypto Exposure", desc: `${cryptoPct}% allocation is within optimal range for growth-oriented portfolios. Monitor quarterly.`, actionText: "Track Portfolio", link: "/dashboard/crypto/hold-and-swap" });
       }
 
-      // 3. Savings / Overall Health
-      plan.push({
-        id: 3, type: 'health', icon: <HiOutlineChartPie className="text-purple-500" />,
-        title: "Portfolio Snapshot",
-        desc: `Net Worth tracked: ${currencySymbol}${totalPortfolio.toLocaleString()}. Keep logging your expenses meticulously to maintain an accurate optimization score.`,
-        actionText: "View Master Audit", link: "/dashboard/history",
-        color: 'bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400', borderColor: 'border-purple-200 dark:border-purple-800'
-      });
+      plan.push({ id: 3, type: 'health', icon: <HiOutlineChartPie className="text-indigo-500" size={24}/>, title: "Portfolio Health Check", desc: `Total tracked: ${currencySymbol}${totalPortfolio.toLocaleString(undefined, {maximumFractionDigits:0})}. Score: ${score}/100. ${score >= 80 ? 'Great job!' : score >= 60 ? 'Room for improvement.' : 'Needs immediate attention.'}`, actionText: "Full Audit Report", link: "/dashboard/accounts/history" });
 
       setStrategyData({
-        optimizationScore: score,
-        riskLevel: risk,
-        allocations: { fiat: fiatPct, crypto: cryptoPct, yield: yieldPct },
-        actionPlan: plan
+        optimizationScore: score, riskLevel: risk, allocations: { fiat: fiatPct, crypto: cryptoPct, yield: yieldPct },
+        totalPortfolio, totalFiat, cryptoBalance, actionPlan: plan
       });
 
       setIsAnalyzing(false);
-    }, 2000); 
+    }, 2000);
 
     return () => clearTimeout(timer);
-  }, [bankBalance, cashBalance, cryptoBalance, onlineBalance, currencySymbol]);
+  }, [bankBalance, cashBalance, cryptoBalance, onlineBalance, currencySymbol, dataLoaded]);
 
-  // Fallback for Empty Data
   const generateEmptyStrategy = () => ({
-      optimizationScore: 0, riskLevel: 'Unknown',
-      allocations: { fiat: 0, crypto: 0, yield: 0 },
-      actionPlan: [
-        {
-          id: 1, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" />,
-          title: "Insufficient Data",
-          desc: "J.A.R.V.I.S needs data to analyze. Please add funds to your Bank, Cash, or Crypto vaults to generate a personalized strategy.",
-          actionText: "Log Deposit", link: "/dashboard/accounts/bank",
-          color: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400', borderColor: 'border-rose-200 dark:border-rose-800'
-        }
-      ]
+    optimizationScore: 0, riskLevel: 'N/A', allocations: { fiat: 0, crypto: 0, yield: 0 },
+    totalPortfolio: 0, totalFiat: 0, cryptoBalance: 0,
+    actionPlan: [{ id: 1, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" size={24}/>, title: "No Financial Data Found", desc: `J.A.R.V.I.S requires transaction data to analyze. Add your first deposit to Bank, Cash, or Crypto vaults to unlock personalized AI insights and portfolio optimization strategies.`, actionText: "Add First Deposit", link: "/dashboard/accounts/bank" }]
   });
 
-  const reAnalyze = () => {
-     setIsAnalyzing(true);
-     setTimeout(() => setIsAnalyzing(false), 2000);
-  };
+  const reAnalyze = () => { setIsAnalyzing(true); setAnalysisProgress(0); };
 
-  if (isAnalyzing) {
+  if (!dataLoaded || isAnalyzing) {
     return (
-      <div className="pt-24 min-h-[80vh] flex flex-col items-center justify-center space-y-6">
-        <div className="relative">
-          <div className="absolute inset-0 bg-blue-500 blur-3xl opacity-20 animate-pulse rounded-full"></div>
-          <FaBrain className="text-7xl text-blue-500 animate-bounce relative z-10 drop-shadow-2xl" />
+      <div className="pt-24 min-h-screen flex flex-col items-center justify-center px-4 -mt-20">
+        <div className="relative mb-12">
+          <div className="absolute inset-0 bg-blue-500 blur-3xl opacity-20 animate-pulse rounded-full scale-[2]" />
+          <div className="relative">
+            <FaBrain className="text-[80px] sm:text-[100px] text-blue-500 animate-bounce drop-shadow-2xl" />
+            {/* 🚀 SPARKLES ICON FIXED HERE */}
+            <HiOutlineSparkles className="absolute -top-4 -right-4 text-3xl text-yellow-400 animate-ping" />
+          </div>
         </div>
-        <div className="text-center space-y-2">
-          <h2 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">J.A.R.V.I.S is Scanning...</h2>
-          <p className="text-sm font-bold text-slate-400 uppercase tracking-widest animate-pulse">Analyzing Cross-Vault Metrics & Risk</p>
+        <div className="w-full max-w-sm mb-8 px-4">
+          <div className="flex justify-between text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-3">
+            <span>Analyzing Vaults</span>
+            <span className="text-blue-500">{Math.min(Math.round(analysisProgress), 100)}%</span>
+          </div>
+          <div className="w-full h-3 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden shadow-inner">
+            <div className="h-full bg-gradient-to-r from-blue-500 via-cyan-500 to-emerald-500 rounded-full transition-all duration-300 ease-out shadow-[0_0_10px_rgba(59,130,246,0.5)]" style={{ width: `${Math.min(analysisProgress, 100)}%` }} />
+          </div>
+        </div>
+        <div className="text-center space-y-3 px-4">
+          <h2 className="text-2xl sm:text-3xl font-black text-slate-800 dark:text-white tracking-tight">J.A.R.V.I.S is Scanning</h2>
+          <p className="text-[10px] sm:text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest h-6 animate-pulse">
+            {analysisProgress < 30 ? 'Compiling Bank & Cash Reserves...' : analysisProgress < 60 ? 'Evaluating Crypto P&L Exposure...' : analysisProgress < 90 ? 'Calculating Global Risk Metrics...' : 'Finalizing Wealth Strategy...'}
+          </p>
+        </div>
+        <div className="flex flex-wrap justify-center gap-2 sm:gap-3 mt-10">
+          {['Bank', 'Cash', 'Crypto', 'Online'].map((vault, i) => (
+            <div key={vault} className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+              <div className={`w-2 h-2 rounded-full ${analysisProgress > (i + 1) * 20 ? 'bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.8)]' : 'bg-slate-300 dark:bg-slate-600 animate-pulse'}`} />
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">{vault}</span>
+            </div>
+          ))}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="pt-24 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20 max-w-6xl mx-auto px-4 md:px-0">
-      
-      {/* HEADER SECTION */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-3.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-2xl ring-1 ring-blue-500/20">
-              <FaRobot size={26} />
-            </div>
-            <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">AI Strategy Matrix</h1>
+    <div className="pt-20 sm:pt-24 space-y-6 sm:space-y-8 pb-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5 sm:gap-6 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-[2.5rem] p-6 sm:p-8 shadow-2xl relative overflow-hidden border border-slate-700/50">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.15),transparent_70%)]" />
+        <div className="flex items-center gap-4 sm:gap-5 relative z-10">
+          <div className="p-3.5 sm:p-4 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-2xl sm:rounded-[1.5rem] shadow-xl shadow-blue-500/30 ring-1 ring-white/20 shrink-0">
+            <FaRobot size={28} className="text-white" />
           </div>
-          <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 max-w-xl">
-            Your personalized Robo-Advisor. Review your financial health, asset allocation blueprint, and actionable steps to optimize wealth.
-          </p>
-          {/* 🚀 GLOBAL DATE FOR LAST SCAN TIME */}
-          <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest mt-2">
-            Last Scanned: {formatGlobalDate ? formatGlobalDate(new Date(), 'full') : 'Just now'}
-          </p>
-        </div>
-        <button onClick={reAnalyze} className="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-white px-6 py-3.5 rounded-2xl font-black text-sm transition-all active:scale-95 shadow-sm border border-slate-200 dark:border-slate-700">
-          <HiOutlineRefresh size={20} /> Re-Analyze
-        </button>
-      </div>
-
-      {/* TOP DASHBOARD: SCORE & ALLOCATION */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* SCORE GAUGE CARD */}
-        <div className="p-8 bg-gradient-to-br from-slate-900 to-slate-800 rounded-[2rem] shadow-2xl border border-slate-700/50 flex flex-col items-center justify-center relative overflow-hidden">
-          <div className="absolute -left-10 -top-10 opacity-5"><FaBrain size={200} className="text-white"/></div>
-          
-          <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-6 relative z-10">Optimization Score</h3>
-          
-          {/* Custom CSS Circular Progress */}
-          <div className="relative w-40 h-40 flex items-center justify-center rounded-full bg-slate-800 shadow-[inset_0_0_20px_rgba(0,0,0,0.5)] z-10 mb-4"
-               style={{ background: `conic-gradient(#3b82f6 ${strategyData.optimizationScore}%, #1e293b ${strategyData.optimizationScore}%)` }}>
-            <div className="absolute w-32 h-32 bg-slate-900 rounded-full flex flex-col items-center justify-center shadow-2xl">
-              <span className="text-4xl font-black text-white tracking-tighter">{strategyData.optimizationScore}</span>
-              <span className="text-[9px] font-bold text-blue-400 uppercase tracking-widest">Out of 100</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 bg-white/10 px-4 py-2 rounded-xl border border-white/5 backdrop-blur-md z-10">
-            <span className="text-xs font-bold text-slate-300">Portfolio Risk:</span>
-            <span className={`text-xs font-black uppercase tracking-wider ${strategyData.riskLevel === 'Safe' || strategyData.riskLevel === 'Low Yield' ? 'text-emerald-400' : strategyData.riskLevel === 'Moderate' ? 'text-yellow-400' : 'text-rose-400'}`}>
-              {strategyData.riskLevel}
-            </span>
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">AI Strategy Matrix</h1>
+            <p className="text-[11px] sm:text-sm font-semibold text-slate-400 mt-1 max-w-xl">Real-time portfolio analysis & personalized wealth optimization</p>
           </div>
         </div>
-
-        {/* ASSET ALLOCATION BLUEPRINT */}
-        <div className="lg:col-span-2 p-8 bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-center">
-          <div className="flex items-center justify-between mb-8">
-            <h3 className="text-lg font-black text-slate-800 dark:text-white flex items-center gap-2">
-              <HiOutlineChartPie className="text-blue-500" size={24}/> Asset Allocation Blueprint
-            </h3>
-            <button onClick={reAnalyze} className="p-2 bg-slate-50 dark:bg-white/5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors border border-slate-200 dark:border-slate-700">
-              <HiOutlineAdjustments className="text-slate-500" size={20}/>
-            </button>
-          </div>
-
-          <div className="space-y-6">
-            {/* Fiat */}
-            <div>
-              <div className="flex justify-between items-end mb-2">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded-lg"><FaWallet size={12}/></div>
-                  <span className="text-sm font-black text-slate-700 dark:text-slate-300">Fiat & Cash Reserves</span>
-                </div>
-                <span className="text-sm font-black text-slate-900 dark:text-white">{strategyData.allocations.fiat}%</span>
-              </div>
-              <div className="w-full h-3 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                <div className="h-full bg-blue-500 rounded-full transition-all duration-1000" style={{width: `${strategyData.allocations.fiat}%`}}></div>
-              </div>
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 relative z-10 w-full lg:w-auto mt-2 lg:mt-0">
+          {strategyData?.riskLevel && strategyData.riskLevel !== 'N/A' && (
+            <div className={`flex-1 lg:flex-none flex justify-center items-center gap-1.5 px-4 py-3 sm:py-3.5 rounded-2xl text-[10px] sm:text-xs font-black uppercase tracking-widest border backdrop-blur-sm shadow-sm
+              ${strategyData.riskLevel === 'Safe' || strategyData.riskLevel === 'Conservative' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : strategyData.riskLevel === 'Moderate' ? 'bg-blue-500/10 text-blue-400 border-blue-500/30' : strategyData.riskLevel === 'Medium-High' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' : 'bg-rose-500/10 text-rose-400 border-rose-500/30'}`}>
+              {strategyData.riskLevel === 'Safe' ? '🛡️' : strategyData.riskLevel === 'Conservative' ? '🔒' : strategyData.riskLevel === 'Moderate' ? '⚖️' : strategyData.riskLevel === 'Medium-High' ? '⚠️' : '🔥'} 
+              <span className="truncate">{strategyData.riskLevel} Risk</span>
             </div>
-
-            {/* Crypto */}
-            <div>
-              <div className="flex justify-between items-end mb-2">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 bg-orange-100 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400 rounded-lg"><FaChartLine size={12}/></div>
-                  <span className="text-sm font-black text-slate-700 dark:text-slate-300">Digital Assets (Holding)</span>
-                </div>
-                <span className="text-sm font-black text-slate-900 dark:text-white">{strategyData.allocations.crypto}%</span>
-              </div>
-              <div className="w-full h-3 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                <div className="h-full bg-orange-500 rounded-full transition-all duration-1000" style={{width: `${strategyData.allocations.crypto}%`}}></div>
-              </div>
-            </div>
-
-            {/* Yield/Staking */}
-            <div>
-              <div className="flex justify-between items-end mb-2">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-lg"><FaLeaf size={12}/></div>
-                  <span className="text-sm font-black text-slate-700 dark:text-slate-300">Yield Farms & Staking (Est.)</span>
-                </div>
-                <span className="text-sm font-black text-slate-900 dark:text-white">{strategyData.allocations.yield}%</span>
-              </div>
-              <div className="w-full h-3 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                <div className="h-full bg-emerald-500 rounded-full transition-all duration-1000" style={{width: `${strategyData.allocations.yield}%`}}></div>
-              </div>
-            </div>
-          </div>
-          
+          )}
+          <button onClick={reAnalyze} className="flex-1 lg:flex-none flex justify-center items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 sm:px-6 py-3 sm:py-3.5 rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-sm border border-white/10">
+            <HiOutlineRefresh size={16} className="shrink-0" /> <span className="truncate">Re-Analyze</span>
+          </button>
         </div>
       </div>
 
-      {/* AI ACTION PLAN */}
-      <div>
-        <h2 className="text-xl font-black text-slate-800 dark:text-white tracking-tight flex items-center gap-2 mb-6">
-          <HiOutlineLightBulb className="text-yellow-500" size={24} /> Strategic Action Plan
-        </h2>
+      <p className="text-[9px] sm:text-[10px] font-black text-blue-500 dark:text-blue-400 uppercase tracking-widest pl-4 sm:pl-6 -mt-2">
+        <HiOutlineEye className="inline mr-1" size={14} /> Last Scan: {formatGlobalDate ? formatGlobalDate(new Date().toISOString(), 'full') : 'Just now'}
+      </p>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {strategyData.actionPlan.map((action) => (
-            <div key={action.id} className={`p-6 bg-white dark:bg-slate-900 rounded-[2rem] border ${action.borderColor} shadow-sm flex flex-col justify-between group hover:shadow-xl hover:-translate-y-1 transition-all duration-300`}>
-              
-              <div>
-                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl mb-5 ${action.color}`}>
-                  {action.icon}
-                </div>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{action.type} alert</p>
-                <h3 className="text-lg font-black text-slate-800 dark:text-white mb-3">{action.title}</h3>
-                <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 leading-relaxed mb-6">
-                  {action.desc}
-                </p>
-              </div>
-
-              <button onClick={() => navigate(action.link)} className="w-full py-4 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-white rounded-xl font-black text-xs uppercase tracking-widest transition-colors flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700">
-                {action.actionText} <HiOutlineArrowRight />
-              </button>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 sm:gap-6">
+        <div className="p-6 sm:p-8 bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center relative overflow-hidden group">
+          <div className="absolute -left-10 -top-10 opacity-[0.02] dark:opacity-5 group-hover:scale-110 transition-transform duration-700">
+            <FaBrain size={200} className="text-slate-900 dark:text-white"/>
+          </div>
+          <h3 className="text-[10px] sm:text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-6 relative z-10 text-center">Portfolio Health Score</h3>
+          <ScoreGauge score={strategyData?.optimizationScore || 0} riskLevel={strategyData?.riskLevel} />
+          {strategyData?.totalPortfolio > 0 && (
+            <div className="mt-8 text-center relative z-10 bg-slate-50 dark:bg-slate-800/50 px-6 py-3 rounded-2xl border border-slate-100 dark:border-slate-700/50">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Tracked Wealth</p>
+              <p className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white truncate max-w-[200px]" title={`${currencySymbol}${strategyData.totalPortfolio.toLocaleString()}`}>{currencySymbol}{strategyData.totalPortfolio.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2})}</p>
             </div>
-          ))}
+          )}
         </div>
+
+        <div className="xl:col-span-2 p-6 sm:p-8 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-center relative overflow-hidden">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8 relative z-10">
+            <h3 className="text-base sm:text-lg font-black text-slate-800 dark:text-white flex items-center gap-2"><HiOutlineChartPie className="text-blue-500 shrink-0" size={22}/>Asset Allocation Blueprint</h3>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-[9px] font-black text-slate-500 uppercase tracking-widest bg-slate-50 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-100 dark:border-slate-700">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500 shadow-sm" /> Fiat</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500 shadow-sm" /> Crypto</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500 shadow-sm" /> Yield</span>
+            </div>
+          </div>
+          <div className="space-y-6 sm:space-y-8 relative z-10">
+            <ProgressBar label="Fiat & Cash Reserves" icon={FaWallet} value={strategyData?.allocations?.fiat || 0} color="bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]" bgColor="bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20" amount={strategyData?.totalFiat ? `${currencySymbol}${strategyData.totalFiat.toLocaleString(undefined, {maximumFractionDigits:0})}` : undefined} />
+            <ProgressBar label="Digital Assets (Crypto)" icon={FaChartLine} value={strategyData?.allocations?.crypto || 0} color="bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.5)]" bgColor="bg-orange-50 dark:bg-orange-500/10 border border-orange-100 dark:border-orange-500/20" amount={strategyData?.cryptoBalance ? `${currencySymbol}${strategyData.cryptoBalance.toLocaleString(undefined, {maximumFractionDigits:0})}` : undefined} />
+            <ProgressBar label="Yield/Staking (Estimated)" icon={FaLeaf} value={strategyData?.allocations?.yield || 0} color="bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" bgColor="bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20" />
+          </div>
+          <div className="mt-8 p-4 sm:p-5 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/10 dark:to-cyan-900/10 rounded-2xl border border-blue-200 dark:border-blue-500/20 relative z-10 shadow-sm">
+            <p className="text-[10px] sm:text-xs font-bold text-blue-700 dark:text-blue-400 flex items-start gap-2.5">
+              <HiOutlineLightBulb className="shrink-0 mt-0.5 text-yellow-500" size={18} />
+              <span className="leading-relaxed">
+                {strategyData?.allocations?.crypto > 50 ? 'Consider rebalancing: High crypto exposure increases volatility risk.' : strategyData?.allocations?.fiat > 80 ? 'Large idle fiat reserves losing value to inflation. Explore yield options.' : 'Your allocation is well-balanced. Focus on consistent contributions.'}
+              </span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="pt-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-5 sm:mb-6">
+          <h2 className="text-xl sm:text-2xl font-black text-slate-800 dark:text-white tracking-tight flex items-center gap-2">
+            <HiOutlineLightBulb className="text-yellow-500 shrink-0" size={24} /> Strategic Action Plan
+          </h2>
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm w-fit">
+            {strategyData?.actionPlan?.length || 0} Recommendations
+          </span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+          {strategyData?.actionPlan?.map((action, index) => <StrategyCard key={action.id} action={action} index={index} />)}
+        </div>
+      </div>
+
+      <div className="text-center py-6 px-4 bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm">
+        <p className="text-[10px] sm:text-xs font-black text-slate-500 dark:text-slate-400 flex items-center justify-center gap-2 flex-wrap uppercase tracking-widest">
+          <FaRobot className="text-blue-500" size={16} /> Powered by J.A.R.V.I.S Engine v2.0 — <span className="text-blue-600 dark:text-blue-400">Real-time cross-vault analysis</span>
+        </p>
       </div>
 
     </div>
