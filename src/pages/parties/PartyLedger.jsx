@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { collection, doc, onSnapshot, setDoc, addDoc, query, orderBy, deleteDoc, getDocs, where, getDoc } from 'firebase/firestore';
@@ -1119,7 +1119,7 @@ const PartyLedger = () => {
                     <span className="text-xs sm:text-sm font-black text-slate-700 dark:text-slate-400 whitespace-nowrap">{baseCurrency}</span>
                   </div>
                   <button type="button" onClick={fetchLiveRate} disabled={isFetchingRate} className="w-full sm:w-auto text-[9px] sm:text-[10px] font-black bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-50 flex items-center justify-center shrink-0 uppercase tracking-widest">
-                    <HiOutlineRefresh className={isFetchingRate ? 'animate-spin' : ''} size={12} className="sm:w-3.5 sm:h-3.5" /> Live
+                    <HiOutlineRefresh className={`${isFetchingRate ? 'animate-spin' : ''} sm:w-3.5 sm:h-3.5`} size={12} /> Live
                   </button>
                 </div>
               )}
@@ -1136,7 +1136,7 @@ const PartyLedger = () => {
                         <option value="online">Online Wallet</option>
                         <option value="crypto">Crypto Engine</option>
                       </select>
-                      <HiOutlineChevronDown className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18} className="sm:w-5 sm:h-5" />
+                      <HiOutlineChevronDown className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none sm:w-5 sm:h-5" size={18} />
                     </div>
                   </div>
                   {(formData.vault === 'bank' || formData.vault === 'online') && (
@@ -1167,7 +1167,7 @@ const PartyLedger = () => {
                             {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
                             <option value="CUSTOM">✨ Custom Platform</option>
                           </select>
-                          <HiOutlineChevronDown className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18} className="sm:w-5 sm:h-5" />
+                          <HiOutlineChevronDown className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none sm:w-5 sm:h-5" size={18} />
                         </div>
                       )}
                     </div>
