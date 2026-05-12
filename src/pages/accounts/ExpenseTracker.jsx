@@ -14,14 +14,12 @@ import {
   HiOutlineTrendingDown, HiOutlineCash
 } from 'react-icons/hi';
 
-// 🚀 FIXED: Added FaTags, FaCreditCard, and FaLock here!
 import { 
   FaMoneyBillWave, FaArrowUp, FaUniversity, FaWallet, 
   FaExchangeAlt, FaRandom, FaBitcoin, FaUserFriends,
   FaGem, FaChartLine, FaPiggyBank, FaArrowDown, FaTags, FaCreditCard, FaLock
 } from 'react-icons/fa';
 
-// 🚀 IMPORT SINGLE SOURCE OF TRUTH
 import { fiatFlagMap } from '../../utils/marketConstants';
 
 const cryptoPlatformsList = [
@@ -48,31 +46,11 @@ const hashPIN = async (pinCode) => {
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
-// 🚀 Helper: Get local Date & Time string for datetime-local input
 const getLocalDateTimeString = () => {
   const now = new Date();
   now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
   return now.toISOString().slice(0, 16); 
 };
-
-// Premium Stat Card
-const StatCard = ({ title, value, icon: Icon, color, subtitle, trend }) => (
-  <div className={`relative overflow-hidden rounded-2xl p-5 sm:p-6 bg-gradient-to-br ${color} text-white shadow-xl group hover:scale-[1.02] transition-all duration-300`}>
-    <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(255,255,255,0.15),transparent_70%)]" />
-    <Icon className="absolute right-[-10%] bottom-[-10%] text-7xl sm:text-8xl opacity-10 group-hover:scale-110 transition-transform duration-500" />
-    <div className="relative z-10 flex flex-col h-full">
-      <p className="text-[10px] sm:text-xs font-black uppercase tracking-widest opacity-80 mb-2">{title}</p>
-      <h3 className="text-2xl sm:text-3xl font-black tracking-tight truncate" title={value}>{value}</h3>
-      {trend !== undefined && (
-        <div className={`flex items-center gap-1 mt-3 text-[10px] sm:text-xs font-bold w-fit px-2 py-1 rounded-lg backdrop-blur-sm bg-white/10 ${trend <= 0 ? 'text-emerald-100' : 'text-rose-100'}`}>
-          {trend <= 0 ? <HiOutlineTrendingDown size={14} /> : <HiOutlineTrendingUp size={14} />}
-          {Math.abs(trend)}% from last month
-        </div>
-      )}
-      {subtitle && <p className="text-[10px] font-medium opacity-70 mt-2">{subtitle}</p>}
-    </div>
-  </div>
-);
 
 const ExpenseTracker = () => {
   const { user, baseCurrency = 'INR', selectedCryptos = [], selectedFiats = [], formatGlobalDate } = useAuth();
@@ -176,6 +154,7 @@ const ExpenseTracker = () => {
   
   const existingBanks = useMemo(() => Array.from(new Set(bankWalletLogs)), [bankWalletLogs]);
 
+  // 🚀 CRASH FIX: Properly initialized and accumulated 'monthTotal'
   const processedExpenses = useMemo(() => {
     const filtered = expenses.filter(exp => {
       const matchSearch = exp.title.toLowerCase().includes(searchTerm.toLowerCase()) || (exp.asset && exp.asset.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -192,9 +171,14 @@ const ExpenseTracker = () => {
       const monthName = formatGlobalDate ? formatGlobalDate(dateObj, 'monthYear') : dateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
       const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
 
-      if (!grouped[monthKey]) { grouped[monthKey] = { monthName, openingBalance: runningBalance, records: [], closingBalance: 0 }; }
-      runningBalance += Number(t.finalBaseAmount || 0); 
-      grouped[monthKey].records.push({ ...t, finalAmount: Number(t.finalBaseAmount || 0) });
+      if (!grouped[monthKey]) { 
+        grouped[monthKey] = { monthName, openingBalance: runningBalance, records: [], closingBalance: 0, monthTotal: 0 }; 
+      }
+      
+      const baseAmt = Number(t.finalBaseAmount || 0);
+      runningBalance += baseAmt; 
+      grouped[monthKey].monthTotal += baseAmt; // FIXED!
+      grouped[monthKey].records.push({ ...t, finalAmount: baseAmt });
       grouped[monthKey].closingBalance = runningBalance;
     });
 
@@ -208,7 +192,6 @@ const ExpenseTracker = () => {
     return expenses.filter(i => i.date?.startsWith(thisMonth)).reduce((acc, i) => acc + (Number(i.finalBaseAmount) || 0), 0);
   }, [expenses]);
 
-  // 🚀 SMART EXPORT LOGIC FOR EXCEL MATH
   const handleDownloadReport = (format) => {
     setIsExportMenuOpen(false);
     const filteredForReport = processedExpenses.flatMap(month => month.records);
@@ -226,7 +209,7 @@ const ExpenseTracker = () => {
         category: rec.category,
         source: sourceText,
         nativeAmount: `${(Number(rec.amount) || 0).toLocaleString()} ${rec.asset}`,
-        baseValue: Number(rec.finalBaseAmount || 0) // 🚀 Raw numeric value for math engine
+        baseValue: Number(rec.finalBaseAmount || 0)
       };
     });
 
@@ -657,7 +640,7 @@ const ExpenseTracker = () => {
     <div className="w-full h-auto pb-24">
       <div className="pt-8 md:pt-12 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 md:px-6">
         
-        {/* 🚀 FIXED: Mobile Export Box Clipping Issue */}
+        {/* 🚀 PREMIUM HEADER & EXPORT */}
         <div className="relative rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50 z-20">
           <div className="absolute inset-0 overflow-hidden rounded-[2.5rem] pointer-events-none">
              <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(244,63,94,0.1),transparent_70%)]" />
@@ -678,22 +661,21 @@ const ExpenseTracker = () => {
             </div>
             
             <div className="grid grid-cols-2 md:flex items-center gap-3 w-full md:w-auto mt-4 md:mt-0">
-              
-              {/* 🚀 EXPORT MENU FIX: High Z-Index, Absolute Positioning */}
-              <div className="relative w-full md:w-auto">
+              {/* 🚀 EXPORT MENU Z-INDEX FIX */}
+              <div className="relative w-full md:w-auto z-[100]">
                 <button 
                   onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
                   onBlur={() => setTimeout(() => setIsExportMenuOpen(false), 200)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 shadow-sm"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 shadow-sm"
                 >
                   <HiOutlineDownload size={16} /> Export
                 </button>
                 {isExportMenuOpen && (
-                  <div className="absolute top-[110%] right-0 w-full md:w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl flex flex-col p-1.5 z-[100] animate-in fade-in zoom-in-95">
-                    <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg transition-colors">
+                  <div className="absolute top-[110%] left-0 sm:right-0 sm:left-auto w-full md:w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl flex flex-col p-1.5 animate-in fade-in zoom-in-95">
+                    <button onMouseDown={(e) => { e.preventDefault(); handleDownloadReport('pdf'); }} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg transition-colors text-left">
                       <HiOutlineDocumentText className="text-rose-400" size={16}/> PDF Document
                     </button>
-                    <button onClick={() => handleDownloadReport('excel')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg transition-colors">
+                    <button onMouseDown={(e) => { e.preventDefault(); handleDownloadReport('excel'); }} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg transition-colors text-left">
                       <HiOutlineTable className="text-emerald-400" size={16}/> Excel (CSV)
                     </button>
                   </div>
@@ -702,22 +684,21 @@ const ExpenseTracker = () => {
               
               <button 
                 onClick={openModal} 
-                className="w-full md:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 text-white px-5 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-rose-500/30"
+                className="w-full md:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 text-white px-5 py-3.5 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-rose-500/30"
               >
                 <HiOutlinePlus size={18} /> Log Expense
               </button>
             </div>
           </div>
           
-          {/* Stats Row */}
           <div className="relative z-30 grid grid-cols-2 md:grid-cols-3 gap-3 mt-6">
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 overflow-hidden">
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><HiOutlineTrendingDown size={14}/> Total Spent</p>
-              <p className="text-lg md:text-xl font-black text-white truncate" title={`${currencySymbol}${totalExpenseBase.toLocaleString()}`}>{currencySymbol}{totalExpenseBase.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+              <p className="text-lg md:text-xl font-black text-white truncate" title={`${currencySymbol}${totalExpenseBase.toLocaleString()}`}>{currencySymbol}{(Number(totalExpenseBase) || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
             </div>
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 overflow-hidden">
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><HiOutlineCalendar size={12}/> This Month</p>
-              <p className="text-lg md:text-xl font-black text-rose-400 truncate" title={`${currencySymbol}${thisMonthExpense.toLocaleString()}`}>{currencySymbol}{thisMonthExpense.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+              <p className="text-lg md:text-xl font-black text-rose-400 truncate" title={`${currencySymbol}${thisMonthExpense.toLocaleString()}`}>{currencySymbol}{(Number(thisMonthExpense) || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
             </div>
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 col-span-2 md:col-span-1 overflow-hidden">
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><FaTags size={12}/> Total Entries</p>
@@ -727,19 +708,19 @@ const ExpenseTracker = () => {
         </div>
 
         {/* Search & Filter */}
-        <div className="flex flex-col md:flex-row gap-4 bg-white dark:bg-slate-900 p-4 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-col md:flex-row gap-3 sm:gap-4 bg-white dark:bg-slate-900 p-3 sm:p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="relative flex-1">
-            <HiOutlineSearch className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+            <HiOutlineSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
             <input 
-              type="text" placeholder="Search by payee or category..."
+              type="text" placeholder="Search payee or category..."
               value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-14 pr-4 py-3.5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none focus:border-rose-500 transition-all placeholder-slate-400 dark:placeholder-slate-500 shadow-sm"
+              className="w-full pl-12 pr-4 py-3.5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none focus:border-rose-500 transition-all placeholder-slate-400 dark:placeholder-slate-500 shadow-sm"
             />
           </div>
           <div className="flex gap-2">
             <select 
               value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
-              className="w-full sm:w-auto px-5 py-3.5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-700 dark:text-slate-300 outline-none focus:border-rose-500 cursor-pointer transition-all shadow-sm"
+              className="w-full sm:w-auto px-4 py-3.5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-black text-xs sm:text-sm text-slate-700 dark:text-slate-300 outline-none focus:border-rose-500 cursor-pointer transition-all shadow-sm"
             >
               <option value="all">All Categories</option>
               {expenseCategories.map(c => <option key={c} value={c}>{c}</option>)}
@@ -747,7 +728,7 @@ const ExpenseTracker = () => {
           </div>
         </div>
 
-        {/* Ledger */}
+        {/* 🚀 RESPONSIVE LEDGER (MOBILE CARDS + DESKTOP TABLE) */}
         <div className="space-y-6 sm:space-y-8">
           {isLoading ? (
             <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm">
@@ -770,21 +751,75 @@ const ExpenseTracker = () => {
             </div>
           ) : (
             processedExpenses.map((month) => (
-              <div key={month.monthName} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[2rem] overflow-hidden shadow-sm">
-                <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50">
-                  <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2.5">
+              <div key={month.monthName} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[1.5rem] md:rounded-[2rem] overflow-hidden shadow-sm">
+                
+                {/* Month Header */}
+                <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50">
+                  <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-2.5">
                     <div className="p-2 bg-rose-100 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-lg">
-                      <HiOutlineCalendar size={18} />
+                      <HiOutlineCalendar size={16} />
                     </div>
                     {month.monthName}
                   </h2>
                   <div className="text-right">
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Month Total</p>
-                    <p className="text-sm font-black text-rose-600 dark:text-rose-400">-{currencySymbol}{month.monthTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                    <p className="text-[8px] sm:text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Month Total</p>
+                    <p className="text-xs sm:text-sm font-black text-rose-600 dark:text-rose-400">-{currencySymbol}{(Number(month.monthTotal) || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
                   </div>
                 </div>
 
-                <div className="overflow-x-auto custom-scrollbar">
+                {/* 📱 MOBILE VIEW: CARDS */}
+                <div className="md:hidden flex flex-col divide-y divide-slate-100 dark:divide-slate-800/50">
+                  {month.records.map((rec) => {
+                    const dateObj = new Date(rec.date);
+                    const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    return (
+                      <div key={rec.id} className={`p-4 ${rec.isSplit ? 'bg-amber-50/30 dark:bg-amber-900/10' : ''}`}>
+                        <div className="flex justify-between items-start mb-2">
+                          <div className="flex-1 min-w-0 pr-2">
+                            <p className="font-black text-slate-900 dark:text-white text-sm truncate">{rec.title}</p>
+                            <span className="inline-block px-1.5 py-0.5 bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400 text-[8px] font-black uppercase tracking-wider rounded mt-1 border border-rose-200 dark:border-rose-500/20 shadow-sm truncate max-w-full">
+                              {rec.category}
+                            </span>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-base font-black text-rose-600 dark:text-rose-400 tracking-tight leading-none">
+                              -{currencySymbol}{(Number(rec.finalBaseAmount) || 0).toLocaleString(undefined, {minimumFractionDigits: 0})}
+                            </p>
+                            {rec.asset !== baseCurrency && (
+                              <p className="text-[9px] font-bold text-slate-500 mt-1">{Number(rec.amount || 0).toLocaleString()} {rec.asset}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap justify-between items-end gap-2 mt-3">
+                          <div className="flex flex-col gap-1.5">
+                            <div className={`flex items-center gap-1.5 w-max px-2 py-1 rounded-md border text-[9px] font-bold shadow-sm ${rec.isSplit ? 'bg-amber-100/50 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/30 text-amber-800 dark:text-amber-400' : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}>
+                              {rec.isSplit ? (
+                                <><FaRandom className="text-amber-600 dark:text-amber-500" /> Split Expense</>
+                              ) : (
+                                <>{getVaultIcon(rec.vault)} <span className="capitalize">{rec.vault}</span> {rec.subWallet && <span className="opacity-70 ml-0.5 truncate max-w-[80px]">· {rec.subWallet}</span>}</>
+                              )}
+                            </div>
+                            <p className="text-[9px] font-bold text-slate-400 flex items-center gap-1">
+                              <HiOutlineCalendar size={10}/> {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]} <span className="opacity-50">· {timeStr}</span>
+                            </p>
+                          </div>
+
+                          <div className="flex gap-1">
+                            {rec.linkedExpenseId && !rec.linkedExpenseId.startsWith('EXP_') && (
+                              <span className="p-1.5 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 rounded-md border border-amber-300 dark:border-amber-500/30 shadow-sm"><FaLock size={12} /></span>
+                            )}
+                            <button onClick={() => handleEdit(rec)} className="p-1.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-md border border-blue-200 dark:border-blue-500/30 shadow-sm"><HiOutlinePencil size={14} /></button>
+                            <button onClick={() => initiateDelete(rec)} className="p-1.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md border border-rose-200 dark:border-rose-500/30 shadow-sm"><HiOutlineTrash size={14} /></button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 💻 DESKTOP VIEW: TABLE */}
+                <div className="hidden md:block overflow-x-auto custom-scrollbar">
                   <table className="w-full text-left min-w-[900px]">
                     <thead className="bg-white dark:bg-slate-900 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
                       <tr>
@@ -835,15 +870,15 @@ const ExpenseTracker = () => {
                               </div>
                             </td>
                             <td className="p-4 text-right align-top">
-                              <p className="font-black text-slate-800 dark:text-slate-200 text-sm mt-1">{rec.amount.toLocaleString()} <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold ml-0.5">{rec.asset}</span></p>
+                              <p className="font-black text-slate-800 dark:text-slate-200 text-sm mt-1">{(Number(rec.amount) || 0).toLocaleString()} <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold ml-0.5">{rec.asset}</span></p>
                               {rec.asset !== baseCurrency && <p className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-widest">Rate: {rec.exchangeRate}</p>}
                             </td>
                             <td className="p-4 text-right align-top">
                               <p className="text-base font-black text-rose-600 dark:text-rose-400 tracking-tight mt-0.5">
-                                -{currencySymbol}{rec.finalBaseAmount.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                -{currencySymbol}{(Number(rec.finalBaseAmount) || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
                               </p>
                               {rec.friendsShare > 0 && (
-                                <p className="text-[9px] text-blue-600 dark:text-blue-400 font-bold mt-1">Friends: {currencySymbol}{rec.friendsShare.toLocaleString()}</p>
+                                <p className="text-[9px] text-blue-600 dark:text-blue-400 font-bold mt-1">Friends: {currencySymbol}{(Number(rec.friendsShare)||0).toLocaleString()}</p>
                               )}
                             </td>
                             <td className="p-4 pr-6 align-top">
@@ -866,11 +901,12 @@ const ExpenseTracker = () => {
                   </table>
                 </div>
 
-                <div className="px-6 py-5 border-t border-slate-200 dark:border-slate-800 flex justify-end bg-slate-50/50 dark:bg-slate-800/30">
-                  <div className="text-right bg-white dark:bg-slate-900 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Closing Balance</p>
-                    <p className="text-lg font-black text-rose-700 dark:text-rose-400">
-                      {currencySymbol}{(month.closingBalance || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                {/* Footer Closing Balance */}
+                <div className="px-4 sm:px-6 py-4 sm:py-5 border-t border-slate-200 dark:border-slate-800 flex justify-end bg-slate-50/50 dark:bg-slate-800/30">
+                  <div className="text-right bg-white dark:bg-slate-900 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Closing Flow</p>
+                    <p className="text-base sm:text-lg font-black text-rose-700 dark:text-rose-400">
+                      {currencySymbol}{(Number(month.closingBalance) || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                     </p>
                   </div>
                 </div>
@@ -880,7 +916,7 @@ const ExpenseTracker = () => {
         </div>
       </div>
 
-      {/* Add/Edit Modal */}
+      {/* 🚀 Add/Edit Modal (Unchanged Backend Logic, Polished Mobile UI) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90dvh] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-300 dark:border-slate-700">
@@ -895,7 +931,7 @@ const ExpenseTracker = () => {
               </button>
             </div>
             
-            <form onSubmit={handleSaveEntry} className="p-6 sm:p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
+            <form onSubmit={handleSaveEntry} className="p-4 sm:p-8 space-y-5 sm:space-y-6 flex-1 overflow-y-auto custom-scrollbar">
               {formData.isSynced && (
                 <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 p-4 rounded-xl text-xs font-bold leading-relaxed border border-amber-300 dark:border-amber-500/30 shadow-sm">
                   <p className="flex items-center gap-1 mb-1"><HiOutlineExclamationCircle size={16}/> Auto-Synced Entry</p>
@@ -903,14 +939,14 @@ const ExpenseTracker = () => {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Payee / Item *</label>
                   <input 
                     disabled={formData.isSynced} type="text" required value={formData.title} 
                     onChange={(e) => setFormData({...formData, title: e.target.value})} 
                     placeholder="e.g., Dinner, Rent"
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 transition-colors shadow-sm"
+                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 transition-colors shadow-sm"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -919,7 +955,7 @@ const ExpenseTracker = () => {
                     <select 
                       disabled={formData.isSynced} value={formData.category} 
                       onChange={(e) => setFormData({...formData, category: e.target.value})}
-                      className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 appearance-none cursor-pointer transition-colors shadow-sm"
+                      className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 appearance-none cursor-pointer transition-colors shadow-sm"
                     >
                       {expenseCategories.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
@@ -929,7 +965,7 @@ const ExpenseTracker = () => {
               </div>
 
               {!formData.isSynced && (
-                <label className="flex justify-between items-center p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 transition-colors">
+                <label className="flex justify-between items-center p-4 sm:p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 transition-colors">
                   <div>
                     <h4 className="font-black text-sm text-slate-900 dark:text-white flex items-center gap-2"><FaRandom className="text-amber-500"/> Split Payment</h4>
                     <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 font-bold">Pay this bill using multiple vaults</p>
@@ -942,8 +978,8 @@ const ExpenseTracker = () => {
               )}
 
               {!formData.isSplit ? (
-                <div className="p-5 sm:p-6 bg-rose-50/50 dark:bg-slate-800/80 rounded-[2rem] border border-rose-200 dark:border-slate-700 shadow-sm space-y-5 animate-in fade-in zoom-in-95">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div className="p-4 sm:p-6 bg-rose-50/50 dark:bg-slate-800/80 rounded-[1.5rem] sm:rounded-[2rem] border border-rose-200 dark:border-slate-700 shadow-sm space-y-4 sm:space-y-5 animate-in fade-in zoom-in-95">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Deduct From</label>
                       <div className="relative">
@@ -958,7 +994,7 @@ const ExpenseTracker = () => {
                               exchangeRate: 1, subWallet: ''
                             });
                           }} 
-                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 appearance-none cursor-pointer transition-colors shadow-sm"
+                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 appearance-none cursor-pointer transition-colors shadow-sm"
                         >
                           <option value="bank">Bank Account</option>
                           <option value="cash">Physical Cash</option>
@@ -975,7 +1011,7 @@ const ExpenseTracker = () => {
                         <input 
                           type="text" list="sub-wallets-exp" required value={formData.subWallet} 
                           onChange={(e) => setFormData({...formData, subWallet: e.target.value})} 
-                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 placeholder-slate-400 shadow-sm transition-colors"
+                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 placeholder-slate-400 shadow-sm transition-colors"
                           placeholder={formData.vault === 'bank' ? "e.g. SBI" : "e.g. PayPal"}
                         />
                         <datalist id="sub-wallets-exp">{existingBanks.map(b => <option key={b} value={b} />)}</datalist>
@@ -987,12 +1023,12 @@ const ExpenseTracker = () => {
                         <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Platform *</label>
                         {formData.isCustomSingle ? (
                           <div className="flex gap-2">
-                            <input type="text" required value={formData.cryptoPlatform} onChange={(e)=>setFormData({...formData, cryptoPlatform: e.target.value})} className="flex-1 p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none shadow-sm transition-colors focus:ring-2 focus:ring-rose-500/50" />
-                            <button type="button" onClick={()=>setFormData({...formData, isCustomSingle: false, cryptoPlatform: cryptoPlatformsList[0]})} className="p-4 bg-slate-100 dark:bg-slate-800 rounded-2xl text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors border border-slate-200 dark:border-slate-700 shadow-sm active:scale-95"><HiOutlineX size={20}/></button>
+                            <input type="text" required value={formData.cryptoPlatform} onChange={(e)=>setFormData({...formData, cryptoPlatform: e.target.value})} className="flex-1 p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-black text-sm text-slate-900 dark:text-white outline-none shadow-sm transition-colors focus:ring-2 focus:ring-rose-500/50" />
+                            <button type="button" onClick={()=>setFormData({...formData, isCustomSingle: false, cryptoPlatform: cryptoPlatformsList[0]})} className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors border border-slate-200 dark:border-slate-700 shadow-sm active:scale-95"><HiOutlineX size={20}/></button>
                           </div>
                         ) : (
                           <div className="relative">
-                            <select value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} onChange={(e) => { if(e.target.value==='CUSTOM'){setFormData({...formData, isCustomSingle: true, cryptoPlatform: ''})} else {setFormData({...formData, cryptoPlatform: e.target.value})} }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none cursor-pointer appearance-none shadow-sm transition-colors focus:ring-2 focus:ring-rose-500/50">
+                            <select value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} onChange={(e) => { if(e.target.value==='CUSTOM'){setFormData({...formData, isCustomSingle: true, cryptoPlatform: ''})} else {setFormData({...formData, cryptoPlatform: e.target.value})} }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-black text-sm text-slate-900 dark:text-white outline-none cursor-pointer appearance-none shadow-sm transition-colors focus:ring-2 focus:ring-rose-500/50">
                               {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}<option value="CUSTOM">✨ Custom Platform</option>
                             </select>
                             <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
@@ -1002,21 +1038,23 @@ const ExpenseTracker = () => {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Asset Paid In</label>
                       <div className="relative">
                         <select 
                           disabled={formData.isSynced} value={formData.asset} 
                           onChange={(e) => setFormData({...formData, asset: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})}
-                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 appearance-none cursor-pointer shadow-sm transition-colors"
+                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 appearance-none cursor-pointer shadow-sm transition-colors"
                         >
                           {formData.vault === 'crypto' ? (
                             availableCryptos.map(c => <option key={c} value={c}>{c}</option>)
                           ) : (
                             <>
                               <option value={baseCurrency}>{baseCurrency} (Base)</option>
-                              {availableFiats.filter(c => c !== baseCurrency).map(c => <option key={c} value={c}>{c}</option>)}
+                              <optgroup label="Fiat">
+                                {availableFiats.filter(c => c !== baseCurrency).map(c => <option key={c} value={c}>{c}</option>)}
+                              </optgroup>
                             </>
                           )}
                         </select>
@@ -1029,21 +1067,21 @@ const ExpenseTracker = () => {
                         disabled={formData.isSynced} type="number" step="any" required value={formData.amount} 
                         onChange={(e) => setFormData({...formData, amount: e.target.value})} 
                         placeholder="0.00"
-                        className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-lg text-rose-600 dark:text-rose-400 outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 shadow-sm placeholder-rose-300 dark:placeholder-slate-600 transition-colors"
+                        className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-black text-lg text-rose-600 dark:text-rose-400 outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 shadow-sm placeholder-rose-300 dark:placeholder-slate-600 transition-colors"
                       />
                     </div>
                   </div>
 
                   {formData.asset !== baseCurrency && (
-                    <div className="p-4 sm:p-5 bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800/50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm animate-in fade-in">
-                      <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 shrink-0"><FaExchangeAlt className="text-rose-500" /> Exchange Rate:</span>
+                    <div className="p-4 bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800/50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 shadow-sm animate-in fade-in">
+                      <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 shrink-0"><FaExchangeAlt className="text-rose-500" /> Rate:</span>
                       <div className="flex items-center gap-2 flex-1 w-full">
-                        <span className="text-sm font-black text-slate-700 dark:text-slate-300 whitespace-nowrap">1 {formData.asset} =</span>
+                        <span className="text-xs sm:text-sm font-black text-slate-700 dark:text-slate-300 whitespace-nowrap">1 {formData.asset} =</span>
                         <input disabled={formData.isSynced} type="number" step="any" required value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} className="flex-1 w-full min-w-0 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none disabled:opacity-60 shadow-sm focus:border-rose-500 transition-colors text-center" />
-                        <span className="text-sm font-black text-slate-700 dark:text-slate-300 whitespace-nowrap">{baseCurrency}</span>
+                        <span className="text-xs sm:text-sm font-black text-slate-700 dark:text-slate-300 whitespace-nowrap">{baseCurrency}</span>
                       </div>
-                      <button type="button" onClick={()=>fetchLiveRate(null)} disabled={isFetchingRate === 'single' || formData.isSynced} className="w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white px-4 py-3 sm:py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center justify-center gap-1.5 shadow-sm transition-colors shrink-0 active:scale-95">
-                        <HiOutlineRefresh className={isFetchingRate === 'single' ? "animate-spin" : ""} size={14} /> Live Rate
+                      <button type="button" onClick={()=>fetchLiveRate(null)} disabled={isFetchingRate === 'single' || formData.isSynced} className="w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center justify-center gap-1.5 shadow-sm transition-colors shrink-0 active:scale-95">
+                        <HiOutlineRefresh className={isFetchingRate === 'single' ? "animate-spin" : ""} size={14} /> Live
                       </button>
                     </div>
                   )}
@@ -1051,33 +1089,33 @@ const ExpenseTracker = () => {
               ) : (
                 <div className="space-y-4 animate-in fade-in zoom-in-95">
                   {formData.splitSources.map((split, index) => (
-                    <div key={index} className="p-5 sm:p-6 border-2 border-amber-200 dark:border-amber-700/50 bg-amber-50/50 dark:bg-amber-900/10 rounded-[2rem] space-y-5 shadow-sm">
+                    <div key={index} className="p-4 sm:p-5 border-2 border-amber-200 dark:border-amber-700/50 bg-amber-50/50 dark:bg-amber-900/10 rounded-2xl sm:rounded-[2rem] space-y-4 shadow-sm">
                       <div className="flex justify-between items-center">
-                        <span className="text-xs font-black text-amber-700 dark:text-amber-400 uppercase tracking-widest flex items-center gap-2">
-                          <span className="w-6 h-6 rounded-full bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200 flex items-center justify-center shadow-sm">{index + 1}</span> Source
+                        <span className="text-[10px] sm:text-xs font-black text-amber-700 dark:text-amber-400 uppercase tracking-widest flex items-center gap-2">
+                          <span className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200 flex items-center justify-center shadow-sm">{index + 1}</span> Source
                         </span>
                         {formData.splitSources.length > 2 && (
                           <button type="button" onClick={() => removeSplitSource(index)} className="text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-900/30 p-2 rounded-xl border border-transparent hover:border-rose-200 dark:hover:border-rose-800 transition-colors active:scale-90 shadow-sm"><HiOutlineTrash size={16}/></button>
                         )}
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                         <div className="space-y-1.5">
                           <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Vault</label>
                           <div className="relative">
-                            <select value={split.vault} onChange={(e) => updateSplit(index, 'vault', e.target.value)} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors focus:ring-2 focus:ring-amber-500/50 appearance-none">
+                            <select value={split.vault} onChange={(e) => updateSplit(index, 'vault', e.target.value)} className="w-full p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl sm:rounded-2xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors focus:ring-2 focus:ring-amber-500/50 appearance-none">
                               <option value="bank">Bank Account</option><option value="cash">Physical Cash</option><option value="online">Online Wallet</option><option value="crypto">Crypto Engine</option>
                             </select>
                             <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18} />
                           </div>
                         </div>
                         {(split.vault === 'bank' || split.vault === 'online') && (
-                          <div className="space-y-1.5 animate-in fade-in"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Bank / Wallet</label><input type="text" list={`split-banks-${index}`} required value={split.subWallet} onChange={(e) => updateSplit(index, 'subWallet', e.target.value)} placeholder={split.vault === 'bank' ? "Bank Name" : "Wallet Name"} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400 transition-colors focus:ring-2 focus:ring-amber-500/50" /></div>
+                          <div className="space-y-1.5 animate-in fade-in"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Bank / Wallet</label><input type="text" list={`split-banks-${index}`} required value={split.subWallet} onChange={(e) => updateSplit(index, 'subWallet', e.target.value)} placeholder={split.vault === 'bank' ? "Bank Name" : "Wallet Name"} className="w-full p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl sm:rounded-2xl font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400 transition-colors focus:ring-2 focus:ring-amber-500/50" /></div>
                         )}
                         {split.vault === 'crypto' && (
                           <div className="space-y-1.5 animate-in fade-in">
                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Platform</label>
                             <div className="relative">
-                              <select value={split.cryptoPlatform} onChange={(e) => updateSplit(index, 'cryptoPlatform', e.target.value)} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors focus:ring-2 focus:ring-amber-500/50 appearance-none">
+                              <select value={split.cryptoPlatform} onChange={(e) => updateSplit(index, 'cryptoPlatform', e.target.value)} className="w-full p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl sm:rounded-2xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors focus:ring-2 focus:ring-amber-500/50 appearance-none">
                                 {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
                               </select>
                               <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18} />
@@ -1087,70 +1125,70 @@ const ExpenseTracker = () => {
                         <div className="space-y-1.5">
                           <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Asset</label>
                           <div className="relative">
-                            <select value={split.asset} onChange={(e) => { updateSplit(index, 'asset', e.target.value); updateSplit(index, 'exchangeRate', 1); }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors focus:ring-2 focus:ring-amber-500/50 appearance-none">
+                            <select value={split.asset} onChange={(e) => { updateSplit(index, 'asset', e.target.value); updateSplit(index, 'exchangeRate', 1); }} className="w-full p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl sm:rounded-2xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors focus:ring-2 focus:ring-amber-500/50 appearance-none">
                               {split.vault === 'crypto' ? availableCryptos.map(c => <option key={c} value={c}>{c}</option>) : [baseCurrency, ...availableFiats.filter(c => c !== baseCurrency)].map(c => <option key={c} value={c}>{c}</option>)}
                             </select>
                             <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18} />
                           </div>
                         </div>
-                        <div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Amount ({split.asset})</label><input type="number" step="any" required value={split.amount} onChange={(e) => updateSplit(index, 'amount', e.target.value)} placeholder="0.00" className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-amber-700 dark:text-amber-500 outline-none shadow-sm placeholder-slate-400 transition-colors focus:ring-2 focus:ring-amber-500/50 text-lg" /></div>
+                        <div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Amount ({split.asset})</label><input type="number" step="any" required value={split.amount} onChange={(e) => updateSplit(index, 'amount', e.target.value)} placeholder="0.00" className="w-full p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl sm:rounded-2xl font-black text-amber-700 dark:text-amber-500 outline-none shadow-sm placeholder-slate-400 transition-colors focus:ring-2 focus:ring-amber-500/50 text-base sm:text-lg" /></div>
                       </div>
                       
                       {split.asset !== baseCurrency && (
-                        <div className="p-4 bg-white dark:bg-slate-800 border border-amber-200 dark:border-amber-800/50 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
-                          <span className="text-xs font-black text-slate-700 dark:text-slate-400 flex items-center gap-2 shrink-0"><FaExchangeAlt className="text-amber-500"/> Rate:</span>
+                        <div className="p-3 sm:p-4 bg-white dark:bg-slate-800 border border-amber-200 dark:border-amber-800/50 rounded-xl flex flex-col md:flex-row items-center justify-between gap-3 shadow-sm">
+                          <span className="text-[10px] sm:text-xs font-black text-slate-700 dark:text-slate-400 flex items-center gap-2 shrink-0"><FaExchangeAlt className="text-amber-500"/> Rate:</span>
                           <div className="flex items-center gap-2 flex-1 w-full">
-                            <span className="text-sm font-black text-slate-700 dark:text-slate-400 whitespace-nowrap">1 {split.asset} =</span>
-                            <input type="number" step="any" required value={split.exchangeRate} onChange={(e) => updateSplit(index, 'exchangeRate', e.target.value)} className="flex-1 w-full min-w-0 p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-bold text-slate-900 dark:text-white outline-none shadow-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-500/50 transition-colors" />
-                            <span className="text-sm font-black text-slate-700 dark:text-slate-400 whitespace-nowrap">{baseCurrency}</span>
+                            <span className="text-[10px] sm:text-sm font-black text-slate-700 dark:text-slate-400 whitespace-nowrap">1 {split.asset} =</span>
+                            <input type="number" step="any" required value={split.exchangeRate} onChange={(e) => updateSplit(index, 'exchangeRate', e.target.value)} className="flex-1 w-full min-w-0 p-2 sm:p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-bold text-slate-900 dark:text-white outline-none shadow-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-500/50 transition-colors" />
+                            <span className="text-[10px] sm:text-sm font-black text-slate-700 dark:text-slate-400 whitespace-nowrap">{baseCurrency}</span>
                           </div>
-                          <button type="button" onClick={()=>fetchLiveRate(index)} disabled={isFetchingRate === index} className="w-full md:w-auto text-[10px] font-black bg-amber-500 hover:bg-amber-600 text-white px-4 py-3 md:py-2 rounded-lg flex items-center justify-center gap-1 uppercase tracking-widest transition-colors shadow-sm shrink-0"><HiOutlineRefresh className={isFetchingRate === index ? "animate-spin" : ""} size={14}/> Live Rate</button>
+                          <button type="button" onClick={()=>fetchLiveRate(index)} disabled={isFetchingRate === index} className="w-full md:w-auto text-[10px] font-black bg-amber-500 hover:bg-amber-600 text-white px-3 py-2.5 rounded-lg flex items-center justify-center gap-1 uppercase tracking-widest transition-colors shadow-sm shrink-0 active:scale-95"><HiOutlineRefresh className={isFetchingRate === index ? "animate-spin" : ""} size={14}/> Live Rate</button>
                         </div>
                       )}
                     </div>
                   ))}
-                  <button type="button" onClick={addSplitSource} className="w-full py-4 border-2 border-dashed border-amber-300 dark:border-amber-700/50 text-amber-700 dark:text-amber-500 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors flex items-center justify-center gap-2 active:scale-95 shadow-sm"><HiOutlinePlus size={18}/> Add Payment Source</button>
+                  <button type="button" onClick={addSplitSource} className="w-full py-3.5 sm:py-4 border-2 border-dashed border-amber-300 dark:border-amber-700/50 text-amber-700 dark:text-amber-500 rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors flex items-center justify-center gap-2 active:scale-95 shadow-sm"><HiOutlinePlus size={18}/> Add Payment Source</button>
                 </div>
               )}
 
               {!formData.isSynced && (
-                <div className="p-5 sm:p-6 bg-blue-50/50 dark:bg-blue-900/10 rounded-[2rem] border border-blue-200 dark:border-blue-800/50 shadow-sm animate-in fade-in">
+                <div className="p-4 sm:p-6 bg-blue-50/50 dark:bg-blue-900/10 rounded-[1.5rem] sm:rounded-[2rem] border border-blue-200 dark:border-blue-800/50 shadow-sm animate-in fade-in">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h4 className="font-black text-sm text-blue-700 dark:text-blue-400 flex items-center gap-2"><FaUserFriends size={18}/> Split with Friends</h4>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 font-bold">Auto-log their share into your Smart Khata ledger</p>
+                      <h4 className="font-black text-xs sm:text-sm text-blue-700 dark:text-blue-400 flex items-center gap-2"><FaUserFriends size={16}/> Split with Friends</h4>
+                      <p className="text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 mt-1 font-bold">Auto-log their share into Khata</p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
                       <input type="checkbox" className="sr-only peer" checked={formData.isKhataSplit} onChange={(e) => setFormData({...formData, isKhataSplit: e.target.checked})} />
-                      <div className="w-11 h-6 bg-slate-300 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500 shadow-inner"></div>
+                      <div className="w-10 h-5 sm:w-11 sm:h-6 bg-slate-300 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 sm:after:h-5 sm:after:w-5 after:transition-all peer-checked:bg-blue-500 shadow-inner"></div>
                     </label>
                   </div>
 
                   {formData.isKhataSplit && (
-                    <div className="mt-5 space-y-4 animate-in fade-in">
+                    <div className="mt-4 sm:mt-5 space-y-3 sm:space-y-4 animate-in fade-in">
                       {formData.khataSplits.map((ks, index) => (
-                        <div key={index} className="flex flex-col sm:flex-row items-center gap-3 w-full bg-white dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                        <div key={index} className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 w-full bg-white dark:bg-slate-800 p-2.5 sm:p-3 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
                           <div className="flex-1 w-full min-w-0">
                             <input 
                               type="text" list={`khata-${index}`} required placeholder="Friend's Name" 
                               value={ks.partyName} 
                               onChange={(e) => updateKhataSplit(index, 'partyName', e.target.value)} 
-                              className="w-full p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none placeholder-slate-400 transition-colors focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50" 
+                              className="w-full p-2.5 sm:p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg font-bold text-sm text-slate-900 dark:text-white outline-none placeholder-slate-400 transition-colors focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50" 
                             />
                             <datalist id={`khata-${index}`}>{existingParties.map(p => <option key={p} value={p} />)}</datalist>
                           </div>
-                          <div className="w-full sm:w-32 shrink-0 flex items-center gap-2">
+                          <div className="w-full sm:w-36 shrink-0 flex items-center gap-2">
                             <input 
                               type="number" step="any" required placeholder="Amt Owed" 
                               value={ks.amount} 
                               onChange={(e) => updateKhataSplit(index, 'amount', e.target.value)} 
-                              className="w-full p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg font-bold text-slate-900 dark:text-white outline-none placeholder-slate-400 transition-colors focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 text-center" 
+                              className="w-full p-2.5 sm:p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg font-bold text-sm text-slate-900 dark:text-white outline-none placeholder-slate-400 transition-colors focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 text-center" 
                             />
                             {formData.khataSplits.length > 1 && (
                               <button 
                                 type="button" 
                                 onClick={() => removeKhataSplit(index)} 
-                                className="shrink-0 text-rose-500 bg-rose-50 dark:bg-rose-900/30 hover:bg-rose-100 dark:hover:bg-rose-800/50 p-3 rounded-lg transition-colors border border-rose-200 dark:border-rose-800 active:scale-95"
+                                className="shrink-0 text-rose-500 bg-rose-50 dark:bg-rose-900/30 hover:bg-rose-100 dark:hover:bg-rose-800/50 p-2.5 sm:p-3 rounded-lg transition-colors border border-rose-200 dark:border-rose-800 active:scale-95"
                               >
                                 <HiOutlineTrash size={16}/>
                               </button>
@@ -1164,26 +1202,26 @@ const ExpenseTracker = () => {
                 </div>
               )}
 
-              <div className="p-5 sm:p-6 bg-slate-100 dark:bg-slate-800/80 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-inner mt-2">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-5">
+              <div className="p-4 sm:p-6 bg-slate-100 dark:bg-slate-800/80 rounded-[1.5rem] sm:rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-inner mt-2">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-5">
                   <div className="w-full sm:w-1/2">
                     <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">Date & Time *</label>
                     <input 
                       disabled={formData.isSynced} type="datetime-local" required value={formData.date} 
                       onChange={(e) => setFormData({...formData, date: e.target.value})} 
-                      className="w-full mt-1.5 p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none disabled:opacity-60 shadow-sm transition-colors focus:border-rose-500 focus:ring-2 focus:ring-rose-500/50 cursor-pointer" 
+                      className="w-full mt-1.5 p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none disabled:opacity-60 shadow-sm transition-colors focus:border-rose-500 focus:ring-2 focus:ring-rose-500/50 cursor-pointer" 
                     />
-                    <p className="text-[10px] text-rose-600 dark:text-rose-400 mt-2 ml-1 font-bold">{formatGlobalDate ? formatGlobalDate(formData.date, 'full') : ''}</p>
+                    <p className="text-[9px] sm:text-[10px] text-rose-600 dark:text-rose-400 mt-2 ml-1 font-bold">{formatGlobalDate ? formatGlobalDate(formData.date, 'full') : ''}</p>
                   </div>
                   
                   <div className="text-left sm:text-right w-full sm:w-auto sm:border-l border-slate-300 dark:border-slate-700 sm:pl-6">
-                    <p className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Total Expense Deduction</p>
-                    <p className="text-3xl sm:text-4xl font-black text-rose-600 dark:text-rose-400 tracking-tight mt-1 truncate">
+                    <p className="text-[9px] sm:text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Total Expense</p>
+                    <p className="text-2xl sm:text-3xl md:text-4xl font-black text-rose-600 dark:text-rose-400 tracking-tight mt-1 truncate">
                       -{currencySymbol}{(formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, formData.asset !== baseCurrency, formData.exchangeRate)).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                     </p>
                     {formData.isKhataSplit && (
-                      <p className="text-xs font-black text-blue-600 dark:text-blue-400 mt-2 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded inline-block">
-                        Net Personal Expense: {currencySymbol}{Math.max(0, (formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, formData.asset !== baseCurrency, formData.exchangeRate)) - getBaseAmount(getKhataTotal(), formData.asset !== baseCurrency, formData.exchangeRate)).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                      <p className="text-[10px] sm:text-xs font-black text-blue-600 dark:text-blue-400 mt-2 bg-blue-50 dark:bg-blue-900/20 px-2 py-1.5 rounded-lg inline-block shadow-sm">
+                        Net Share: {currencySymbol}{Math.max(0, (formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, formData.asset !== baseCurrency, formData.exchangeRate)) - getBaseAmount(getKhataTotal(), formData.asset !== baseCurrency, formData.exchangeRate)).toLocaleString(undefined, {minimumFractionDigits: 2})}
                       </p>
                     )}
                   </div>
@@ -1193,9 +1231,9 @@ const ExpenseTracker = () => {
               <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-4 z-10">
                 <button 
                   type="submit" disabled={isSaving} 
-                  className={`w-full p-4 sm:p-5 rounded-[2rem] font-black text-sm sm:text-base uppercase tracking-widest text-white transition-all shadow-xl flex items-center justify-center gap-2 shrink-0 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'active:scale-95'} ${formData.isSplit ? 'bg-gradient-to-r from-amber-600 to-orange-600 shadow-amber-500/30 hover:from-amber-700 hover:to-orange-700' : 'bg-gradient-to-r from-rose-600 to-pink-600 shadow-rose-500/30 hover:from-rose-700 hover:to-pink-700'}`}
+                  className={`w-full p-4 sm:p-5 rounded-[1.5rem] sm:rounded-[2rem] font-black text-sm sm:text-base uppercase tracking-widest text-white transition-all shadow-xl flex items-center justify-center gap-2 shrink-0 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'active:scale-95'} ${formData.isSplit ? 'bg-gradient-to-r from-amber-600 to-orange-600 shadow-amber-500/30 hover:from-amber-700 hover:to-orange-700' : 'bg-gradient-to-r from-rose-600 to-pink-600 shadow-rose-500/30 hover:from-rose-700 hover:to-pink-700'}`}
                 >
-                  {isSaving ? <HiOutlineRefresh className="animate-spin text-2xl" /> : <HiOutlineShoppingCart size={20} />}
+                  {isSaving ? <HiOutlineRefresh className="animate-spin text-xl" /> : <HiOutlineShoppingCart size={20} />}
                   {isSaving ? 'Processing...' : (editingId ? 'Update Ledger' : (formData.isKhataSplit ? 'Save & Sync Khata' : 'Secure Payment'))}
                 </button>
               </div>
@@ -1204,7 +1242,7 @@ const ExpenseTracker = () => {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* 🚀 Delete Confirmation Modal */}
       {deleteContext && (
         <div className="fixed inset-0 z-[600] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2rem] shadow-2xl overflow-hidden border border-slate-300 dark:border-slate-700 flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95">
@@ -1215,7 +1253,7 @@ const ExpenseTracker = () => {
                 </div>
                 <div>
                   <h3 className="text-xl font-black">Security Verification</h3>
-                  <p className="text-[10px] font-bold text-rose-100 uppercase tracking-widest">Permanent Ledger Deletion</p>
+                  <p className="text-[10px] font-bold text-rose-100 uppercase tracking-widest">Permanent Deletion</p>
                 </div>
               </div>
             </div>
@@ -1224,7 +1262,7 @@ const ExpenseTracker = () => {
               <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-500/30 rounded-2xl shadow-sm">
                 <p className="text-xs font-bold text-amber-800 dark:text-amber-300 leading-relaxed">
                   You are deleting <span className="font-black">"{deleteContext.title}"</span> worth 
-                  <span className="font-black"> {currencySymbol}{deleteContext.finalBaseAmount?.toLocaleString()}</span>
+                  <span className="font-black"> {currencySymbol}{(Number(deleteContext.finalBaseAmount)||0).toLocaleString()}</span>
                 </p>
                 {deleteContext.linkedExpenseId && !deleteContext.linkedExpenseId.startsWith('EXP_') && (
                   <p className="text-[10px] text-rose-600 dark:text-rose-400 mt-2 font-bold flex items-center gap-1.5 bg-rose-50 dark:bg-rose-900/20 p-2 rounded-lg border border-rose-200 dark:border-rose-800/50">
@@ -1238,7 +1276,7 @@ const ExpenseTracker = () => {
                 <input 
                   type="password" maxLength={6} required autoFocus
                   value={pinInput} onChange={(e) => setPinInput(e.target.value)}
-                  className="w-full text-center tracking-[0.4em] text-2xl p-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-2xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors shadow-sm"
+                  className="w-full text-center tracking-[0.4em] text-2xl p-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors shadow-sm focus:border-rose-500"
                   placeholder="••••"
                 />
                 {pinError && <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-2 text-center animate-bounce">{pinError}</p>}

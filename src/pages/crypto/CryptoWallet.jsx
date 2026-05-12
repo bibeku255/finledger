@@ -9,11 +9,10 @@ import {
   HiOutlineSearch, HiOutlineRefresh, HiOutlineTrendingUp, HiOutlineTrendingDown,
   HiOutlineLockClosed, HiOutlineExclamationCircle, HiOutlineDownload, HiOutlineUpload,
   HiOutlineInformationCircle, HiOutlineChevronDown,
-  HiOutlineDocumentText, HiOutlineTable, HiOutlineShieldCheck
+  HiOutlineDocumentText, HiOutlineTable, HiOutlineShieldCheck, HiOutlineSwitchHorizontal, HiOutlineCalendar
 } from 'react-icons/hi';
 import { FaBitcoin, FaWallet, FaChartPie, FaBuilding, FaExchangeAlt, FaArrowDown, FaArrowUp } from 'react-icons/fa';
 
-// 🚀 IMPORT FROM CONSTANTS ONLY
 import { fiatFlagMap } from '../../utils/marketConstants';
 
 const fetchWithRetry = async (url, retries = 2) => {
@@ -67,7 +66,6 @@ const getLocalISOString = () => {
 };
 
 const CryptoWallet = () => {
-  // 🚀 5-LAYER ARCHITECTURE
   const { user, baseCurrency = 'USD', selectedCryptos = [], selectedFiats = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
 
@@ -83,7 +81,7 @@ const CryptoWallet = () => {
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null); 
-  const [transactionType, setTransactionType] = useState('in'); // 'in' or 'out' ONLY
+  const [transactionType, setTransactionType] = useState('in'); 
   
   const [isBridging, setIsBridging] = useState(false);
   const [isFetchingRate, setIsFetchingRate] = useState(false);
@@ -97,7 +95,6 @@ const CryptoWallet = () => {
 
   const localTimeStr = getLocalISOString();
 
-  // 🚀 DYNAMIC DATABASE COMPILER
   const fullDatabase = useMemo(() => {
     const coinMap = new Map();
     selectedCryptos.forEach(c => { 
@@ -120,6 +117,7 @@ const CryptoWallet = () => {
     fiatAmount: '', fiatFee: '', fiatCurrency: baseCurrency, fiatExchangeRate: 1, destinationVault: 'bankWallet', destinationVaultName: ''
   });
 
+  // 🚀 DYNAMIC PLATFORM FETCHER (No Hardcodes Needed!)
   useEffect(() => {
     if (!user) return;
     const fetchVaultsAndPlatforms = async () => {
@@ -137,7 +135,6 @@ const CryptoWallet = () => {
       const cryptoNames = new Set();
       snapCrypto.docs.forEach(d => { 
         if(d.data().platform) cryptoNames.add(d.data().platform);
-        // We still check from/to platform to populate existing lists for older data compatibility
         if(d.data().fromPlatform) cryptoNames.add(d.data().fromPlatform);
         if(d.data().toPlatform) cryptoNames.add(d.data().toPlatform);
       });
@@ -172,11 +169,10 @@ const CryptoWallet = () => {
     transactions.forEach(t => {
       if (!vault[t.coin]) vault[t.coin] = { total: 0, platforms: {} };
       const qty = parseFloat(t.quantity) || 0;
-      const fee = parseFloat(t.networkFee) || 0; // Keeping fee deduction for older 'transfer' records
+      const fee = parseFloat(t.networkFee) || 0; 
       if (t.type === 'in') { vault[t.coin].total += qty; vault[t.coin].platforms[t.platform] = (vault[t.coin].platforms[t.platform] || 0) + qty; }
       else if (t.type === 'out') { vault[t.coin].total -= qty; vault[t.coin].platforms[t.platform] = (vault[t.coin].platforms[t.platform] || 0) - qty; }
       else if (t.type === 'transfer') { 
-        // For backwards compatibility with old records
         vault[t.coin].platforms[t.fromPlatform] = (vault[t.coin].platforms[t.fromPlatform] || 0) - qty; 
         vault[t.coin].platforms[t.toPlatform] = (vault[t.coin].platforms[t.toPlatform] || 0) + (qty - fee); 
         vault[t.coin].total -= fee; 
@@ -189,7 +185,6 @@ const CryptoWallet = () => {
     return vault;
   }, [transactions]);
 
-  // 🚀 DYNAMIC MARKET SYNC ENGINE
   const fetchMarketData = useCallback(async () => {
     setIsMarketSyncing(true);
     let usdToBase = 1;
@@ -399,7 +394,7 @@ const CryptoWallet = () => {
   };
 
   const handleEdit = (rec) => { 
-    setTransactionType(rec.type === 'transfer' ? 'out' : rec.type); // Saftey fallback if editing old transfer
+    setTransactionType(rec.type === 'transfer' ? 'out' : rec.type); 
     setIsBridging(false); 
     
     let editDateStr = rec.date;
@@ -469,7 +464,6 @@ const CryptoWallet = () => {
 
   const filteredLedger = transactions.filter(t => t.coin.toLowerCase().includes(searchTerm.toLowerCase()) || t.reason?.toLowerCase().includes(searchTerm.toLowerCase()) || t.platform?.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  // 🚀 Math-based export mapping
   const handleDownloadReport = (format) => {
     setIsExportMenuOpen(false);
     if (filteredLedger.length === 0) return alert("No records found.");
@@ -502,7 +496,7 @@ const CryptoWallet = () => {
     <div className="h-full min-h-screen overflow-y-auto pb-24">
       <div className="pt-8 md:pt-12 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 md:px-6">
         
-        {/* Premium Header - Export Isolated Z-Index */}
+        {/* Premium Header */}
         <div className="relative rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50 z-20">
           <div className="absolute inset-0 overflow-hidden rounded-[2.5rem] pointer-events-none">
              <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(249,115,22,0.1),transparent_70%)]" />
@@ -520,10 +514,8 @@ const CryptoWallet = () => {
               </div>
             </div>
             
-            {/* 🚀 FIXED: Buttons Grid without Transfer, Mobile Visible Export */}
             <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full md:w-auto mt-4 md:mt-0">
-              
-              <div className="relative w-full sm:w-auto z-50">
+              <div className="relative w-full sm:w-auto z-[100]">
                 <button 
                   onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
                   onBlur={() => setTimeout(() => setIsExportMenuOpen(false), 200)}
@@ -532,15 +524,13 @@ const CryptoWallet = () => {
                   <HiOutlineDownload size={16} /> Export
                 </button>
                 {isExportMenuOpen && (
-                  <div className="absolute top-[110%] right-0 md:left-0 w-full md:w-40 bg-slate-800 border border-slate-700 rounded-xl shadow-xl flex flex-col p-1.5 animate-in fade-in zoom-in-95">
-                    <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg transition-colors"><HiOutlineDocumentText className="text-rose-400" size={16}/> PDF Report</button>
-                    <button onClick={() => handleDownloadReport('excel')} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg transition-colors"><HiOutlineTable className="text-emerald-400" size={16}/> Excel (CSV)</button>
+                  <div className="absolute top-[110%] right-0 md:left-0 w-full md:w-40 bg-slate-800 border border-slate-700 rounded-xl shadow-xl flex flex-col p-1.5 animate-in fade-in zoom-in-95 z-[9999]">
+                    <button onMouseDown={(e) => { e.preventDefault(); handleDownloadReport('pdf'); }} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg transition-colors text-left"><HiOutlineDocumentText className="text-rose-400" size={16}/> PDF Report</button>
+                    <button onMouseDown={(e) => { e.preventDefault(); handleDownloadReport('excel'); }} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg transition-colors text-left"><HiOutlineTable className="text-emerald-400" size={16}/> Excel (CSV)</button>
                   </div>
                 )}
               </div>
-              
               <button onClick={() => openModal('out')} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white px-5 py-3.5 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all border border-white/10 shadow-sm"><FaArrowUp size={14} /> Sell / Out</button>
-              
               <button onClick={() => openModal('in')} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 text-white px-6 py-3.5 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest shadow-lg shadow-orange-500/30 transition-all active:scale-95"><FaArrowDown size={14} /> Buy / Deposit</button>
             </div>
           </div>
@@ -561,7 +551,7 @@ const CryptoWallet = () => {
           </div>
         </div>
 
-        {/* Multi-Platform Balances Grid */}
+        {/* Platform Breakdown */}
         <div>
           <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2"><FaChartPie className="text-orange-500" /> Platform Storage Breakdown</h3>
           {Object.keys(holdings).length === 0 ? (
@@ -629,19 +619,68 @@ const CryptoWallet = () => {
           )}
         </div>
 
-        {/* Search & Ledger */}
+        {/* Search Input */}
         <div className="relative mt-8">
           <HiOutlineSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
           <input type="text" placeholder="Search transactions by coin, reason or platform..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-4 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-bold dark:text-white outline-none focus:border-orange-500 transition-all shadow-sm placeholder-slate-400 dark:placeholder-slate-500" />
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-[2rem] overflow-hidden shadow-sm">
-          <div className="overflow-x-auto custom-scrollbar">
+        {/* 🚀 RESPONSIVE LEDGER (MOBILE CARDS + DESKTOP TABLE) */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-[1.5rem] md:rounded-[2rem] overflow-hidden shadow-sm">
+          
+          {/* 📱 MOBILE VIEW: CARDS */}
+          <div className="md:hidden flex flex-col divide-y divide-slate-100 dark:divide-slate-800/50">
+             {isLoading ? (
+                <div className="p-10 text-center"><HiOutlineRefresh className="animate-spin mx-auto text-2xl text-orange-500" /></div>
+             ) : filteredLedger.length === 0 ? (
+                <div className="p-10 text-center text-slate-500 font-bold">No transactions found</div>
+             ) : filteredLedger.map((rec) => {
+                const dbCoin = fullDatabase.find(c => c.symbol.toUpperCase() === rec.coin.toUpperCase()) || {};
+                return (
+                  <div key={rec.id} className="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                    <div className="flex justify-between items-start mb-2">
+                       <div className="flex items-center gap-3 min-w-0 pr-2">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-sm shrink-0 border ${rec.type === 'in' ? 'bg-emerald-50 border-emerald-200 text-emerald-600 dark:bg-emerald-500/10' : rec.type === 'out' ? 'bg-rose-50 border-rose-200 text-rose-600 dark:bg-rose-500/10' : 'bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-500/10'}`}>
+                             <LogoRenderer symbol={rec.coin} logoUrl={dbCoin.logo} bg={dbCoin.bg} color={dbCoin.color} />
+                          </div>
+                          <div className="min-w-0">
+                             <p className="font-black text-slate-900 dark:text-white text-sm uppercase truncate">{rec.coin}</p>
+                             <span className={`inline-block px-1.5 py-0.5 mt-0.5 rounded text-[8px] font-black uppercase tracking-wider border shadow-sm ${rec.type === 'in' ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-400' : rec.type === 'out' ? 'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-500/20 dark:text-rose-400' : 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-500/20 dark:text-blue-400'}`}>
+                               {rec.type === 'in' ? 'Deposit' : rec.type === 'out' ? 'Withdraw' : 'Transfer'}
+                             </span>
+                          </div>
+                       </div>
+                       <div className="text-right shrink-0">
+                          <p className={`text-base font-black tracking-tight leading-none ${rec.type === 'in' ? 'text-emerald-600 dark:text-emerald-400' : rec.type === 'out' ? 'text-rose-600 dark:text-rose-400' : 'text-blue-600 dark:text-blue-400'}`}>
+                             {rec.type === 'in' ? '+' : rec.type === 'out' ? '-' : '↔'}{rec.quantity}
+                          </p>
+                       </div>
+                    </div>
+                    <div className="flex flex-wrap justify-between items-end gap-2 mt-3">
+                       <div className="flex flex-col gap-1.5">
+                          <span className="text-[9px] font-black text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 w-max shadow-sm truncate max-w-[200px]">
+                             {rec.type === 'transfer' ? `${rec.fromPlatform} → ${rec.toPlatform}` : rec.platform}
+                          </span>
+                          <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 truncate max-w-[200px]">{rec.reason}</p>
+                          <p className="text-[9px] font-medium text-slate-400 mt-0.5 flex items-center gap-1"><HiOutlineCalendar size={10}/> {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date}</p>
+                       </div>
+                       <div className="flex gap-1">
+                          <button onClick={() => handleEdit(rec)} className="p-1.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-md border border-blue-200 dark:border-blue-500/30 shadow-sm"><HiOutlinePencil size={14}/></button>
+                          <button onClick={() => { setDeleteContext(rec); setPinInput(''); setPinError(''); }} className="p-1.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md border border-rose-200 dark:border-rose-500/30 shadow-sm"><HiOutlineTrash size={14}/></button>
+                       </div>
+                    </div>
+                  </div>
+                );
+             })}
+          </div>
+
+          {/* 💻 DESKTOP VIEW: TABLE */}
+          <div className="hidden md:block overflow-x-auto custom-scrollbar">
             <table className="w-full text-left min-w-[800px]">
               <thead className="bg-slate-50 dark:bg-slate-800/50 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
                 <tr><th className="p-4 pl-6 whitespace-nowrap">Type</th><th className="p-4 whitespace-nowrap">Asset & Event</th><th className="p-4 whitespace-nowrap">Platform</th><th className="p-4 text-right whitespace-nowrap">Quantity</th><th className="p-4 pr-6 text-right whitespace-nowrap">Actions</th></tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
                 {isLoading ? (
                   <tr><td colSpan={5} className="p-10 text-center"><HiOutlineRefresh className="animate-spin mx-auto text-2xl text-orange-500" /></td></tr>
                 ) : filteredLedger.length === 0 ? (
@@ -651,7 +690,7 @@ const CryptoWallet = () => {
                   return (
                     <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
                       <td className="p-4 pl-6"><div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-sm border ${rec.type === 'in' ? 'bg-emerald-50 border-emerald-200 text-emerald-600 dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:text-emerald-400' : rec.type === 'out' ? 'bg-rose-50 border-rose-200 text-rose-600 dark:bg-rose-500/10 dark:border-rose-500/20 dark:text-rose-400' : 'bg-blue-50 border-blue-200 text-blue-600 dark:bg-blue-500/10 dark:border-blue-500/20 dark:text-blue-400'}`}>{rec.type === 'in' ? <HiOutlineDownload size={16}/> : rec.type === 'out' ? <HiOutlineUpload size={16}/> : <HiOutlineSwitchHorizontal size={16}/>}</div></td>
-                      <td className="p-4 min-w-[200px]"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700 shadow-sm shrink-0"><LogoRenderer symbol={rec.coin} logoUrl={dbCoin.logo} bg={dbCoin.bg} color={dbCoin.color} /></div><div className="min-w-0"><p className="font-black text-slate-900 dark:text-white text-sm uppercase truncate">{rec.coin}</p><p className="text-[10px] font-bold text-slate-500 truncate">{rec.reason}</p><p className="text-[9px] font-medium text-slate-400 mt-0.5">{formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date}</p></div></div></td>
+                      <td className="p-4 min-w-[200px]"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700 shadow-sm shrink-0"><LogoRenderer symbol={rec.coin} logoUrl={dbCoin.logo} bg={dbCoin.bg} color={dbCoin.color} /></div><div className="min-w-0"><p className="font-black text-slate-900 dark:text-white text-sm uppercase truncate">{rec.coin}</p><p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 truncate">{rec.reason}</p><p className="text-[9px] font-medium text-slate-400 mt-0.5">{formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date}</p></div></div></td>
                       <td className="p-4"><span className="text-[10px] font-black text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 whitespace-nowrap shadow-sm">{rec.type === 'transfer' ? `${rec.fromPlatform} → ${rec.toPlatform}` : rec.platform}</span></td>
                       <td className="p-4 text-right"><p className={`text-base font-black truncate max-w-[150px] ml-auto ${rec.type === 'in' ? 'text-emerald-600 dark:text-emerald-400' : rec.type === 'out' ? 'text-rose-600 dark:text-rose-400' : 'text-blue-600 dark:text-blue-400'}`}>{rec.type === 'in' ? '+' : rec.type === 'out' ? '-' : '↔'}{rec.quantity}</p></td>
                       <td className="p-4 pr-6"><div className="flex items-center justify-end gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => handleEdit(rec)} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-500/20 rounded-xl transition-all border border-slate-300 dark:border-slate-700 shadow-sm active:scale-95"><HiOutlinePencil size={16}/></button><button onClick={() => { setDeleteContext(rec); setPinInput(''); setPinError(''); }} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-200 dark:hover:bg-rose-500/20 rounded-xl transition-all border border-slate-300 dark:border-slate-700 shadow-sm active:scale-95"><HiOutlineTrash size={16}/></button></div></td>
@@ -664,7 +703,7 @@ const CryptoWallet = () => {
         </div>
       </div>
 
-      {/* FULLY UPGRADED TRANSACTION MODAL - NO TRANSFER */}
+      {/* FULLY UPGRADED TRANSACTION MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200 pt-[60px] md:pt-0">
           <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[calc(100dvh-4rem)] sm:max-h-[85vh] border border-slate-300 dark:border-slate-700 animate-in slide-in-from-bottom-10 sm:zoom-in-95">
@@ -803,7 +842,7 @@ const CryptoWallet = () => {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Date & Time</label>
                   <input type="datetime-local" required value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} className="w-full mt-1 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm transition-colors cursor-pointer focus:border-orange-500 focus:ring-2 focus:ring-orange-500/50" />

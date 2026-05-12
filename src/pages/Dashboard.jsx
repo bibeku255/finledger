@@ -10,17 +10,18 @@ import {
   HiOutlineGlobe, HiOutlinePlusCircle, 
   HiOutlineRefresh, HiOutlineChartPie, 
   HiOutlineArrowUp, HiOutlineArrowDown, HiOutlineClock,
-  HiOutlineChevronRight
+  HiOutlineChevronRight, HiOutlinePlus
 } from 'react-icons/hi';
 
+// 🚀 FIXED: Added FaHistory and FaChartPie here to prevent the crash!
 import { 
   FaWallet, FaBolt, FaTrophy, 
   FaPiggyBank, FaSun, FaMoon, FaCloudSun, FaGem, FaChartLine,
   FaArrowUp, FaArrowDown, FaGlobe, FaUniversity, FaMoneyBillWave, FaBitcoin,
-  FaHandHoldingUsd, FaHandHoldingHeart
+  FaHandHoldingUsd, FaHandHoldingHeart, FaShoppingCart, FaBriefcase,
+  FaHistory, FaChartPie 
 } from 'react-icons/fa';
 
-// 🚀 IMPORT ONLY WHAT WE NEED (Zero Garbage Strategy)
 import { fiatFlagMap } from '../utils/marketConstants';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1', '#ec4899', '#14b8a6', '#f97316', '#06b6d4'];
@@ -28,9 +29,7 @@ const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1'
 const GRADIENTS = {
   income: 'from-emerald-500 to-teal-600',
   expense: 'from-rose-500 to-pink-600',
-  savings: 'from-blue-600 to-indigo-700',
-  market: 'from-amber-500 to-orange-600',
-  vault: 'from-purple-500 to-violet-600'
+  savings: 'from-blue-600 to-indigo-700'
 };
 
 const fetchWithRetry = async (url, retries = 2) => {
@@ -66,12 +65,8 @@ const StatCard = ({ title, value, icon: Icon, gradient, trend, trendValue, subti
         )}
       </p>
       <h2 className="text-3xl md:text-4xl font-black tracking-tight mb-1 break-words">{value}</h2>
-      {subtitle && (
-        <p className="text-[10px] font-bold opacity-70 uppercase tracking-wider">{subtitle}</p>
-      )}
-      {trendValue && (
-        <p className="text-xs font-bold mt-2 opacity-90">{trendValue}</p>
-      )}
+      {subtitle && <p className="text-[10px] font-bold opacity-70 uppercase tracking-wider">{subtitle}</p>}
+      {trendValue && <p className="text-xs font-bold mt-2 opacity-90">{trendValue}</p>}
     </div>
     <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0">
       <HiOutlineChevronRight size={20} className="text-white/70" />
@@ -90,12 +85,7 @@ const MarketIcon = ({ symbol, customLogo, type }) => {
     return (
       <div className="relative w-full h-full">
         {!isLoaded && <div className="absolute inset-0 bg-slate-700 animate-pulse rounded-full" />}
-        <img 
-          src={`https://flagcdn.com/w40/${flagId}.png`} 
-          className={`w-full h-full object-cover transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
-          alt={symbol} 
-          onLoad={() => setIsLoaded(true)}
-        />
+        <img src={`https://flagcdn.com/w40/${flagId}.png`} className={`w-full h-full object-cover transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'}`} alt={symbol} onLoad={() => setIsLoaded(true)} />
       </div>
     );
   }
@@ -108,23 +98,13 @@ const MarketIcon = ({ symbol, customLogo, type }) => {
   ].filter(Boolean);
 
   if (imgIndex >= sources.length) {
-    return (
-      <span className="w-full h-full flex items-center justify-center font-black text-sm bg-gradient-to-br from-slate-700 to-slate-800 text-white">
-        {symbolUpper?.charAt(0)}
-      </span>
-    );
+    return <span className="w-full h-full flex items-center justify-center font-black text-sm bg-gradient-to-br from-slate-700 to-slate-800 text-white">{symbolUpper?.charAt(0)}</span>;
   }
 
   return (
     <div className="relative w-full h-full">
       {!isLoaded && <div className="absolute inset-0 bg-slate-700 animate-pulse rounded-full" />}
-      <img 
-        src={sources[imgIndex]} 
-        className={`w-full h-full object-contain p-1 transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
-        alt={symbolUpper} 
-        onLoad={() => setIsLoaded(true)}
-        onError={() => setImgIndex(prev => prev + 1)}
-      />
+      <img src={sources[imgIndex]} className={`w-full h-full object-contain p-1 transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'}`} alt={symbolUpper} onLoad={() => setIsLoaded(true)} onError={() => setImgIndex(prev => prev + 1)} />
     </div>
   );
 };
@@ -133,10 +113,7 @@ const MarketCard = ({ item, baseCurrency, currencySymbol }) => {
   const isPositive = item.change >= 0;
   return (
     <div className="min-w-[240px] snap-center p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] shadow-sm flex flex-col justify-between shrink-0 hover:shadow-xl hover:border-blue-500/30 transition-all duration-300 group relative overflow-hidden">
-      <div className={`absolute -right-4 -top-4 w-20 h-20 bg-gradient-to-br rounded-full blur-2xl opacity-0 group-hover:opacity-20 transition-opacity duration-500 pointer-events-none ${
-        isPositive ? 'from-emerald-500 to-teal-500' : 'from-rose-500 to-pink-500'
-      }`} />
-      
+      <div className={`absolute -right-4 -top-4 w-20 h-20 bg-gradient-to-br rounded-full blur-2xl opacity-0 group-hover:opacity-20 transition-opacity duration-500 pointer-events-none ${isPositive ? 'from-emerald-500 to-teal-500' : 'from-rose-500 to-pink-500'}`} />
       <div className="flex justify-between items-center mb-4 relative z-10">
         <div className="flex items-center gap-3">
           <div className="relative w-12 h-12 rounded-full overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-700 flex items-center justify-center shrink-0 border-2 border-white dark:border-slate-700 shadow-md group-hover:scale-110 transition-transform duration-300">
@@ -148,26 +125,16 @@ const MarketCard = ({ item, baseCurrency, currencySymbol }) => {
           </div>
         </div>
         {item.change !== null && (
-          <span className={`text-[10px] font-black px-2.5 py-1 rounded-xl flex items-center gap-1 shadow-sm border transition-all group-hover:scale-105 ${
-            isPositive 
-              ? 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-500/10 dark:border-emerald-500/30 dark:text-emerald-400' 
-              : 'bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-500/10 dark:border-rose-500/30 dark:text-rose-400'
-          }`}>
-            {isPositive ? <HiOutlineTrendingUp size={12} /> : <HiOutlineTrendingDown size={12} />}
-            {Math.abs(item.change).toFixed(2)}%
+          <span className={`text-[10px] font-black px-2.5 py-1 rounded-xl flex items-center gap-1 shadow-sm border transition-all group-hover:scale-105 ${isPositive ? 'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-500/10 dark:border-emerald-500/30 dark:text-emerald-400' : 'bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-500/10 dark:border-rose-500/30 dark:text-rose-400'}`}>
+            {isPositive ? <HiOutlineTrendingUp size={12} /> : <HiOutlineTrendingDown size={12} />} {Math.abs(item.change).toFixed(2)}%
           </span>
         )}
       </div>
-      
       <div className="relative z-10">
         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Value in {baseCurrency}</p>
-        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight break-words">
-          {currencySymbol}{item.priceBase < 1 ? item.priceBase.toFixed(6) : item.priceBase.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-        </p>
+        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight break-words">{currencySymbol}{item.priceBase < 1 ? item.priceBase.toFixed(6) : item.priceBase.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
         <div className="flex items-center gap-2 mt-2">
-          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest break-words">
-            ≈ $ {item.priceUSD < 1 ? item.priceUSD.toFixed(6) : item.priceUSD.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 6})}
-          </p>
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest break-words">≈ $ {item.priceUSD < 1 ? item.priceUSD.toFixed(6) : item.priceUSD.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 6})}</p>
         </div>
       </div>
     </div>
@@ -202,21 +169,17 @@ const Dashboard = () => {
   const [greeting, setGreeting] = useState('');
   const [greetingIcon, setGreetingIcon] = useState(null);
 
+  const [rawIncomes, setRawIncomes] = useState([]);
+  const [rawExpenses, setRawExpenses] = useState([]);
+
   const hasCrypto = selectedCryptos && selectedCryptos.length > 0;
   const hasForex = selectedFiats && selectedFiats.filter(f => f !== baseCurrency).length > 0;
 
   useEffect(() => {
     const hour = new Date().getHours();
-    if (hour >= 5 && hour < 12) {
-      setGreeting("Good Morning");
-      setGreetingIcon(<FaCloudSun className="text-amber-500" size={28} />);
-    } else if (hour >= 12 && hour < 17) {
-      setGreeting("Good Afternoon");
-      setGreetingIcon(<FaSun className="text-orange-500" size={28} />);
-    } else {
-      setGreeting("Good Evening");
-      setGreetingIcon(<FaMoon className="text-indigo-400" size={28} />);
-    }
+    if (hour >= 5 && hour < 12) { setGreeting("Good Morning"); setGreetingIcon(<FaCloudSun className="text-amber-500" size={28} />); } 
+    else if (hour >= 12 && hour < 17) { setGreeting("Good Afternoon"); setGreetingIcon(<FaSun className="text-orange-500" size={28} />); } 
+    else { setGreeting("Good Evening"); setGreetingIcon(<FaMoon className="text-indigo-400" size={28} />); }
   }, []);
   
   useEffect(() => {
@@ -230,43 +193,30 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (!user) return;
-
-    const calcVaultBalance = (snapshot) => {
-      return snapshot.docs.reduce((acc, doc) => {
-        const data = doc.data();
-        const finalAmount = Number(data.finalBaseAmount || data.amount || 0);
-        const netChange = data.type === 'in' ? finalAmount : -finalAmount;
-        return acc + netChange;
-      }, 0);
-    };
+    const calcVaultBalance = (snapshot) => snapshot.docs.reduce((acc, doc) => acc + (doc.data().type === 'in' ? Number(doc.data().finalBaseAmount || doc.data().amount || 0) : -Number(doc.data().finalBaseAmount || doc.data().amount || 0)), 0);
 
     const unsubBank = onSnapshot(collection(db, "users", user.uid, "bankWallet"), snap => setBankTotal(calcVaultBalance(snap)));
     const unsubCash = onSnapshot(collection(db, "users", user.uid, "cashWallet"), snap => setCashTotal(calcVaultBalance(snap)));
     const unsubOnline = onSnapshot(collection(db, "users", user.uid, "onlineWallet"), snap => setOnlineTotal(calcVaultBalance(snap)));
     
-    const unsubOldCrypto = onSnapshot(collection(db, "users", user.uid, "cryptoWallet"), snap => {
-      setOldCryptoHoldings(snap.docs.map(doc => doc.data()));
-    });
-    const unsubCryptoLogs = onSnapshot(collection(db, "users", user.uid, "cryptoWalletLogs"), snap => {
-      setCryptoTransactions(snap.docs.map(doc => doc.data()));
-    });
+    const unsubOldCrypto = onSnapshot(collection(db, "users", user.uid, "cryptoWallet"), snap => setOldCryptoHoldings(snap.docs.map(doc => doc.data())));
+    const unsubCryptoLogs = onSnapshot(collection(db, "users", user.uid, "cryptoWalletLogs"), snap => setCryptoTransactions(snap.docs.map(doc => doc.data())));
 
     const unsubIncome = onSnapshot(collection(db, "users", user.uid, "incomeLogs"), snap => {
-      let total = 0;
-      snap.docs.forEach(doc => { total += Number(doc.data().finalBaseAmount) || 0; });
-      setIncomeTotal(total);
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setRawIncomes(docs);
+      setIncomeTotal(docs.reduce((acc, d) => acc + (Number(d.finalBaseAmount) || 0), 0));
     });
 
     const unsubExpense = onSnapshot(collection(db, "users", user.uid, "expenseLogs"), snap => {
-      let total = 0;
-      snap.docs.forEach(doc => { total += Number(doc.data().finalBaseAmount) || 0; });
-      setExpenseTotal(total);
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setRawExpenses(docs);
+      setExpenseTotal(docs.reduce((acc, d) => acc + (Number(d.finalBaseAmount) || 0), 0));
       setIsLoading(false); 
     });
 
     const unsubParties = onSnapshot(collection(db, "users", user.uid, "parties"), snap => {
-      let rec = 0;
-      let pay = 0;
+      let rec = 0, pay = 0;
       snap.docs.forEach(doc => {
         const data = doc.data();
         if (data.status !== 'bad_debt') {
@@ -274,92 +224,48 @@ const Dashboard = () => {
           else if (data.netBalance < 0) pay += Math.abs(data.netBalance);
         }
       });
-      setKhataReceivables(rec);
-      setKhataPayables(pay);
+      setKhataReceivables(rec); setKhataPayables(pay);
     });
 
     return () => { unsubBank(); unsubCash(); unsubOnline(); unsubOldCrypto(); unsubCryptoLogs(); unsubIncome(); unsubExpense(); unsubParties(); };
   }, [user]);
 
-  // 🚀 PURE DATABASE: Combines only what the user explicitly tracking
   const fullDatabase = useMemo(() => {
     const coinMap = new Map();
     selectedCryptos.forEach(c => { if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c); });
-    customUserCoins.forEach(c => { 
-      const existing = coinMap.get(c.symbol.toUpperCase()); 
-      coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c, logo: c.logo || existing?.logo }); 
-    });
+    customUserCoins.forEach(c => { const existing = coinMap.get(c.symbol.toUpperCase()); coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c, logo: c.logo || existing?.logo }); });
     return Array.from(coinMap.values());
   }, [customUserCoins, selectedCryptos]);
 
   const unifiedCryptoHoldings = useMemo(() => {
     const vault = {};
-    
-    oldCryptoHoldings.forEach(item => {
-       const sym = (item.symbol || item.coin || '').toUpperCase();
-       if (!sym) return;
-       if (!vault[sym]) vault[sym] = { total: 0 };
-       vault[sym].total += Number(item.amount || item.balance || 0);
-    });
-    
-    cryptoTransactions.forEach(t => {
-       const sym = (t.coin || '').toUpperCase();
-       if (!sym) return;
-       if (!vault[sym]) vault[sym] = { total: 0 };
-       const qty = parseFloat(t.quantity) || 0;
-       const fee = parseFloat(t.networkFee) || 0;
-       if (t.type === 'in') vault[sym].total += qty;
-       else if (t.type === 'out') vault[sym].total -= qty;
-       else if (t.type === 'transfer') vault[sym].total -= fee;
-    });
-    
-    Object.keys(vault).forEach(sym => {
-      if (vault[sym].total <= 0.00000001) delete vault[sym];
-    });
-    
+    oldCryptoHoldings.forEach(item => { const sym = (item.symbol || item.coin || '').toUpperCase(); if (!sym) return; if (!vault[sym]) vault[sym] = { total: 0 }; vault[sym].total += Number(item.amount || item.balance || 0); });
+    cryptoTransactions.forEach(t => { const sym = (t.coin || '').toUpperCase(); if (!sym) return; if (!vault[sym]) vault[sym] = { total: 0 }; const qty = parseFloat(t.quantity) || 0; const fee = parseFloat(t.networkFee) || 0; if (t.type === 'in') vault[sym].total += qty; else if (t.type === 'out') vault[sym].total -= qty; else if (t.type === 'transfer') vault[sym].total -= fee; });
+    Object.keys(vault).forEach(sym => { if (vault[sym].total <= 0.00000001) delete vault[sym]; });
     return vault;
   }, [oldCryptoHoldings, cryptoTransactions]);
 
-  // 🚀 PURE FETCH ENGINE: Retrieves prices strictly based on user's active holdings and selection
   const fetchMarketData = useCallback(async () => {
-    if (!hasCrypto && !hasForex) {
-      setIsMarketLoading(false);
-      return; 
-    }
-
+    if (!hasCrypto && !hasForex) { setIsMarketLoading(false); return; }
     setIsMarketLoading(true);
-    let usdToBase = 1;
-    let forexDataRaw = null;
+    let usdToBase = 1; let forexDataRaw = null;
 
     try {
       const forexRes = await fetchWithRetry('https://api.exchangerate-api.com/v4/latest/USD');
-      if (forexRes && forexRes.ok) {
-        forexDataRaw = await forexRes.json();
-        usdToBase = parseFloat(forexDataRaw.rates[baseCurrency]) || 1;
-        setFiatRate(usdToBase);
-      }
-    } catch (error) { console.warn("Forex API Error."); }
+      if (forexRes && forexRes.ok) { forexDataRaw = await forexRes.json(); usdToBase = parseFloat(forexDataRaw.rates[baseCurrency]) || 1; setFiatRate(usdToBase); }
+    } catch (error) {}
 
     const watchlistSymbols = selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
     const coinsToFetch = Array.from(new Set([...Object.keys(unifiedCryptoHoldings), ...watchlistSymbols, 'USDT']));
 
     if (coinsToFetch.length > 0) {
-      let cgJson = {};
-      const normalCoins = [];
-      const contractCoins = [];
+      let cgJson = {}; const normalCoins = []; const contractCoins = [];
 
       coinsToFetch.forEach(sym => {
-        const upperSym = sym.toUpperCase();
-        const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || { symbol: upperSym, id: sym.toLowerCase() };
-        
-        if (dbCoin.fetchMode === 'contract' && dbCoin.contractAddress) {
-           contractCoins.push(dbCoin);
-        } else {
-           normalCoins.push(dbCoin.id || sym.toLowerCase());
-        }
+        const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase()) || { symbol: sym.toUpperCase(), id: sym.toLowerCase() };
+        if (dbCoin.fetchMode === 'contract' && dbCoin.contractAddress) contractCoins.push(dbCoin); else normalCoins.push(dbCoin.id || sym.toLowerCase());
       });
 
-      // Layer 1: CoinGecko
       try {
         if (normalCoins.length > 0) {
           const uniqueIds = [...new Set(normalCoins)].join(',');
@@ -368,7 +274,6 @@ const Dashboard = () => {
         }
       } catch (error) {}
 
-      // Layer 2 & 3: GeckoTerminal & DexScreener
       let customApiJson = {};
       await Promise.all(contractCoins.map(async (coin) => {
         try {
@@ -376,64 +281,34 @@ const Dashboard = () => {
             const gtRes = await fetchWithRetry(`https://api.geckoterminal.com/api/v2/networks/${network}/tokens/${coin.contractAddress}`);
             if (gtRes && gtRes.ok) {
                 const gtData = await gtRes.json();
-                customApiJson[coin.symbol] = {
-                    usd: parseFloat(gtData?.data?.attributes?.price_usd || 0),
-                    usd_24h_change: parseFloat(gtData?.data?.attributes?.price_change_percentage?.h24 || 0)
-                };
+                customApiJson[coin.symbol] = { usd: parseFloat(gtData?.data?.attributes?.price_usd || 0), usd_24h_change: parseFloat(gtData?.data?.attributes?.price_change_percentage?.h24 || 0) };
             } else {
                 const dexRes = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${coin.contractAddress}`);
                 if (dexRes && dexRes.ok) {
                     const dexData = await dexRes.json();
-                    if (dexData.pairs?.length > 0) {
-                        customApiJson[coin.symbol] = {
-                            usd: parseFloat(dexData.pairs[0].priceUsd || 0),
-                            usd_24h_change: parseFloat(dexData.pairs[0].priceChange?.h24 || 0)
-                        };
-                    }
+                    if (dexData.pairs?.length > 0) customApiJson[coin.symbol] = { usd: parseFloat(dexData.pairs[0].priceUsd || 0), usd_24h_change: parseFloat(dexData.pairs[0].priceChange?.h24 || 0) };
                 }
             }
         } catch(e) {}
       }));
 
-      const priceMap = {};
-      let newMarketData = [];
-      
+      const priceMap = {}; let newMarketData = [];
       await Promise.all(coinsToFetch.map(async (sym) => {
         const upperSym = sym.toUpperCase();
         const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || { symbol: upperSym, id: sym.toLowerCase() };
         const searchId = dbCoin.id || upperSym.toLowerCase();
         const fallback = dbCoin.fallbackPrice ? parseFloat(dbCoin.fallbackPrice) : 0;
-        
-        let priceUsd = 0;
-        let changePercent = 0;
+        let priceUsd = 0; let changePercent = 0;
 
-        // 🚀 THE PURE HIERARCHY (Zero Garbage)
-        if (customApiJson[upperSym] && customApiJson[upperSym].usd > 0) {
-            priceUsd = customApiJson[upperSym].usd;
-            changePercent = customApiJson[upperSym].usd_24h_change;
-        } else if (cgJson[searchId] && cgJson[searchId].usd > 0) {
-            priceUsd = cgJson[searchId].usd;
-            changePercent = cgJson[searchId].usd_24h_change;
-        } else if (fallback > 0) {
-          priceUsd = fallback;
-        }
+        if (customApiJson[upperSym] && customApiJson[upperSym].usd > 0) { priceUsd = customApiJson[upperSym].usd; changePercent = customApiJson[upperSym].usd_24h_change; } 
+        else if (cgJson[searchId] && cgJson[searchId].usd > 0) { priceUsd = cgJson[searchId].usd; changePercent = cgJson[searchId].usd_24h_change; } 
+        else if (fallback > 0) { priceUsd = fallback; }
         
         priceMap[upperSym] = { priceUSD: priceUsd, change: changePercent };
-        
-        // Push only items actively tracked by the user in the Watchlist UI
         if (watchlistSymbols.includes(upperSym) || (upperSym === 'USDT' && watchlistSymbols.length > 0)) {
-          newMarketData.push({ 
-            symbol: upperSym, 
-            type: 'crypto', 
-            priceUSD: priceUsd, 
-            priceBase: priceUsd * usdToBase, 
-            change: changePercent,
-            customLogo: dbCoin.logo,
-            image: dbCoin.logo
-          });
+          newMarketData.push({ symbol: upperSym, type: 'crypto', priceUSD: priceUsd, priceBase: priceUsd * usdToBase, change: changePercent, customLogo: dbCoin.logo });
         }
       }));
-      
       setLivePrices(priceMap);
 
       if (selectedFiats && selectedFiats.length > 0 && forexDataRaw) {
@@ -443,29 +318,19 @@ const Dashboard = () => {
              if(rateToUsd) {
                const priceInUsd = 1 / rateToUsd;
                const priceInBase = priceInUsd * usdToBase;
-               newMarketData.push({ 
-                 symbol: fiat, 
-                 type: 'fiat', 
-                 priceUSD: priceInUsd, 
-                 priceBase: priceInBase, 
-                 change: (Math.random() * 0.4 - 0.2) 
-               });
+               newMarketData.push({ symbol: fiat, type: 'fiat', priceUSD: priceInUsd, priceBase: priceInBase, change: (Math.random() * 0.4 - 0.2) });
              }
            }
          });
       }
-
-      const uniqueMarketData = Array.from(new Map(newMarketData.map(item => [item.symbol, item])).values());
-      setMarketData(uniqueMarketData);
+      setMarketData(Array.from(new Map(newMarketData.map(item => [item.symbol, item])).values()));
     }
     setIsMarketLoading(false);
   }, [unifiedCryptoHoldings, selectedCryptos, baseCurrency, fullDatabase, selectedFiats, hasCrypto, hasForex]);
 
   useEffect(() => {
     if (!isLoading && fullDatabase.length > 0 && (hasCrypto || hasForex)) { 
-      fetchMarketData(); 
-      const interval = setInterval(fetchMarketData, 60000); 
-      return () => clearInterval(interval); 
+      fetchMarketData(); const interval = setInterval(fetchMarketData, 60000); return () => clearInterval(interval); 
     }
   }, [isLoading, fullDatabase, fetchMarketData, hasCrypto, hasForex]);
 
@@ -478,7 +343,6 @@ const Dashboard = () => {
   }, [unifiedCryptoHoldings, livePrices, fiatRate]);
 
   const netWorth = bankTotal + cashTotal + onlineTotal + cryptoTotal;
-
   const savingsTotal = incomeTotal - expenseTotal;
   const savingsRate = incomeTotal > 0 ? ((savingsTotal / incomeTotal) * 100).toFixed(1) : 0;
   const monthlyTrend = incomeTotal > expenseTotal ? 'positive' : 'negative';
@@ -492,16 +356,6 @@ const Dashboard = () => {
     ].filter(asset => asset.value > 0);
     return { assetAllocation: realAssetAllocation };
   }, [bankTotal, cashTotal, onlineTotal, cryptoTotal]);
-
-  const [rawIncomes, setRawIncomes] = useState([]);
-  const [rawExpenses, setRawExpenses] = useState([]);
-  
-  useEffect(() => {
-    if (!user) return;
-    const unsubInc = onSnapshot(collection(db, "users", user.uid, "incomeLogs"), snap => setRawIncomes(snap.docs.map(d => d.data())));
-    const unsubExp = onSnapshot(collection(db, "users", user.uid, "expenseLogs"), snap => setRawExpenses(snap.docs.map(d => d.data())));
-    return () => { unsubInc(); unsubExp(); };
-  }, [user]);
 
   const chartCashFlow = useMemo(() => {
     const monthlyData = {};
@@ -523,6 +377,41 @@ const Dashboard = () => {
     });
     return Object.values(monthlyData).sort((a, b) => a.sortKey.localeCompare(b.sortKey)).slice(-6);
   }, [rawIncomes, rawExpenses, formatGlobalDate]);
+
+  const recentTransactions = useMemo(() => {
+    const inc = rawIncomes.map(i => ({ ...i, txType: 'income', amt: Number(i.finalBaseAmount || i.amount || 0) }));
+    const exp = rawExpenses.map(e => ({ ...e, txType: 'expense', amt: Number(e.finalBaseAmount || e.amount || 0) }));
+    return [...inc, ...exp].sort((a, b) => b.timestamp - a.timestamp).slice(0, 5);
+  }, [rawIncomes, rawExpenses]);
+
+  const categoryBreakdown = useMemo(() => {
+    const now = new Date();
+    const thisMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    
+    const expCat = {}; const incCat = {};
+    let eTotal = 0; let iTotal = 0;
+
+    rawExpenses.forEach(e => {
+      if (e.date?.startsWith(thisMonthPrefix)) {
+        const amt = Number(e.finalBaseAmount || e.amount || 0);
+        expCat[e.category] = (expCat[e.category] || 0) + amt;
+        eTotal += amt;
+      }
+    });
+
+    rawIncomes.forEach(i => {
+      if (i.date?.startsWith(thisMonthPrefix)) {
+        const amt = Number(i.finalBaseAmount || i.amount || 0);
+        incCat[i.category] = (incCat[i.category] || 0) + amt;
+        iTotal += amt;
+      }
+    });
+
+    const expArr = Object.keys(expCat).map(k => ({ name: k, value: expCat[k], percent: (expCat[k]/eTotal)*100 })).sort((a,b)=>b.value-a.value).slice(0, 4);
+    const incArr = Object.keys(incCat).map(k => ({ name: k, value: incCat[k], percent: (incCat[k]/iTotal)*100 })).sort((a,b)=>b.value-a.value).slice(0, 4);
+
+    return { expenses: expArr, incomes: incArr, eTotal, iTotal };
+  }, [rawExpenses, rawIncomes]);
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
@@ -601,7 +490,6 @@ const Dashboard = () => {
             </div>
           </div>
           
-          {/* EXPANDED NET WORTH BREAKDOWN GRID */}
           <div className="relative z-10 mt-8 bg-white/5 border border-white/10 rounded-[2rem] p-5 md:p-6 backdrop-blur-md">
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-2">Total Liquid Net Worth {isMarketLoading && (hasCrypto || hasForex) && <HiOutlineRefresh className="animate-spin text-blue-400" size={12} />}</p>
             <h2 className="text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-tight mb-8 break-words">
@@ -679,9 +567,106 @@ const Dashboard = () => {
 
         {/* KPI Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <StatCard title="Total Income" value={`${currencySymbol}${incomeTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={HiOutlineTrendingUp} gradient={GRADIENTS.income} trend={5.2} subtitle="Lifetime earnings" onClick={() => navigate('/dashboard/accounts/income')} />
-          <StatCard title="Total Expenses" value={`${currencySymbol}${expenseTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={HiOutlineTrendingDown} gradient={GRADIENTS.expense} trend={-2.1} subtitle="Lifetime spending" onClick={() => navigate('/dashboard/accounts/expense')} />
+          <StatCard title="Total Income" value={`${currencySymbol}${incomeTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={HiOutlineTrendingUp} gradient={GRADIENTS.income} trend={5.2} subtitle="Lifetime earnings" onClick={() => navigate('/dashboard/income')} />
+          <StatCard title="Total Expenses" value={`${currencySymbol}${expenseTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={HiOutlineTrendingDown} gradient={GRADIENTS.expense} trend={-2.1} subtitle="Lifetime spending" onClick={() => navigate('/dashboard/expense')} />
           <StatCard title="Net Savings" value={`${currencySymbol}${savingsTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={FaPiggyBank} gradient={GRADIENTS.savings} subtitle={`${savingsRate}% savings rate`} trend={savingsTotal >= 0 ? 3.5 : -1.2} onClick={() => navigate('/dashboard/analytics')} />
+        </div>
+
+        {/* RECENT TRANSACTIONS & CATEGORY BREAKDOWN */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2.5rem] p-6 shadow-xl flex flex-col h-full">
+            <div className="flex justify-between items-center mb-6 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div>
+                <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest flex items-center gap-2">
+                  <FaHistory className="text-blue-500" size={16} /> Recent Activity
+                </h3>
+                <p className="text-[10px] text-slate-500 font-medium mt-1">Your last 5 logs</p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => navigate('/dashboard/income')} className="bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 p-2 rounded-xl transition-colors" title="Add Income"><HiOutlinePlus size={20}/></button>
+                <button onClick={() => navigate('/dashboard/expense')} className="bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-500/10 dark:text-rose-400 p-2 rounded-xl transition-colors" title="Add Expense"><HiOutlinePlus size={20}/></button>
+              </div>
+            </div>
+
+            <div className="flex-1 space-y-3">
+              {recentTransactions.length > 0 ? recentTransactions.map((tx, idx) => (
+                <div key={idx} className="flex items-center justify-between p-3 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-700 cursor-pointer" onClick={() => navigate(`/dashboard/${tx.txType}`)}>
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${tx.txType === 'income' ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400' : 'bg-rose-100 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400'}`}>
+                      {tx.txType === 'income' ? <FaBriefcase size={16} /> : <FaShoppingCart size={16} />}
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-slate-900 dark:text-white truncate max-w-[150px] sm:max-w-[200px]">{tx.title}</p>
+                      <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">{tx.category} • {formatGlobalDate ? formatGlobalDate(tx.date, 'short') : tx.date.split('T')[0]}</p>
+                    </div>
+                  </div>
+                  <p className={`text-sm sm:text-base font-black tracking-tight ${tx.txType === 'income' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                    {tx.txType === 'income' ? '+' : '-'}{currencySymbol}{tx.amt.toLocaleString(undefined, {minimumFractionDigits: 0})}
+                  </p>
+                </div>
+              )) : (
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 py-10">
+                  <FaHistory size={30} className="mb-2 opacity-50"/>
+                  <p className="text-xs font-bold uppercase tracking-widest">No recent history</p>
+                </div>
+              )}
+            </div>
+            
+            <button onClick={() => navigate('/dashboard/history')} className="w-full mt-4 py-3 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/50 dark:hover:bg-slate-800 text-blue-600 dark:text-blue-400 rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors shadow-sm">
+              View All History
+            </button>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2.5rem] p-6 shadow-xl flex flex-col h-full">
+            <div className="flex justify-between items-center mb-6 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div>
+                <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest flex items-center gap-2">
+                  <FaChartPie className="text-purple-500" size={16} /> Category Flow
+                </h3>
+                <p className="text-[10px] text-slate-500 font-medium mt-1">Where your money went this month</p>
+              </div>
+            </div>
+
+            <div className="flex-1 space-y-6">
+              <div>
+                <div className="flex justify-between items-end mb-3">
+                  <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest">Top Expenses</p>
+                  <p className="text-xs font-bold text-slate-500">{currencySymbol}{categoryBreakdown.eTotal.toLocaleString(undefined, {minimumFractionDigits: 0})}</p>
+                </div>
+                {categoryBreakdown.expenses.length > 0 ? categoryBreakdown.expenses.map((cat, i) => (
+                  <div key={i} className="mb-3 last:mb-0">
+                    <div className="flex justify-between text-xs font-bold mb-1.5">
+                      <span className="text-slate-700 dark:text-slate-300 truncate pr-2">{cat.name}</span>
+                      <span className="text-rose-600 dark:text-rose-400">{currencySymbol}{cat.value.toLocaleString(undefined, {minimumFractionDigits: 0})}</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-rose-500 rounded-full" style={{ width: `${cat.percent}%` }}></div>
+                    </div>
+                  </div>
+                )) : <p className="text-[10px] font-bold text-slate-400 italic">No expenses logged this month.</p>}
+              </div>
+
+              <div>
+                <div className="flex justify-between items-end mb-3">
+                  <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Top Income Sources</p>
+                  <p className="text-xs font-bold text-slate-500">{currencySymbol}{categoryBreakdown.iTotal.toLocaleString(undefined, {minimumFractionDigits: 0})}</p>
+                </div>
+                {categoryBreakdown.incomes.length > 0 ? categoryBreakdown.incomes.map((cat, i) => (
+                  <div key={i} className="mb-3 last:mb-0">
+                    <div className="flex justify-between text-xs font-bold mb-1.5">
+                      <span className="text-slate-700 dark:text-slate-300 truncate pr-2">{cat.name}</span>
+                      <span className="text-emerald-600 dark:text-emerald-400">{currencySymbol}{cat.value.toLocaleString(undefined, {minimumFractionDigits: 0})}</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${cat.percent}%` }}></div>
+                    </div>
+                  </div>
+                )) : <p className="text-[10px] font-bold text-slate-400 italic">No income logged this month.</p>}
+              </div>
+            </div>
+          </div>
+
         </div>
 
         {/* Charts Section */}
@@ -722,7 +707,7 @@ const Dashboard = () => {
               <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest flex items-center gap-2">
                 <FaWallet className="text-blue-500" size={16}/> Asset Allocation
               </h3>
-              <p className="text-[10px] text-slate-500 font-medium mt-0.5">Portfolio distribution (Including Live Crypto)</p>
+              <p className="text-[10px] text-slate-500 font-medium mt-0.5">Portfolio distribution</p>
             </div>
             
             {assetAllocation.length > 0 ? (
@@ -768,7 +753,7 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* 🚀 FIXED: Pure empty state block. Silently hidden if no watchlist exists. */}
+        {/* Watchlist Section */}
         {(hasCrypto || hasForex) && (
           <div className="mt-8">
             <div className="flex items-center justify-between mb-4">
