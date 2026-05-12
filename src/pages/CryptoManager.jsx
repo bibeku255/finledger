@@ -84,7 +84,7 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, confirm
 // 🚀 CONSTANTS & CONFIG (CLEANED SCAM COINS)
 // ============================================
 
-const COINMARKETCAP_API_KEY = import.meta.env.VITE_CMC_API_KEY || '0f7b7c97-bd3e-45fd-9134-8ab57c70e3a8';
+
 const MAX_COINS_TO_DISPLAY = 500; 
 
 const SUPPORTED_NETWORKS = [
@@ -320,15 +320,11 @@ const fetchCoinGeckoCoins = async (page = 1, perPage = 250) => {
 
 const fetchCoinMarketCapCoins = async (limit = 300) => {
   try {
-    const res = await fetch(
-      `https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest?limit=${limit}&sort=market_cap&sort_dir=desc&convert=USD`,
-      {
-        headers: {
-          'X-CMC_PRO_API_KEY': COINMARKETCAP_API_KEY,
-          'Accept': 'application/json'
-        }
-      }
-    );
+    // Proxy URL: apni Vercel serverless function
+    const params = `limit=${limit},sort=market_cap,sort_dir=desc,convert=USD`;
+    const url = `/api/crypto?endpoint=cryptocurrency/listings/latest&params=${encodeURIComponent(params)}`;
+
+    const res = await fetch(url);
     
     if (res && res.ok) {
       const data = await res.json();
