@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { HiOutlineShieldCheck, HiOutlineArrowRight, HiOutlineLogout } from 'react-icons/hi';
-
+import { verifyPIN } from '../utils/cryptoUtils';
 const VerifyPin = () => {
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
@@ -19,46 +19,42 @@ const VerifyPin = () => {
     }
   }, [user, navigate]);
 
-  // --- SHA-256 Hashing Algorithm (Same as Settings) ---
-  const hashPIN = async (pinCode) => {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(pinCode);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-  };
+const handleVerify = async (e) => {
+  e.preventDefault();
+  if (!pin || pin.length < 4) {
+    setError("Please enter your 4-6 digit passcode.");
+    return;
+  }
 
-  const handleVerify = async (e) => {
-    e.preventDefault();
-    if (!pin) {
-      setError("Please enter your 4-6 digit passcode.");
-      return;
-    }
+  setLoading(true);
+  setError('');
 
-    setLoading(true);
-    setError('');
-
-    try {
-      // 1. Hash the entered PIN
-      const hashedInput = await hashPIN(pin);
-      
-      // 2. Compare with Database Hash
-      if (hashedInput === dbData?.security?.pinHash) {
-        // ✅ SUCCESS! 
-        // Ek chota sa 'session' bana dete hain taaki app ko yaad rahe ki 2FA pass ho gaya
-        sessionStorage.setItem('is2faPassed', 'true');
-        navigate('/dashboard');
-      } else {
-        // ❌ FAILED!
-        setError("Incorrect Passcode. Access Denied! 🛑");
-        setPin(''); // Input clear kar do
+  try {
+    const { valid, newHash } = await verifyPIN(pin, dbData?.security?.pinHash, user.uid);
+    
+    if (valid) {
+      // Auto-upgrade if old hash
+      if (newHash) {
+        const { doc, setDoc } = await import('firebase/firestore');
+        const { db } = await import('../firebase/firebaseConfig');
+        await setDoc(doc(db, "users", user.uid), 
+          { security: { pinHash: newHash } }, 
+          { merge: true }
+        );
       }
-    } catch (err) {
-      console.error(err);
-      setError("Verification failed due to a system error.");
-    } finally {
-      setLoading(false);
+      sessionStorage.setItem('is2faPassed', 'true');
+      navigate('/dashboard');
+    } else {
+      setError("Incorrect Passcode. Access Denied! 🛑");
+      setPin('');
     }
-  };
+  } catch (err) {
+    console.error(err);
+    setError("Verification failed due to a system error.");
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleLogout = async () => {
     await logout();

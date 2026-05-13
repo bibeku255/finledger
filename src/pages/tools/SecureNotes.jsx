@@ -3,7 +3,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { collection, addDoc, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { deriveKey, encryptData, decryptData } from '../../utils/encryption';
-
+import { verifyPIN } from '../../utils/cryptoUtils';
 import { 
   HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
   HiOutlineLockClosed, HiOutlineEye, HiOutlineEyeOff, HiOutlineClipboardCopy,
@@ -13,13 +13,7 @@ import {
 } from 'react-icons/hi';
 import { FaKey, FaSeedling, FaUniversity, FaStickyNote, FaLock, FaUnlockAlt, FaShieldAlt } from 'react-icons/fa';
 
-// ✅ Keep hashPIN for vault PIN verification only
-const hashPIN = async (pinCode) => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(pinCode);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-};
+
 
 const SecureNotes = () => {
   const { user, formatGlobalDate } = useAuth();
@@ -88,36 +82,43 @@ const SecureNotes = () => {
 
   // 🚀 MASTER VAULT UNLOCK LOGIC (with key derivation)
   const handleUnlockVault = async (e) => {
-    e.preventDefault();
-    if (!pinInput.trim()) return setPinError("Please enter your PIN.");
-    setIsVerifying(true);
-    setPinError('');
+  e.preventDefault();
+  if (!pinInput.trim()) return setPinError("Please enter your PIN.");
+  setIsVerifying(true);
+  setPinError('');
 
-    try {
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      const userData = userDoc.data();
-      
-      const hashedInput = await hashPIN(pinInput.trim());
-      const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin; 
-
-      // Verify PIN
-      if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) {
-        setPinError("Incorrect Security PIN. Vault remains locked."); 
-        setIsVerifying(false); 
-        return;
-      }
-
-      // Derive encryption key from the same PIN
-      const key = await deriveKey(pinInput.trim(), user.uid);
-      setEncryptionKey(key);
-      setIsVaultUnlocked(true);
-    } catch (error) {
-      setPinError("System error or failed to initialize vault. Try again.");
-    } finally {
+  try {
+    const userDoc = await getDoc(doc(db, "users", user.uid));
+    const userData = userDoc.data();
+    const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin;
+    
+    const { valid, newHash } = await verifyPIN(pinInput.trim(), storedPin, user.uid);
+    
+    if (!valid) {
+      setPinError("Incorrect Security PIN. Vault remains locked.");
       setIsVerifying(false);
-      setPinInput('');
+      return;
     }
-  };
+
+    // Auto-upgrade if old hash
+    if (newHash) {
+      await setDoc(doc(db, "users", user.uid), 
+        { security: { pinHash: newHash } }, 
+        { merge: true }
+      );
+    }
+
+    // Derive encryption key from the same PIN
+    const key = await deriveKey(pinInput.trim(), user.uid);
+    setEncryptionKey(key);
+    setIsVaultUnlocked(true);
+  } catch (error) {
+    setPinError("System error or failed to initialize vault. Try again.");
+  } finally {
+    setIsVerifying(false);
+    setPinInput('');
+  }
+};
 
   const handleSaveNote = async (e) => {
     e.preventDefault();

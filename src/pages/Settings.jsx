@@ -12,7 +12,7 @@ import { updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCre
 import Cropper from "react-easy-crop";
 import getCroppedImg from "../utils/cropImage";
 import Avatar from "../components/ui/Avatar"; 
-
+import { hashPIN, verifyPIN } from '../utils/cryptoUtils';
 // 🚀 NAYA: Calendar Options Array for clean UI rendering
 const calendarOptions = [
   { 
@@ -135,65 +135,71 @@ const Settings = () => {
     }
   };
 
-  // --- SECURITY LOGIC ---
-  const hashPIN = async (pinCode) => {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(pinCode);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-  };
-
-  const handlePinSave = async (e) => {
-    e.preventDefault();
-    setPinLoading(true);
-    try {
-      await auth.currentUser.reload();
-      if (!auth.currentUser.emailVerified && !isSocialUser) {
-        await sendEmailVerification(auth.currentUser);
-        alert("Please verify email first!");
-        setPinLoading(false); return;
-      }
-      if (isEmailUser && !isSocialUser) {
-        const credential = EmailAuthProvider.credential(user.email, pinAuthPassword);
-        await reauthenticateWithCredential(auth.currentUser, credential);
-      }
-      if (isPinSet) {
-        const hashedOldPin = await hashPIN(oldPin);
-        if (hashedOldPin !== dbData.security.pinHash) throw new Error("Wrong Old PIN");
-      }
-      const hashedPin = await hashPIN(pin);
-      await setDoc(doc(db, "users", user.uid), { 
-        security: { pinHash: hashedPin, isPinSet: true }
-      }, { merge: true });
-      alert("Security PIN Activated! 🛡️");
-      setOldPin(""); setPin(""); setConfirmPin(""); setPinAuthPassword("");
-      await refreshUser();
-    } catch (err) {
-      alert("Verification Failed ❌");
-    } finally {
-      setPinLoading(false);
+const handlePinSave = async (e) => {
+  e.preventDefault();
+  setPinLoading(true);
+  try {
+    await auth.currentUser.reload();
+    if (!auth.currentUser.emailVerified && !isSocialUser) {
+      await sendEmailVerification(auth.currentUser);
+      alert("Please verify email first!");
+      setPinLoading(false); return;
     }
-  };
+    if (isEmailUser && !isSocialUser) {
+      const credential = EmailAuthProvider.credential(user.email, pinAuthPassword);
+      await reauthenticateWithCredential(auth.currentUser, credential);
+    }
+
+    // Verify old PIN if 2FA already set
+    if (isPinSet) {
+      const { valid } = await verifyPIN(oldPin, dbData.security.pinHash, user.uid);
+      if (!valid) throw new Error("Wrong Old PIN");
+    }
+
+    // Basic PIN strength (4-6 digits)
+    if (pin.length < 4 || pin.length > 6) {
+      alert("PIN must be 4 to 6 digits.");
+      setPinLoading(false); return;
+    }
+    if (pin !== confirmPin) {
+      alert("PINs do not match.");
+      setPinLoading(false); return;
+    }
+
+    // Generate new PBKDF2 hash
+    const newHash = await hashPIN(pin, user.uid);
+    await setDoc(doc(db, "users", user.uid), { 
+      security: { pinHash: newHash, isPinSet: true }
+    }, { merge: true });
+    alert("Security PIN Activated! 🛡️");
+    setOldPin(""); setPin(""); setConfirmPin(""); setPinAuthPassword("");
+    await refreshUser();
+  } catch (err) {
+    alert(err.message || "Verification Failed ❌");
+  } finally {
+    setPinLoading(false);
+  }
+};
 
   const handlePasswordUpdate = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      if (isPinSet) {
-        const hashedAuthPin = await hashPIN(passwordAuthPin);
-        if (hashedAuthPin !== dbData.security.pinHash) throw new Error("Wrong PIN");
-      }
-      const credential = EmailAuthProvider.credential(user.email, currentPassword);
-      await reauthenticateWithCredential(auth.currentUser, credential);
-      await updatePassword(auth.currentUser, newPassword);
-      alert("Password Updated! ✅");
-      setCurrentPassword(""); setNewPassword(""); setPasswordAuthPin("");
-    } catch (err) {
-      alert("Update Failed ❌");
-    } finally {
-      setLoading(false);
+  e.preventDefault();
+  setLoading(true);
+  try {
+    if (isPinSet) {
+      const { valid } = await verifyPIN(passwordAuthPin, dbData.security.pinHash, user.uid);
+      if (!valid) throw new Error("Wrong PIN");
     }
-  };
+    const credential = EmailAuthProvider.credential(user.email, currentPassword);
+    await reauthenticateWithCredential(auth.currentUser, credential);
+    await updatePassword(auth.currentUser, newPassword);
+    alert("Password Updated! ✅");
+    setCurrentPassword(""); setNewPassword(""); setPasswordAuthPin("");
+  } catch (err) {
+    alert(err.message || "Update Failed ❌");
+  } finally {
+    setLoading(false);
+  }
+};
 
   // 🚀 SAVE CALENDAR SETTING
   const handleCalendarUpdate = async (selectedCode) => {
