@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { collection, addDoc, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
+import { deriveKey, encryptData, decryptData } from '../../utils/encryption';
 
 import { 
   HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
@@ -12,28 +13,12 @@ import {
 } from 'react-icons/hi';
 import { FaKey, FaSeedling, FaUniversity, FaStickyNote, FaLock, FaUnlockAlt, FaShieldAlt } from 'react-icons/fa';
 
-// 🚀 SECURE SHA-256 HASHING ALGORITHM FOR PIN
+// ✅ Keep hashPIN for vault PIN verification only
 const hashPIN = async (pinCode) => {
   const encoder = new TextEncoder();
   const data = encoder.encode(pinCode);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-};
-
-// 🚀 BASIC ENCRYPTION (Obfuscation to hide from Firebase Console)
-const encryptData = (text, uid) => {
-  if (!text) return '';
-  return btoa(encodeURIComponent(text + "||_SECURE_||" + uid));
-};
-
-const decryptData = (hash, uid) => {
-  if (!hash) return '';
-  try {
-    const decoded = decodeURIComponent(atob(hash));
-    return decoded.replace("||_SECURE_||" + uid, "");
-  } catch (e) {
-    return "Error decrypting data";
-  }
 };
 
 const SecureNotes = () => {
@@ -44,6 +29,9 @@ const SecureNotes = () => {
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
+
+  // ✅ NEW: Encryption key derived from PIN
+  const [encryptionKey, setEncryptionKey] = useState(null);
 
   const [notes, setNotes] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -56,7 +44,7 @@ const SecureNotes = () => {
   const [copySuccess, setCopySuccess] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
-  const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
+  const [viewMode, setViewMode] = useState('grid');
 
   const todayDate = new Date().toISOString().split('T')[0];
 
@@ -74,28 +62,31 @@ const SecureNotes = () => {
     date: todayDate
   });
 
-  // Fetch Notes (Only if Vault is unlocked)
+  // Fetch Notes (Only if Vault unlocked & key ready)
   useEffect(() => {
-    if (!user || !isVaultUnlocked) return;
+    if (!user || !isVaultUnlocked || !encryptionKey) return;
     
     const q = query(collection(db, "users", user.uid, "secureNotes"), orderBy("timestamp", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedNotes = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          content: decryptData(data.contentHash, user.uid)
-        };
-      });
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      const fetchedNotes = await Promise.all(
+        snapshot.docs.map(async (doc) => {
+          const data = doc.data();
+          const decryptedContent = await decryptData(data.contentHash, encryptionKey);
+          return {
+            id: doc.id,
+            ...data,
+            content: decryptedContent
+          };
+        })
+      );
       setNotes(fetchedNotes);
       setIsLoading(false);
     });
     
     return () => unsubscribe();
-  }, [user, isVaultUnlocked]);
+  }, [user, isVaultUnlocked, encryptionKey]);
 
-  // 🚀 MASTER VAULT UNLOCK LOGIC
+  // 🚀 MASTER VAULT UNLOCK LOGIC (with key derivation)
   const handleUnlockVault = async (e) => {
     e.preventDefault();
     if (!pinInput.trim()) return setPinError("Please enter your PIN.");
@@ -109,15 +100,19 @@ const SecureNotes = () => {
       const hashedInput = await hashPIN(pinInput.trim());
       const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin; 
 
+      // Verify PIN
       if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) {
         setPinError("Incorrect Security PIN. Vault remains locked."); 
         setIsVerifying(false); 
         return;
       }
-      
+
+      // Derive encryption key from the same PIN
+      const key = await deriveKey(pinInput.trim(), user.uid);
+      setEncryptionKey(key);
       setIsVaultUnlocked(true);
     } catch (error) {
-      setPinError("System error. Try again.");
+      setPinError("System error or failed to initialize vault. Try again.");
     } finally {
       setIsVerifying(false);
       setPinInput('');
@@ -126,12 +121,13 @@ const SecureNotes = () => {
 
   const handleSaveNote = async (e) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user || !encryptionKey) return;
     setIsSaving(true);
 
     const timestamp = editingId ? notes.find(n => n.id === editingId)?.timestamp : new Date(formData.date).getTime();
     
-    const secureHash = encryptData(formData.content, user.uid);
+    // ✅ Encrypt with the new AES-GCM method
+    const secureHash = await encryptData(formData.content, encryptionKey);
 
     const noteRecord = {
       title: formData.title,
