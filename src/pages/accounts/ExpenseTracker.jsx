@@ -4,33 +4,23 @@ import { useAuth } from '../../hooks/useAuth';
 import { collection, addDoc, doc, deleteDoc, updateDoc, onSnapshot, query, orderBy, where, getDocs, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
+import { verifyPIN } from '../../utils/cryptoUtils';
 
 import { 
   HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
   HiOutlineSearch, HiOutlineRefresh, HiOutlineShoppingCart,
   HiOutlineLockClosed, HiOutlineExclamationCircle, HiOutlineChevronDown,
   HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable,
-  HiOutlineCalendar, HiOutlineShieldCheck, HiOutlineTrendingUp,
-  HiOutlineTrendingDown, HiOutlineCash
+  HiOutlineCalendar, HiOutlineShieldCheck, HiOutlineTrendingDown,
+  HiOutlineCash
 } from 'react-icons/hi';
 
 import { 
-  FaMoneyBillWave, FaArrowUp, FaUniversity, FaWallet, 
-  FaExchangeAlt, FaRandom, FaBitcoin, FaUserFriends,
-  FaGem, FaChartLine, FaPiggyBank, FaArrowDown, FaTags, FaCreditCard, FaLock
+  FaMoneyBillWave, FaUniversity, FaWallet, FaExchangeAlt, 
+  FaRandom, FaBitcoin, FaUserFriends, FaTags, FaCreditCard, FaLock
 } from 'react-icons/fa';
 
-import { fiatFlagMap } from '../../utils/marketConstants';
-
-const cryptoPlatformsList = [
-  "CoinDCX", "WazirX", "ZebPay", "Mudrex", "SunCrypto",
-  "Binance", "Coinbase", "Bybit", "KuCoin", "OKX", "Kraken", "Mexc", "Gate.io",
-  "FaucetPay", "Trust Wallet", "MetaMask", "Phantom", "NC Wallet", "Payeer",
-  "Hardware Wallet (Ledger/Trezor)", 
-  "CoinPayU", "Cointiply", "FreeBitcoin", "FireFaucet", "PipeFlare", 
-  "GlobalHive", "AdBTC", "Viefaucet", "DutchyCorp", "LarvelFaucet", 
-  "Coinpot", "RollerCoin", "Other Wallet/Site"
-];
+import { currenciesList } from '../../utils/marketConstants';
 
 const expenseCategories = [
   "Food & Dining", "Groceries & Supermarket", "Rent & Housing",
@@ -57,10 +47,6 @@ const ExpenseTracker = () => {
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
 
   const availableFiats = useMemo(() => Array.from(new Set([baseCurrency, ...selectedFiats])), [baseCurrency, selectedFiats]);
-  const availableCryptos = useMemo(() => {
-    const customSymbols = selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
-    return Array.from(new Set(["USDT", ...customSymbols])).map(s => s.toUpperCase());
-  }, [selectedCryptos]);
 
   const [expenses, setExpenses] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -80,23 +66,7 @@ const ExpenseTracker = () => {
   const [customUserCoins, setCustomUserCoins] = useState([]); 
   const [bankWalletLogs, setBankWalletLogs] = useState([]);
   const [existingParties, setExistingParties] = useState([]); 
-
-  const defaultSplitSource = { 
-    vault: 'bank', subWallet: '', asset: baseCurrency, 
-    cryptoPlatform: cryptoPlatformsList[12], amount: '', exchangeRate: 1, isCustomPlatform: false 
-  };
-
-  const defaultKhataSplit = { partyName: '', amount: '' };
-
-  const [formData, setFormData] = useState({
-    title: '', category: expenseCategories[0], date: getLocalDateTimeString(), linkedExpenseId: '', 
-    isSplit: false, vault: 'bank', subWallet: '', asset: baseCurrency, cryptoPlatform: cryptoPlatformsList[12], 
-    amount: '', exchangeRate: 1, isCustomSingle: false,
-    splitSources: [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ],
-    isKhataSplit: false, 
-    khataSplits: [ { ...defaultKhataSplit } ], 
-    isSynced: false 
-  });
+  const [existingCryptoPlatforms, setExistingCryptoPlatforms] = useState([]);
 
   useEffect(() => {
     if (!user) return;
@@ -113,9 +83,7 @@ const ExpenseTracker = () => {
       if (!user) return;
       const userRef = doc(db, "users", user.uid);
       const userSnap = await getDoc(userRef);
-      if (userSnap.exists() && userSnap.data().customCoins) {
-        setCustomUserCoins(userSnap.data().customCoins);
-      }
+      if (userSnap.exists() && userSnap.data().customCoins) setCustomUserCoins(userSnap.data().customCoins);
     };
     fetchUserData();
   }, [user]);
@@ -130,9 +98,13 @@ const ExpenseTracker = () => {
     return Array.from(coinMap.values());
   }, [customUserCoins, selectedCryptos]);
 
+  const availableCryptos = useMemo(() => {
+    return Array.from(new Set(["USDT", ...fullDatabase.map(c => c.symbol.toUpperCase())]));
+  }, [fullDatabase]);
+
   useEffect(() => {
      if(!user) return;
-     const fetchBanksAndParties = async () => {
+     const fetchDynamicLists = async () => {
         const qBank = query(collection(db, "users", user.uid, "bankWallet"));
         const snapBank = await getDocs(qBank);
         const qOnline = query(collection(db, "users", user.uid, "onlineWallet"));
@@ -148,16 +120,100 @@ const ExpenseTracker = () => {
         const partyNames = new Set();
         snapParty.docs.forEach(d => { if(d.data().name) partyNames.add(d.data().name) });
         setExistingParties(Array.from(partyNames));
+
+        const qCrypto = query(collection(db, "users", user.uid, "cryptoWalletLogs"));
+        const snapCrypto = await getDocs(qCrypto);
+        const cryptoNames = new Set();
+        snapCrypto.docs.forEach(d => { if(d.data().platform) cryptoNames.add(d.data().platform) });
+        setExistingCryptoPlatforms(Array.from(cryptoNames));
      };
-     fetchBanksAndParties();
+     fetchDynamicLists();
   }, [user]);
   
   const existingBanks = useMemo(() => Array.from(new Set(bankWalletLogs)), [bankWalletLogs]);
 
-  // 🚀 CRASH FIX: Properly initialized and accumulated 'monthTotal'
+  const defaultSplitSource = { vault: 'bank', subWallet: '', asset: baseCurrency, cryptoPlatform: '', amount: '', exchangeRate: 1 };
+  const defaultKhataSplit = { partyName: '', amount: '' };
+
+  const [formData, setFormData] = useState({
+    title: '', category: expenseCategories[0], date: getLocalDateTimeString(), linkedExpenseId: '', 
+    isSplit: false, vault: 'bank', subWallet: '', cryptoPlatform: '', asset: baseCurrency, 
+    amount: '', exchangeRate: 1, isSynced: false,
+    splitSources: [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ],
+    isKhataSplit: false, khataSplits: [ { ...defaultKhataSplit } ]
+  });
+
+  const fetchLiveRate = async (index = null) => {
+    const isSingle = index === null;
+    const assetToCheck = isSingle ? formData.asset : formData.splitSources[index].asset;
+    
+    if (assetToCheck === baseCurrency) return;
+    setIsFetchingRate(isSingle ? 'single' : index);
+    
+    try {
+      const fiatRes = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+      const fiatData = await fiatRes.json();
+      const usdToBase = fiatData.rates[baseCurrency] || 1;
+      let finalRate = 1;
+
+      if (availableFiats.includes(assetToCheck) || currenciesList.find(c => c.code === assetToCheck)) {
+        const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${assetToCheck}`);
+        const data = await res.json();
+        finalRate = data.rates[baseCurrency] || 1;
+      } else {
+        const upperSym = assetToCheck.toUpperCase();
+        const coinObj = fullDatabase.find(c => c.symbol === upperSym) || {};
+        const searchId = coinObj.id || assetToCheck.toLowerCase();
+        let priceUsd = null;
+
+        if (coinObj.fetchMode === 'contract' && coinObj.network && coinObj.contractAddress) {
+           try {
+              const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${coinObj.network}/tokens/${coinObj.contractAddress}`);
+              if (gtRes.ok) { const gtJson = await gtRes.json(); priceUsd = parseFloat(gtJson.data.attributes.price_usd); }
+           } catch(e) {}
+        } 
+
+        if (!priceUsd) {
+           try {
+               const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
+               const cgData = await cgRes.json();
+               if (cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
+           } catch(e) {}
+        }
+
+        if (!priceUsd) {
+            try {
+                if (['USDT', 'USDC', 'DAI'].includes(upperSym)) priceUsd = 1.00; 
+                else {
+                    const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${upperSym}USDT`);
+                    if (bRes.ok) { const bData = await bRes.json(); priceUsd = parseFloat(bData.price); }
+                }
+            } catch(e) {}
+        }
+        finalRate = (priceUsd || (coinObj?.fallbackPrice || 0)) * usdToBase;
+      }
+
+      if (isSingle) setFormData(prev => ({ ...prev, exchangeRate: finalRate.toFixed(6) }));
+      else {
+        const updatedSplits = [...formData.splitSources];
+        updatedSplits[index].exchangeRate = finalRate.toFixed(6);
+        setFormData(prev => ({ ...prev, splitSources: updatedSplits }));
+      }
+    } catch (error) { alert("Rate fetch failed. Please enter manually."); } finally { setIsFetchingRate(false); }
+  };
+
+  const getBaseAmount = (amount, isForeign, rate) => {
+    const amt = parseFloat(amount) || 0;
+    const r = parseFloat(rate) || 1;
+    return amt * (isForeign ? r : 1);
+  };
+  
+  const getSplitTotalBase = () => formData.splitSources.reduce((acc, curr) => acc + getBaseAmount(curr.amount, curr.asset !== baseCurrency, curr.exchangeRate), 0);
+  const getKhataTotal = () => formData.khataSplits.reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
+
   const processedExpenses = useMemo(() => {
     const filtered = expenses.filter(exp => {
-      const matchSearch = exp.title.toLowerCase().includes(searchTerm.toLowerCase()) || (exp.asset && exp.asset.toLowerCase().includes(searchTerm.toLowerCase()));
+      const matchSearch = exp.title?.toLowerCase().includes(searchTerm.toLowerCase()) || (exp.asset && exp.asset.toLowerCase().includes(searchTerm.toLowerCase()));
       const matchCategory = filterCategory === 'all' || exp.category === filterCategory;
       return matchSearch && matchCategory;
     });
@@ -175,9 +231,9 @@ const ExpenseTracker = () => {
         grouped[monthKey] = { monthName, openingBalance: runningBalance, records: [], closingBalance: 0, monthTotal: 0 }; 
       }
       
-      const baseAmt = Number(t.finalBaseAmount || 0);
+      const baseAmt = Number(t.finalBaseAmount) || 0;
       runningBalance += baseAmt; 
-      grouped[monthKey].monthTotal += baseAmt; // FIXED!
+      grouped[monthKey].monthTotal += baseAmt; 
       grouped[monthKey].records.push({ ...t, finalAmount: baseAmt });
       grouped[monthKey].closingBalance = runningBalance;
     });
@@ -200,15 +256,15 @@ const ExpenseTracker = () => {
 
     const reportData = filteredForReport.map(rec => {
       const cleanTitle = (rec.title || 'N/A').replace(/(\r\n|\n|\r)/gm, " ");
-      const sourceText = rec.isSplit ? 'Split Payment' : `${rec.vault.charAt(0).toUpperCase() + rec.vault.slice(1)} Vault${rec.subWallet ? ` (${rec.subWallet})` : ''}`;
+      const sourceText = rec.isSplit ? 'Split Payment' : `${(rec.vault || '').charAt(0).toUpperCase() + (rec.vault || '').slice(1)} Vault${rec.subWallet ? ` (${rec.subWallet})` : ''}`;
       const rawDate = rec.date ? rec.date.split('T')[0] : 'N/A';
 
       return {
         date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rawDate,
         payee: cleanTitle,
-        category: rec.category,
+        category: rec.category || 'N/A',
         source: sourceText,
-        nativeAmount: `${(Number(rec.amount) || 0).toLocaleString()} ${rec.asset}`,
+        nativeAmount: `${(Number(rec.amount) || 0).toLocaleString()} ${rec.asset || baseCurrency}`,
         baseValue: Number(rec.finalBaseAmount || 0)
       };
     });
@@ -223,208 +279,189 @@ const ExpenseTracker = () => {
     ];
 
     const fileName = `Expense_Tracker_Ledger`;
-    const filterTitle = filterCategory !== 'all' ? ` - ${filterCategory}` : ``;
-    const searchTitle = searchTerm ? ` (Filtered)` : ``;
-    const reportTitle = `Expense Ledger${filterTitle}${searchTitle}`;
-
-    if (format === 'pdf') downloadPDFReport(reportData, columns, fileName, reportTitle);
-    else downloadExcelReport(reportData, columns, fileName, reportTitle);
+    const reportTitle = `Expense Ledger${filterCategory !== 'all' ? ` - ${filterCategory}` : ''}${searchTerm ? ` (Filtered)` : ''}`;
+    format === 'pdf' ? downloadPDFReport(reportData, columns, fileName, reportTitle) : downloadExcelReport(reportData, columns, fileName, reportTitle);
   };
 
-  const fetchLiveRate = async (index = null) => {
-    const isSingle = index === null;
-    const assetToCheck = isSingle ? formData.asset : formData.splitSources[index].asset;
-    
-    if (assetToCheck === baseCurrency) return;
-    setIsFetchingRate(isSingle ? 'single' : index);
-    
-    try {
-      const fiatRes = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
-      const fiatData = await fiatRes.json();
-      const usdToBase = fiatData.rates[baseCurrency] || 1;
-      let finalRate = 1;
-
-      if (availableFiats.includes(assetToCheck)) {
-        const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${assetToCheck}`);
-        const data = await res.json();
-        finalRate = data.rates[baseCurrency] || 1;
-      } else {
-        const upperSym = assetToCheck.toUpperCase();
-        const coinObj = fullDatabase.find(c => c.symbol === upperSym) || {};
-        const searchId = coinObj.id || assetToCheck.toLowerCase();
-        let priceUsd = null;
-
-        if (coinObj.fetchMode === 'contract' && coinObj.network && coinObj.contractAddress) {
-           try {
-              const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${coinObj.network}/tokens/${coinObj.contractAddress}`);
-              if (gtRes.ok) { const gtJson = await gtRes.json(); priceUsd = parseFloat(gtJson.data.attributes.price_usd); }
-           } catch(e) {}
-        } 
-        if (!priceUsd) {
-           try {
-               const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
-               const cgData = await cgRes.json();
-               if (cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
-           } catch(e) {}
-        }
-        if (!priceUsd) {
-            try {
-                if (['USDT', 'USDC', 'DAI'].includes(upperSym)) {
-                    priceUsd = 1.00;
-                } else {
-                    const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${upperSym}USDT`);
-                    if (bRes.ok) { const bData = await bRes.json(); priceUsd = parseFloat(bData.price); }
-                }
-            } catch(e) {}
-        }
-        const finalPrice = priceUsd || (coinObj?.fallbackPrice || 0);
-        finalRate = finalPrice * usdToBase;
-      }
-
-      if (isSingle) setFormData(prev => ({ ...prev, exchangeRate: finalRate.toFixed(6) }));
-      else {
-        const updatedSplits = [...formData.splitSources];
-        updatedSplits[index].exchangeRate = finalRate.toFixed(6);
-        setFormData(prev => ({ ...prev, splitSources: updatedSplits }));
-      }
-    } catch (error) { alert("Rate fetch failed."); } finally { setIsFetchingRate(false); }
-  };
-
-  const getBaseAmount = (amount, isForeign, rate) => (parseFloat(amount) || 0) * (isForeign ? (parseFloat(rate) || 1) : 1);
-  const getSplitTotalBase = () => formData.splitSources.reduce((acc, curr) => acc + getBaseAmount(curr.amount, curr.asset !== baseCurrency, curr.exchangeRate), 0);
-  const getKhataTotal = () => formData.khataSplits.reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
-
+  // 🚀 BULLETPROOF VAULT CREATOR
   const createVaultRecord = (sourceData, linkId, amountToDeduct) => {
     const isForeignAsset = sourceData.asset !== baseCurrency;
     const baseAmt = getBaseAmount(amountToDeduct, isForeignAsset, sourceData.exchangeRate);
+    const safeTitle = formData.title || 'Expense Entry';
+    const safeCat = formData.category || 'Other Expenses';
+    const safeDate = formData.date || getLocalDateTimeString();
     
     if (sourceData.vault === 'crypto') {
       return {
         collection: 'cryptoWalletLogs',
         data: {
-          type: 'out', coin: sourceData.asset, quantity: amountToDeduct, platform: sourceData.cryptoPlatform,
-          reason: `Expense: ${formData.category} (${formData.title}) ${formData.isKhataSplit ? '[Shared]' : ''}`,
-          referenceNo: linkId, date: formData.date, timestamp: new Date(formData.date).getTime(), linkedExpenseId: linkId
+          type: 'out', 
+          coin: sourceData.asset || 'USDT', 
+          quantity: amountToDeduct || 0, 
+          platform: sourceData.cryptoPlatform || 'Unknown Platform',
+          reason: `Expense: ${safeCat} (${safeTitle}) ${formData.isKhataSplit ? '[Shared]' : ''}`,
+          referenceNo: linkId, 
+          date: safeDate, 
+          timestamp: new Date(safeDate).getTime() || Date.now(), 
+          linkedExpenseId: linkId
         }
       };
     }
     
     return {
-      collection: sourceData.vault + 'Wallet',
+      collection: (sourceData.vault || 'bank') + 'Wallet',
       data: {
-        title: `Expense: ${formData.category} (${formData.title}) ${formData.isKhataSplit ? '[Shared]' : ''}`,
-        type: 'out', date: formData.date, timestamp: new Date(formData.date).getTime(),
-        currency: sourceData.asset, foreignAmount: amountToDeduct, exchangeRate: isForeignAsset ? parseFloat(sourceData.exchangeRate) : 1,
-        fee: 0, finalBaseAmount: baseAmt, isExpense: true, linkedExpenseId: linkId,
-        walletName: sourceData.subWallet || 'Default Wallet', bankName: sourceData.subWallet || 'Default Bank', 
-        transferType: 'Payment/Expense', walletCategory: sourceData.vault === 'online' ? 'Fiat Wallet' : 'Fiat Wallet'
+        title: `Expense: ${safeCat} (${safeTitle}) ${formData.isKhataSplit ? '[Shared]' : ''}`,
+        type: 'out', 
+        date: safeDate, 
+        timestamp: new Date(safeDate).getTime() || Date.now(),
+        currency: sourceData.asset || baseCurrency, 
+        foreignAmount: amountToDeduct || 0, 
+        exchangeRate: isForeignAsset ? (parseFloat(sourceData.exchangeRate) || 1) : 1,
+        fee: 0, 
+        finalBaseAmount: baseAmt || 0, 
+        isExpense: true, 
+        linkedExpenseId: linkId,
+        walletName: sourceData.subWallet || 'Default Wallet', 
+        bankName: sourceData.subWallet || 'Default Bank', 
+        transferType: 'Payment/Expense', 
+        walletCategory: sourceData.vault === 'online' ? 'Fiat Wallet' : 'Fiat Wallet'
       }
     };
   };
 
+  // 🚀 BULLETPROOF SAVE ENGINE
   const handleSaveEntry = async (e) => {
     e.preventDefault();
     if (!user) return alert("Please login first!");
 
     if (!formData.isSplit) {
-      if (formData.vault === 'crypto' && !formData.cryptoPlatform.trim()) return alert("Please specify the crypto platform.");
-      if ((formData.vault === 'bank' || formData.vault === 'online') && !formData.subWallet.trim()) return alert("Please specify the Bank or Wallet Name.");
+      if (formData.vault === 'crypto' && !(formData.cryptoPlatform || '').trim()) return alert("Please specify the crypto platform.");
+      if ((formData.vault === 'bank' || formData.vault === 'online') && !(formData.subWallet || '').trim()) return alert("Please specify the Bank or Wallet Name.");
       if (!formData.amount || parseFloat(formData.amount) <= 0) return alert("Amount must be greater than zero.");
     } else {
       for (let i = 0; i < formData.splitSources.length; i++) {
         const s = formData.splitSources[i];
         if (!s.amount || parseFloat(s.amount) <= 0) return alert(`Amount in Source ${i + 1} must be greater than zero.`);
-        if (s.vault === 'crypto' && !s.cryptoPlatform.trim()) return alert(`Please specify platform for Source ${i + 1}.`);
-        if ((s.vault === 'bank' || s.vault === 'online') && !s.subWallet.trim()) return alert(`Please specify Bank/Wallet for Source ${i + 1}.`);
+        if (s.vault === 'crypto' && !(s.cryptoPlatform || '').trim()) return alert(`Please specify platform for Source ${i + 1}.`);
+        if ((s.vault === 'bank' || s.vault === 'online') && !(s.subWallet || '').trim()) return alert(`Please specify Bank/Wallet for Source ${i + 1}.`);
       }
     }
 
     let totalKhataOwed = 0;
     if (formData.isKhataSplit) {
       totalKhataOwed = getKhataTotal();
-      const totalPaidAmount = formData.isSplit ? formData.splitSources.reduce((acc, curr)=>acc+(parseFloat(curr.amount)||0),0) : parseFloat(formData.amount);
+      const totalPaidAmount = formData.isSplit ? formData.splitSources.reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0) : (parseFloat(formData.amount) || 0);
       
       if (totalKhataOwed >= totalPaidAmount) {
          return alert("Total amount owed by friends cannot be greater than or equal to the total bill paid!");
       }
       for (let i = 0; i < formData.khataSplits.length; i++) {
-         if(!formData.khataSplits[i].partyName.trim() || !formData.khataSplits[i].amount) {
+         if(!(formData.khataSplits[i].partyName || '').trim() || !(formData.khataSplits[i].amount || 0)) {
             return alert("Please enter valid names and amounts for all split friends.");
          }
       }
     }
 
     setIsSaving(true);
-    const timestamp = editingId ? expenses.find(i => i.id === editingId)?.timestamp : new Date(formData.date).getTime();
+    
+    // SAFE TIMESTAMP & ID GENERATION
+    const oldExp = editingId ? expenses.find(i => i.id === editingId) : null;
+    const safeDate = formData.date || getLocalDateTimeString();
+    const timestamp = oldExp?.timestamp || new Date(safeDate).getTime() || Date.now();
     const linkId = formData.linkedExpenseId || `EXP_${timestamp}_${Math.floor(Math.random() * 1000)}`;
 
-    const totalVaultDeductionBase = formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, formData.asset !== baseCurrency, formData.exchangeRate);
-    const totalKhataOwedBase = formData.isKhataSplit ? getBaseAmount(totalKhataOwed, formData.asset !== baseCurrency, formData.exchangeRate) : 0;
-    const personalNetExpenseBase = totalVaultDeductionBase - totalKhataOwedBase;
+    // SAFE MATH
+    const totalVaultDeductionBase = Number(formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, formData.asset !== baseCurrency, formData.exchangeRate)) || 0;
+    const totalKhataOwedBase = Number(formData.isKhataSplit ? getBaseAmount(totalKhataOwed, formData.asset !== baseCurrency, formData.exchangeRate) : 0) || 0;
+    const personalNetExpenseBase = Number(totalVaultDeductionBase - totalKhataOwedBase) || 0;
 
+    // STERILIZED RECORD OBJECT (No undefined fields allowed in Firebase)
     const expenseRecord = {
-      title: formData.title, category: formData.category,
-      asset: formData.isSplit ? 'Multiple' : formData.asset,
-      amount: formData.isSplit ? totalVaultDeductionBase : parseFloat(formData.amount), 
-      exchangeRate: formData.isSplit ? 1 : (formData.asset !== baseCurrency ? parseFloat(formData.exchangeRate) : 1),
-      finalBaseAmount: personalNetExpenseBase, totalPaidFromVault: totalVaultDeductionBase, friendsShare: totalKhataOwedBase, 
-      date: formData.date, timestamp, linkedExpenseId: linkId, isSplit: formData.isSplit,
-      vault: formData.isSplit ? 'split' : formData.vault,
-      subWallet: !formData.isSplit && (formData.vault === 'bank' || formData.vault === 'online') ? formData.subWallet : '', 
-      cryptoPlatform: !formData.isSplit && formData.vault === 'crypto' ? formData.cryptoPlatform : '', 
-      splitDetails: formData.isSplit ? formData.splitSources.map(s => ({
-        vault: s.vault, subWallet: s.subWallet, asset: s.asset, amount: parseFloat(s.amount),
-        cryptoPlatform: s.vault === 'crypto' ? s.cryptoPlatform : '', exchangeRate: parseFloat(s.exchangeRate)
+      title: formData.title || 'Expense', 
+      category: formData.category || 'Other Expenses', 
+      asset: formData.isSplit ? 'Multiple' : (formData.asset || baseCurrency),
+      amount: formData.isSplit ? totalVaultDeductionBase : (parseFloat(formData.amount) || 0), 
+      exchangeRate: formData.isSplit ? 1 : (formData.asset !== baseCurrency ? (parseFloat(formData.exchangeRate) || 1) : 1),
+      finalBaseAmount: personalNetExpenseBase, 
+      totalPaidFromVault: totalVaultDeductionBase, 
+      friendsShare: totalKhataOwedBase, 
+      date: safeDate, 
+      timestamp, 
+      linkedExpenseId: linkId, 
+      isSplit: formData.isSplit || false,
+      vault: formData.isSplit ? 'split' : (formData.vault || 'bank'),
+      subWallet: !formData.isSplit && (formData.vault === 'bank' || formData.vault === 'online') ? (formData.subWallet || '') : '', 
+      cryptoPlatform: !formData.isSplit && formData.vault === 'crypto' ? (formData.cryptoPlatform || '') : '', 
+      splitDetails: formData.isSplit ? formData.splitSources.map(s => ({ 
+        vault: s.vault || 'bank', 
+        subWallet: s.subWallet || '', 
+        asset: s.asset || baseCurrency, 
+        amount: parseFloat(s.amount) || 0, 
+        cryptoPlatform: s.vault === 'crypto' ? (s.cryptoPlatform || '') : '', 
+        exchangeRate: parseFloat(s.exchangeRate) || 1 
       })) : null,
-      khataDetails: formData.isKhataSplit ? formData.khataSplits : null
+      khataDetails: formData.isKhataSplit ? formData.khataSplits.map(k => ({
+        partyName: k.partyName || '',
+        amount: parseFloat(k.amount) || 0
+      })) : null
     };
 
     try {
       if (editingId) {
         if (formData.isSynced) {
-            await updateDoc(doc(db, "users", user.uid, "expenseLogs", editingId), { subWallet: formData.subWallet, vault: formData.vault });
+            await updateDoc(doc(db, "users", user.uid, "expenseLogs", editingId), { 
+              subWallet: formData.subWallet || '', 
+              vault: formData.vault || 'bank' 
+            });
             const vaults = ['bankWallet', 'onlineWallet'];
             for (const v of vaults) {
-               if(linkId) {
-                 const q = query(collection(db, "users", user.uid, v), where("linkedExpenseId", "==", linkId));
-                 const snap = await getDocs(q);
-                 snap.forEach(async (d) => await updateDoc(doc(db, "users", user.uid, v, d.id), { walletName: formData.subWallet, bankName: formData.subWallet }));
-               }
+               const q = query(collection(db, "users", user.uid, v), where("linkedExpenseId", "==", linkId));
+               const snap = await getDocs(q);
+               const updatePromises = snap.docs.map(d => updateDoc(doc(db, "users", user.uid, v, d.id), { walletName: formData.subWallet || '', bankName: formData.subWallet || '' }));
+               await Promise.all(updatePromises);
             }
         } else {
+            // SEQUENTIAL SAFE DELETION
             const vaults = ['cashWallet', 'bankWallet', 'onlineWallet', 'cryptoWalletLogs'];
             for (const v of vaults) {
-               if(linkId) {
-                 const q = query(collection(db, "users", user.uid, v), where("linkedExpenseId", "==", linkId));
-                 const snap = await getDocs(q);
-                 snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, v, d.id)));
-               }
+               const q = query(collection(db, "users", user.uid, v), where("linkedExpenseId", "==", linkId));
+               const snap = await getDocs(q);
+               const deletePromises = snap.docs.map(d => deleteDoc(doc(db, "users", user.uid, v, d.id)));
+               await Promise.all(deletePromises);
             }
             
             const partiesSnap = await getDocs(collection(db, "users", user.uid, "parties"));
             for (const pDoc of partiesSnap.docs) {
                const lQuery = query(collection(db, "users", user.uid, "parties", pDoc.id, "ledger"), where("linkId", "==", linkId));
                const lSnap = await getDocs(lQuery);
-               lSnap.forEach(async (ld) => {
+               
+               for (const ld of lSnap.docs) {
                    const lData = ld.data();
                    const currentPartySnap = await getDoc(doc(db, "users", user.uid, "parties", pDoc.id));
                    if (currentPartySnap.exists()) {
-                       const newBal = currentPartySnap.data().netBalance - lData.baseAmount;
-                       await updateDoc(doc(db, "users", user.uid, "parties", pDoc.id), { netBalance: newBal, status: newBal === 0 ? 'settled' : 'active' });
+                       const newBal = Number(currentPartySnap.data().netBalance || 0) - Number(lData.baseAmount || 0);
+                       await updateDoc(doc(db, "users", user.uid, "parties", pDoc.id), { 
+                         netBalance: newBal, 
+                         status: newBal === 0 ? 'settled' : 'active' 
+                       });
                    }
                    await deleteDoc(doc(db, "users", user.uid, "parties", pDoc.id, "ledger", ld.id));
-               });
+               }
             }
 
             await updateDoc(doc(db, "users", user.uid, "expenseLogs", editingId), expenseRecord);
             
             if (formData.isSplit) {
               for (let s of formData.splitSources) {
-                const rec = createVaultRecord(s, linkId, parseFloat(s.amount));
+                const rec = createVaultRecord(s, linkId, parseFloat(s.amount) || 0);
                 await addDoc(collection(db, "users", user.uid, rec.collection), rec.data);
               }
             } else {
-              const singleRec = createVaultRecord({ vault: formData.vault, subWallet: formData.subWallet, asset: formData.asset, exchangeRate: formData.exchangeRate, cryptoPlatform: formData.cryptoPlatform }, linkId, parseFloat(formData.amount));
+              const singleRec = createVaultRecord({ 
+                vault: formData.vault, subWallet: formData.subWallet, asset: formData.asset, 
+                exchangeRate: formData.exchangeRate, cryptoPlatform: formData.cryptoPlatform 
+              }, linkId, parseFloat(formData.amount) || 0);
               await addDoc(collection(db, "users", user.uid, singleRec.collection), singleRec.data);
             }
 
@@ -433,47 +470,52 @@ const ExpenseTracker = () => {
                const existingPartiesDocs = freshPartiesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
                for (let ks of formData.khataSplits) {
-                  const partyName = ks.partyName.trim();
-                  const amountOwedBase = getBaseAmount(ks.amount, formData.asset !== baseCurrency, formData.exchangeRate);
+                  const partyName = (ks.partyName || '').trim();
+                  if (!partyName) continue; // Skip invalid entries
                   
-                  const existingParty = existingPartiesDocs.find(p => p.name.toLowerCase() === partyName.toLowerCase());
+                  const amountOwedBase = getBaseAmount(ks.amount, formData.asset !== baseCurrency, formData.exchangeRate) || 0;
+                  const existingParty = existingPartiesDocs.find(p => (p.name || '').toLowerCase() === partyName.toLowerCase());
                   let partyId = '';
 
                   if (existingParty) {
                      partyId = existingParty.id;
-                     await updateDoc(doc(db, "users", user.uid, "parties", partyId), {
-                        netBalance: existingParty.netBalance + amountOwedBase,
-                        status: (existingParty.netBalance + amountOwedBase) === 0 ? 'settled' : 'active'
+                     const newNetBal = Number(existingParty.netBalance || 0) + amountOwedBase;
+                     await updateDoc(doc(db, "users", user.uid, "parties", partyId), { 
+                       netBalance: newNetBal, 
+                       status: newNetBal === 0 ? 'settled' : 'active' 
                      });
                   } else {
-                     const newPartyRef = await addDoc(collection(db, "users", user.uid, "parties"), {
-                        name: partyName, accountType: 'casual', netBalance: amountOwedBase,
-                        baseCurrency: baseCurrency, createdAt: timestamp, status: 'active'
+                     const newPartyRef = await addDoc(collection(db, "users", user.uid, "parties"), { 
+                       name: partyName, accountType: 'casual', netBalance: amountOwedBase, 
+                       baseCurrency: baseCurrency, createdAt: timestamp, status: 'active' 
                      });
                      partyId = newPartyRef.id;
                   }
 
-                  await addDoc(collection(db, "users", user.uid, "parties", partyId, "ledger"), {
-                     type: 'give', amount: parseFloat(ks.amount),
-                     currency: formData.isSplit ? baseCurrency : formData.asset,
-                     exchangeRate: formData.isSplit ? 1 : formData.exchangeRate,
-                     baseAmount: amountOwedBase,
-                     note: `Shared Bill: ${formData.title} (${formData.category})`,
-                     date: formData.date, timestamp, linkId: linkId
+                  await addDoc(collection(db, "users", user.uid, "parties", partyId, "ledger"), { 
+                    type: 'give', amount: parseFloat(ks.amount) || 0, 
+                    currency: formData.isSplit ? baseCurrency : (formData.asset || baseCurrency), 
+                    exchangeRate: formData.isSplit ? 1 : (parseFloat(formData.exchangeRate) || 1), 
+                    baseAmount: amountOwedBase, note: `Shared Bill: ${formData.title || 'Unknown'} (${formData.category || 'Other'})`, 
+                    date: safeDate, timestamp, linkId: linkId 
                   });
                }
             }
         }
       } else {
+        // NEW ENTRY
         await addDoc(collection(db, "users", user.uid, "expenseLogs"), expenseRecord);
         
         if (formData.isSplit) {
-          for (let s of formData.splitSources) {
-            const rec = createVaultRecord(s, linkId, parseFloat(s.amount));
-            await addDoc(collection(db, "users", user.uid, rec.collection), rec.data);
+          for (let s of formData.splitSources) { 
+            const rec = createVaultRecord(s, linkId, parseFloat(s.amount) || 0); 
+            await addDoc(collection(db, "users", user.uid, rec.collection), rec.data); 
           }
         } else {
-          const singleRec = createVaultRecord({ vault: formData.vault, subWallet: formData.subWallet, asset: formData.asset, exchangeRate: formData.exchangeRate, cryptoPlatform: formData.cryptoPlatform }, linkId, parseFloat(formData.amount));
+          const singleRec = createVaultRecord({ 
+            vault: formData.vault, subWallet: formData.subWallet, asset: formData.asset, 
+            exchangeRate: formData.exchangeRate, cryptoPlatform: formData.cryptoPlatform 
+          }, linkId, parseFloat(formData.amount) || 0);
           await addDoc(collection(db, "users", user.uid, singleRec.collection), singleRec.data);
         }
 
@@ -482,39 +524,45 @@ const ExpenseTracker = () => {
            const existingPartiesDocs = partiesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
            for (let ks of formData.khataSplits) {
-              const partyName = ks.partyName.trim();
-              const amountOwedBase = getBaseAmount(ks.amount, formData.asset !== baseCurrency, formData.exchangeRate);
+              const partyName = (ks.partyName || '').trim();
+              if (!partyName) continue;
               
-              const existingParty = existingPartiesDocs.find(p => p.name.toLowerCase() === partyName.toLowerCase());
+              const amountOwedBase = getBaseAmount(ks.amount, formData.asset !== baseCurrency, formData.exchangeRate) || 0;
+              const existingParty = existingPartiesDocs.find(p => (p.name || '').toLowerCase() === partyName.toLowerCase());
               let partyId = '';
 
               if (existingParty) {
                  partyId = existingParty.id;
-                 await updateDoc(doc(db, "users", user.uid, "parties", partyId), {
-                    netBalance: existingParty.netBalance + amountOwedBase,
-                    status: (existingParty.netBalance + amountOwedBase) === 0 ? 'settled' : 'active'
+                 const newNetBal = Number(existingParty.netBalance || 0) + amountOwedBase;
+                 await updateDoc(doc(db, "users", user.uid, "parties", partyId), { 
+                   netBalance: newNetBal, 
+                   status: newNetBal === 0 ? 'settled' : 'active' 
                  });
               } else {
-                 const newPartyRef = await addDoc(collection(db, "users", user.uid, "parties"), {
-                    name: partyName, accountType: 'casual', netBalance: amountOwedBase,
-                    baseCurrency: baseCurrency, createdAt: timestamp, status: 'active'
+                 const newPartyRef = await addDoc(collection(db, "users", user.uid, "parties"), { 
+                   name: partyName, accountType: 'casual', netBalance: amountOwedBase, 
+                   baseCurrency: baseCurrency, createdAt: timestamp, status: 'active' 
                  });
                  partyId = newPartyRef.id;
               }
 
-              await addDoc(collection(db, "users", user.uid, "parties", partyId, "ledger"), {
-                 type: 'give', amount: parseFloat(ks.amount),
-                 currency: formData.isSplit ? baseCurrency : formData.asset,
-                 exchangeRate: formData.isSplit ? 1 : formData.exchangeRate,
-                 baseAmount: amountOwedBase,
-                 note: `Shared Bill: ${formData.title} (${formData.category})`,
-                 date: formData.date, timestamp, linkId: linkId
+              await addDoc(collection(db, "users", user.uid, "parties", partyId, "ledger"), { 
+                type: 'give', amount: parseFloat(ks.amount) || 0, 
+                currency: formData.isSplit ? baseCurrency : (formData.asset || baseCurrency), 
+                exchangeRate: formData.isSplit ? 1 : (parseFloat(formData.exchangeRate) || 1), 
+                baseAmount: amountOwedBase, note: `Shared Bill: ${formData.title || 'Unknown'} (${formData.category || 'Other'})`, 
+                date: safeDate, timestamp, linkId: linkId 
               });
            }
         }
       }
       closeModal();
-    } catch (error) { alert("Failed to save expense log."); } finally { setIsSaving(false); }
+    } catch (error) { 
+      console.error(error); // Logs exact error for debugging
+      alert("System Error: Failed to save expense log securely."); 
+    } finally { 
+      setIsSaving(false); 
+    }
   };
 
   const initiateDelete = (rec) => { setDeleteContext(rec); setPinInput(''); setPinError(''); };
@@ -526,12 +574,16 @@ const ExpenseTracker = () => {
 
     try {
       const userDoc = await getDoc(doc(db, "users", user.uid));
-      const userData = userDoc.data();
-      const hashedInput = await hashPIN(pinInput.trim());
-      const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin; 
+      const storedHash = userDoc.data()?.security?.pinHash || userDoc.data()?.securityPin || userDoc.data()?.pin; 
       
-      if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) {
+      const { valid, newHash } = await verifyPIN(pinInput.trim(), storedHash, user.uid);
+      
+      if (!valid) {
         setPinError("Incorrect PIN."); setIsVerifying(false); return;
+      }
+      
+      if (newHash) {
+        await setDoc(doc(db, "users", user.uid), { security: { pinHash: newHash } }, { merge: true });
       }
       
       await deleteDoc(doc(db, "users", user.uid, "expenseLogs", deleteContext.id));
@@ -541,7 +593,8 @@ const ExpenseTracker = () => {
         for (const v of vaults) {
           const q = query(collection(db, "users", user.uid, v), where("linkedExpenseId", "==", deleteContext.linkedExpenseId));
           const snap = await getDocs(q);
-          snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, v, d.id)));
+          const delPromises = snap.docs.map(d => deleteDoc(doc(db, "users", user.uid, v, d.id)));
+          await Promise.all(delPromises);
         }
 
         const partiesSnap = await getDocs(collection(db, "users", user.uid, "parties"));
@@ -549,15 +602,18 @@ const ExpenseTracker = () => {
            const lQuery = query(collection(db, "users", user.uid, "parties", pDoc.id, "ledger"), where("linkId", "==", deleteContext.linkedExpenseId));
            const lSnap = await getDocs(lQuery);
            
-           lSnap.forEach(async (ld) => {
+           for (const ld of lSnap.docs) {
                const lData = ld.data();
                const currentPartySnap = await getDoc(doc(db, "users", user.uid, "parties", pDoc.id));
                if (currentPartySnap.exists()) {
-                   const newBal = currentPartySnap.data().netBalance - lData.baseAmount;
-                   await updateDoc(doc(db, "users", user.uid, "parties", pDoc.id), { netBalance: newBal, status: newBal === 0 ? 'settled' : 'active' });
+                   const newBal = Number(currentPartySnap.data().netBalance || 0) - Number(lData.baseAmount || 0);
+                   await updateDoc(doc(db, "users", user.uid, "parties", pDoc.id), { 
+                     netBalance: newBal, 
+                     status: newBal === 0 ? 'settled' : 'active' 
+                   });
                }
                await deleteDoc(doc(db, "users", user.uid, "parties", pDoc.id, "ledger", ld.id));
-           });
+           }
         }
       }
       setDeleteContext(null); 
@@ -569,8 +625,8 @@ const ExpenseTracker = () => {
     const lastBank = existingBanks.length > 0 ? existingBanks[0] : '';
     setFormData({ 
       title: '', category: expenseCategories[0], date: getLocalDateTimeString(), linkedExpenseId: '', 
-      vault: 'bank', subWallet: lastBank, cryptoPlatform: cryptoPlatformsList[12], asset: baseCurrency, 
-      amount: '', exchangeRate: 1, isCustomSingle: false, isSynced: false,
+      vault: 'bank', subWallet: lastBank, cryptoPlatform: '', asset: baseCurrency, 
+      amount: '', exchangeRate: 1, isSynced: false,
       splitSources: [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ],
       isKhataSplit: false, khataSplits: [ { ...defaultKhataSplit } ]
     }); 
@@ -583,9 +639,9 @@ const ExpenseTracker = () => {
     let mappedSplits = [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ];
     if (isSplit && rec.splitDetails) {
       mappedSplits = rec.splitDetails.map(s => ({
-        vault: s.vault, subWallet: s.subWallet || s.bankName || s.walletName || '',
-        asset: s.asset || baseCurrency, amount: s.amount || '', cryptoPlatform: s.cryptoPlatform || cryptoPlatformsList[12], 
-        exchangeRate: s.exchangeRate || 1, isCustomPlatform: s.vault === 'crypto' && !cryptoPlatformsList.includes(s.cryptoPlatform)
+        vault: s.vault || 'bank', subWallet: s.subWallet || s.bankName || s.walletName || '',
+        asset: s.asset || baseCurrency, amount: s.amount || '', cryptoPlatform: s.cryptoPlatform || '', 
+        exchangeRate: s.exchangeRate || 1
       }));
     }
 
@@ -595,11 +651,10 @@ const ExpenseTracker = () => {
     const isSyncedEntry = !!(rec.linkedExpenseId && !rec.linkedExpenseId.startsWith('EXP_'));
 
     setFormData({
-      title: rec.title, category: rec.category, date: rec.date || getLocalDateTimeString(), linkedExpenseId: rec.linkedExpenseId || '', 
+      title: rec.title || '', category: rec.category || expenseCategories[0], date: rec.date || getLocalDateTimeString(), linkedExpenseId: rec.linkedExpenseId || '', 
       isSplit: isSplit, vault: isSplit ? 'bank' : (rec.vault || 'bank'), subWallet: isSplit ? '' : (rec.subWallet || rec.bankName || rec.walletName || ''),
       asset: isSplit ? baseCurrency : (rec.asset || baseCurrency), amount: isSplit ? '' : (rec.amount || ''),
-      exchangeRate: isSplit ? 1 : (rec.exchangeRate || 1), cryptoPlatform: isSplit ? cryptoPlatformsList[12] : (rec.cryptoPlatform || cryptoPlatformsList[12]),
-      isCustomSingle: !isSplit && rec.vault === 'crypto' && !cryptoPlatformsList.includes(rec.cryptoPlatform), 
+      exchangeRate: isSplit ? 1 : (rec.exchangeRate || 1), cryptoPlatform: isSplit ? '' : (rec.cryptoPlatform || ''), 
       splitSources: mappedSplits,
       isKhataSplit: isKhataSplit, khataSplits: mappedKhataSplits, 
       isSynced: isSyncedEntry 
@@ -619,10 +674,10 @@ const ExpenseTracker = () => {
   const updateSplit = (index, field, value) => {
     const updated = [...formData.splitSources]; updated[index][field] = value;
     if (field === 'vault') {
-        updated[index].asset = value === 'crypto' ? (availableCryptos[0] || 'BTC') : baseCurrency; updated[index].exchangeRate = 1;
+        const cList = availableCryptos.length > 0 ? availableCryptos : ['USDT'];
+        updated[index].asset = value === 'crypto' ? (cList[0] || 'USDT') : baseCurrency; updated[index].exchangeRate = 1;
         if(value === 'cash' || value === 'crypto') updated[index].subWallet = ''; 
     }
-    if (field === 'isCustomPlatform' && !value) { updated[index].cryptoPlatform = cryptoPlatformsList[12]; }
     setFormData({ ...formData, splitSources: updated });
   };
 
@@ -638,10 +693,10 @@ const ExpenseTracker = () => {
 
   return (
     <div className="w-full h-auto pb-24">
-      <div className="pt-8 md:pt-12 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 md:px-6">
+      <div className="pt-20 sm:pt-24 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* 🚀 PREMIUM HEADER & EXPORT */}
-        <div className="relative rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50 z-20">
+        <div className="relative rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 sm:p-8 lg:p-10 shadow-2xl border border-slate-700/50 z-20">
           <div className="absolute inset-0 overflow-hidden rounded-[2.5rem] pointer-events-none">
              <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(244,63,94,0.1),transparent_70%)]" />
              <div className="absolute right-0 top-0 w-64 h-64 bg-rose-500/5 rounded-full blur-3xl" />
@@ -650,23 +705,22 @@ const ExpenseTracker = () => {
           <div className="relative z-50 flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
               <div className="flex items-center gap-3 mb-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-rose-500 to-pink-600 rounded-2xl flex items-center justify-center shadow-lg">
+                <div className="w-12 h-12 bg-gradient-to-br from-rose-500 to-pink-600 rounded-2xl flex items-center justify-center shadow-lg shrink-0">
                   <HiOutlineShoppingCart size={24} className="text-white" />
                 </div>
-                <div>
-                  <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">Expense Tracker</h1>
-                  <p className="text-sm font-medium text-slate-400">Track expenses and split bills with friends</p>
+                <div className="min-w-0">
+                  <h1 className="text-2xl md:text-3xl lg:text-4xl font-black text-white tracking-tight truncate">Expense Tracker</h1>
+                  <p className="text-sm font-medium text-slate-400 truncate">Track expenses and split bills with friends</p>
                 </div>
               </div>
             </div>
             
             <div className="grid grid-cols-2 md:flex items-center gap-3 w-full md:w-auto mt-4 md:mt-0">
-              {/* 🚀 EXPORT MENU Z-INDEX FIX */}
               <div className="relative w-full md:w-auto z-[100]">
                 <button 
                   onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
                   onBlur={() => setTimeout(() => setIsExportMenuOpen(false), 200)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 shadow-sm"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 active:scale-95 shadow-sm"
                 >
                   <HiOutlineDownload size={16} /> Export
                 </button>
@@ -691,24 +745,24 @@ const ExpenseTracker = () => {
             </div>
           </div>
           
-          <div className="relative z-30 grid grid-cols-2 md:grid-cols-3 gap-3 mt-6">
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 overflow-hidden">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><HiOutlineTrendingDown size={14}/> Total Spent</p>
-              <p className="text-lg md:text-xl font-black text-white truncate" title={`${currencySymbol}${totalExpenseBase.toLocaleString()}`}>{currencySymbol}{(Number(totalExpenseBase) || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+          <div className="relative z-30 grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 mt-6">
+            <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/10 overflow-hidden">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1"><HiOutlineTrendingDown size={14}/> Total Spent</p>
+              <p className="text-xl sm:text-2xl font-black text-white truncate" title={`${currencySymbol}${totalExpenseBase.toLocaleString()}`}>{currencySymbol}{(Number(totalExpenseBase) || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
             </div>
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 overflow-hidden">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><HiOutlineCalendar size={12}/> This Month</p>
-              <p className="text-lg md:text-xl font-black text-rose-400 truncate" title={`${currencySymbol}${thisMonthExpense.toLocaleString()}`}>{currencySymbol}{(Number(thisMonthExpense) || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+            <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/10 overflow-hidden">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1"><HiOutlineCalendar size={12}/> This Month</p>
+              <p className="text-xl sm:text-2xl font-black text-rose-400 truncate" title={`${currencySymbol}${thisMonthExpense.toLocaleString()}`}>{currencySymbol}{(Number(thisMonthExpense) || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
             </div>
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 col-span-2 md:col-span-1 overflow-hidden">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><FaTags size={12}/> Total Entries</p>
-              <p className="text-lg md:text-xl font-black text-white truncate">{expenses.length}</p>
+            <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/10 col-span-2 md:col-span-1 overflow-hidden">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1"><FaTags size={12}/> Total Entries</p>
+              <p className="text-xl sm:text-2xl font-black text-white truncate">{expenses.length}</p>
             </div>
           </div>
         </div>
 
         {/* Search & Filter */}
-        <div className="flex flex-col md:flex-row gap-3 sm:gap-4 bg-white dark:bg-slate-900 p-3 sm:p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 bg-white dark:bg-slate-900 p-3 sm:p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="relative flex-1">
             <HiOutlineSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
             <input 
@@ -720,7 +774,7 @@ const ExpenseTracker = () => {
           <div className="flex gap-2">
             <select 
               value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
-              className="w-full sm:w-auto px-4 py-3.5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-black text-xs sm:text-sm text-slate-700 dark:text-slate-300 outline-none focus:border-rose-500 cursor-pointer transition-all shadow-sm"
+              className="w-full sm:w-auto px-4 py-3.5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-black text-xs sm:text-sm text-slate-700 dark:text-slate-300 outline-none focus:border-rose-500 cursor-pointer transition-all shadow-sm appearance-none"
             >
               <option value="all">All Categories</option>
               {expenseCategories.map(c => <option key={c} value={c}>{c}</option>)}
@@ -753,7 +807,6 @@ const ExpenseTracker = () => {
             processedExpenses.map((month) => (
               <div key={month.monthName} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[1.5rem] md:rounded-[2rem] overflow-hidden shadow-sm">
                 
-                {/* Month Header */}
                 <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50">
                   <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-2.5">
                     <div className="p-2 bg-rose-100 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-lg">
@@ -785,9 +838,10 @@ const ExpenseTracker = () => {
                             <p className="text-base font-black text-rose-600 dark:text-rose-400 tracking-tight leading-none">
                               -{currencySymbol}{(Number(rec.finalBaseAmount) || 0).toLocaleString(undefined, {minimumFractionDigits: 0})}
                             </p>
-                            {rec.asset !== baseCurrency && (
+                            {rec.asset !== baseCurrency && !rec.isSplit && (
                               <p className="text-[9px] font-bold text-slate-500 mt-1">{Number(rec.amount || 0).toLocaleString()} {rec.asset}</p>
                             )}
+                            {rec.isSplit && <p className="text-[9px] font-bold text-slate-500 mt-1">Multiple Assets</p>}
                           </div>
                         </div>
 
@@ -870,8 +924,14 @@ const ExpenseTracker = () => {
                               </div>
                             </td>
                             <td className="p-4 text-right align-top">
-                              <p className="font-black text-slate-800 dark:text-slate-200 text-sm mt-1">{(Number(rec.amount) || 0).toLocaleString()} <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold ml-0.5">{rec.asset}</span></p>
-                              {rec.asset !== baseCurrency && <p className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-widest">Rate: {rec.exchangeRate}</p>}
+                              {rec.isSplit ? (
+                                <p className="font-bold text-slate-800 dark:text-slate-200 text-sm mt-1">Multiple</p>
+                              ) : (
+                                <>
+                                  <p className="font-black text-slate-800 dark:text-slate-200 text-sm mt-1">{(Number(rec.amount) || 0).toLocaleString()} <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold ml-0.5">{rec.asset}</span></p>
+                                  {rec.asset !== baseCurrency && <p className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-widest">Rate: {rec.exchangeRate}</p>}
+                                </>
+                              )}
                             </td>
                             <td className="p-4 text-right align-top">
                               <p className="text-base font-black text-rose-600 dark:text-rose-400 tracking-tight mt-0.5">
@@ -901,7 +961,6 @@ const ExpenseTracker = () => {
                   </table>
                 </div>
 
-                {/* Footer Closing Balance */}
                 <div className="px-4 sm:px-6 py-4 sm:py-5 border-t border-slate-200 dark:border-slate-800 flex justify-end bg-slate-50/50 dark:bg-slate-800/30">
                   <div className="text-right bg-white dark:bg-slate-900 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
                     <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Closing Flow</p>
@@ -916,7 +975,7 @@ const ExpenseTracker = () => {
         </div>
       </div>
 
-      {/* 🚀 Add/Edit Modal (Unchanged Backend Logic, Polished Mobile UI) */}
+      {/* 🚀 ADD/EDIT MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90dvh] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-300 dark:border-slate-700">
@@ -934,7 +993,7 @@ const ExpenseTracker = () => {
             <form onSubmit={handleSaveEntry} className="p-4 sm:p-8 space-y-5 sm:space-y-6 flex-1 overflow-y-auto custom-scrollbar">
               {formData.isSynced && (
                 <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 p-4 rounded-xl text-xs font-bold leading-relaxed border border-amber-300 dark:border-amber-500/30 shadow-sm">
-                  <p className="flex items-center gap-1 mb-1"><HiOutlineExclamationCircle size={16}/> Auto-Synced Entry</p>
+                  <p className="flex items-center gap-1.5 mb-1.5 font-black"><HiOutlineExclamationCircle size={16}/> Auto-Synced Entry</p>
                   This entry is securely linked to a bill or system transaction. To maintain accuracy, you can only update the <span className="underline decoration-amber-400">Deduction Vault</span> here.
                 </div>
               )}
@@ -991,7 +1050,7 @@ const ExpenseTracker = () => {
                             setFormData({
                               ...formData, vault: v, 
                               asset: v === 'crypto' ? cList[0] : baseCurrency, 
-                              exchangeRate: 1, subWallet: ''
+                              exchangeRate: 1, subWallet: '', cryptoPlatform: ''
                             });
                           }} 
                           className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 appearance-none cursor-pointer transition-colors shadow-sm"
@@ -1020,20 +1079,14 @@ const ExpenseTracker = () => {
                     
                     {formData.vault === 'crypto' && (
                       <div className="space-y-1.5 animate-in fade-in">
-                        <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Platform *</label>
-                        {formData.isCustomSingle ? (
-                          <div className="flex gap-2">
-                            <input type="text" required value={formData.cryptoPlatform} onChange={(e)=>setFormData({...formData, cryptoPlatform: e.target.value})} className="flex-1 p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-black text-sm text-slate-900 dark:text-white outline-none shadow-sm transition-colors focus:ring-2 focus:ring-rose-500/50" />
-                            <button type="button" onClick={()=>setFormData({...formData, isCustomSingle: false, cryptoPlatform: cryptoPlatformsList[0]})} className="p-4 bg-slate-100 dark:bg-slate-800 rounded-xl text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors border border-slate-200 dark:border-slate-700 shadow-sm active:scale-95"><HiOutlineX size={20}/></button>
-                          </div>
-                        ) : (
-                          <div className="relative">
-                            <select value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} onChange={(e) => { if(e.target.value==='CUSTOM'){setFormData({...formData, isCustomSingle: true, cryptoPlatform: ''})} else {setFormData({...formData, cryptoPlatform: e.target.value})} }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-black text-sm text-slate-900 dark:text-white outline-none cursor-pointer appearance-none shadow-sm transition-colors focus:ring-2 focus:ring-rose-500/50">
-                              {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}<option value="CUSTOM">✨ Custom Platform</option>
-                            </select>
-                            <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
-                          </div>
-                        )}
+                        <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Crypto Platform *</label>
+                        <input 
+                          type="text" list="crypto-platforms-list" required value={formData.cryptoPlatform} 
+                          onChange={(e) => setFormData({...formData, cryptoPlatform: e.target.value})} 
+                          placeholder="Platform Name (e.g. Binance)"
+                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors shadow-sm"
+                        />
+                        <datalist id="crypto-platforms-list">{existingCryptoPlatforms.map(p => <option key={p} value={p} />)}</datalist>
                       </div>
                     )}
                   </div>
@@ -1073,15 +1126,15 @@ const ExpenseTracker = () => {
                   </div>
 
                   {formData.asset !== baseCurrency && (
-                    <div className="p-4 bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800/50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 shadow-sm animate-in fade-in">
+                    <div className="p-4 sm:p-5 bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800/50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 shadow-sm animate-in fade-in">
                       <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 shrink-0"><FaExchangeAlt className="text-rose-500" /> Rate:</span>
                       <div className="flex items-center gap-2 flex-1 w-full">
-                        <span className="text-xs sm:text-sm font-black text-slate-700 dark:text-slate-300 whitespace-nowrap">1 {formData.asset} =</span>
+                        <span className="text-[10px] sm:text-sm font-black text-slate-700 dark:text-slate-300 whitespace-nowrap">1 {formData.asset} =</span>
                         <input disabled={formData.isSynced} type="number" step="any" required value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} className="flex-1 w-full min-w-0 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none disabled:opacity-60 shadow-sm focus:border-rose-500 transition-colors text-center" />
-                        <span className="text-xs sm:text-sm font-black text-slate-700 dark:text-slate-300 whitespace-nowrap">{baseCurrency}</span>
+                        <span className="text-[10px] sm:text-sm font-black text-slate-700 dark:text-slate-300 whitespace-nowrap">{baseCurrency}</span>
                       </div>
-                      <button type="button" onClick={()=>fetchLiveRate(null)} disabled={isFetchingRate === 'single' || formData.isSynced} className="w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center justify-center gap-1.5 shadow-sm transition-colors shrink-0 active:scale-95">
-                        <HiOutlineRefresh className={isFetchingRate === 'single' ? "animate-spin" : ""} size={14} /> Live
+                      <button type="button" onClick={()=>fetchLiveRate(null)} disabled={isFetchingRate === 'single' || formData.isSynced} className="w-full sm:w-auto bg-rose-600 hover:bg-rose-700 text-white px-4 py-3 sm:py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center justify-center gap-1.5 shadow-sm transition-colors shrink-0 active:scale-95">
+                        <HiOutlineRefresh className={isFetchingRate === 'single' ? "animate-spin" : ""} size={14} /> Live Rate
                       </button>
                     </div>
                   )}
@@ -1114,12 +1167,7 @@ const ExpenseTracker = () => {
                         {split.vault === 'crypto' && (
                           <div className="space-y-1.5 animate-in fade-in">
                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Platform</label>
-                            <div className="relative">
-                              <select value={split.cryptoPlatform} onChange={(e) => updateSplit(index, 'cryptoPlatform', e.target.value)} className="w-full p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl sm:rounded-2xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors focus:ring-2 focus:ring-amber-500/50 appearance-none">
-                                {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
-                              </select>
-                              <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18} />
-                            </div>
+                            <input type="text" list="crypto-platforms-list" required value={split.cryptoPlatform} onChange={(e) => updateSplit(index, 'cryptoPlatform', e.target.value)} placeholder="e.g. Binance" className="w-full p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl sm:rounded-2xl font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400 transition-colors focus:ring-2 focus:ring-amber-500/50" />
                           </div>
                         )}
                         <div className="space-y-1.5">
@@ -1135,19 +1183,19 @@ const ExpenseTracker = () => {
                       </div>
                       
                       {split.asset !== baseCurrency && (
-                        <div className="p-3 sm:p-4 bg-white dark:bg-slate-800 border border-amber-200 dark:border-amber-800/50 rounded-xl flex flex-col md:flex-row items-center justify-between gap-3 shadow-sm">
+                        <div className="p-3 sm:p-4 bg-white dark:bg-slate-800 border border-amber-200 dark:border-amber-800/50 rounded-xl flex flex-col md:flex-row items-center justify-between gap-3 shadow-sm relative z-10 animate-in fade-in">
                           <span className="text-[10px] sm:text-xs font-black text-slate-700 dark:text-slate-400 flex items-center gap-2 shrink-0"><FaExchangeAlt className="text-amber-500"/> Rate:</span>
                           <div className="flex items-center gap-2 flex-1 w-full">
                             <span className="text-[10px] sm:text-sm font-black text-slate-700 dark:text-slate-400 whitespace-nowrap">1 {split.asset} =</span>
-                            <input type="number" step="any" required value={split.exchangeRate} onChange={(e) => updateSplit(index, 'exchangeRate', e.target.value)} className="flex-1 w-full min-w-0 p-2 sm:p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-bold text-slate-900 dark:text-white outline-none shadow-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-500/50 transition-colors" />
+                            <input type="number" step="any" required value={split.exchangeRate} onChange={(e) => updateSplit(index, 'exchangeRate', e.target.value)} className="flex-1 w-full min-w-0 p-2 sm:p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-bold text-slate-900 dark:text-white outline-none shadow-sm focus:ring-2 focus:ring-amber-500/50 transition-colors text-center" />
                             <span className="text-[10px] sm:text-sm font-black text-slate-700 dark:text-slate-400 whitespace-nowrap">{baseCurrency}</span>
                           </div>
-                          <button type="button" onClick={()=>fetchLiveRate(index)} disabled={isFetchingRate === index} className="w-full md:w-auto text-[10px] font-black bg-amber-500 hover:bg-amber-600 text-white px-3 py-2.5 rounded-lg flex items-center justify-center gap-1 uppercase tracking-widest transition-colors shadow-sm shrink-0 active:scale-95"><HiOutlineRefresh className={isFetchingRate === index ? "animate-spin" : ""} size={14}/> Live Rate</button>
+                          <button type="button" onClick={()=>fetchLiveRate(index)} disabled={isFetchingRate === index} className="w-full md:w-auto text-[10px] font-black bg-amber-500 hover:bg-amber-600 text-white px-3 py-2.5 sm:py-2 rounded-lg flex items-center justify-center gap-1 uppercase tracking-widest transition-colors shadow-sm shrink-0 active:scale-95"><HiOutlineRefresh className={isFetchingRate === index ? "animate-spin" : ""} size={14}/> Live Rate</button>
                         </div>
                       )}
                     </div>
                   ))}
-                  <button type="button" onClick={addSplitSource} className="w-full py-3.5 sm:py-4 border-2 border-dashed border-amber-300 dark:border-amber-700/50 text-amber-700 dark:text-amber-500 rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors flex items-center justify-center gap-2 active:scale-95 shadow-sm"><HiOutlinePlus size={18}/> Add Payment Source</button>
+                  <button type="button" onClick={addSplitSource} className="w-full py-3.5 sm:py-4 border-2 border-dashed border-amber-300 dark:border-amber-700/50 text-amber-600 dark:text-amber-500 rounded-2xl sm:rounded-[2rem] font-black text-[10px] sm:text-xs uppercase tracking-widest hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors flex items-center justify-center gap-2 active:scale-95 shadow-sm"><HiOutlinePlus size={18}/> Add Payment Source</button>
                 </div>
               )}
 
@@ -1209,19 +1257,19 @@ const ExpenseTracker = () => {
                     <input 
                       disabled={formData.isSynced} type="datetime-local" required value={formData.date} 
                       onChange={(e) => setFormData({...formData, date: e.target.value})} 
-                      className="w-full mt-1.5 p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none disabled:opacity-60 shadow-sm transition-colors focus:border-rose-500 focus:ring-2 focus:ring-rose-500/50 cursor-pointer" 
+                      className="block w-full mt-1.5 p-3.5 sm:p-4 bg-white dark:bg-slate-900 font-bold text-sm text-slate-900 dark:text-white outline-none cursor-pointer disabled:opacity-60 border border-slate-200 dark:border-slate-700 transition-colors shadow-sm focus:border-rose-500 focus:ring-2 focus:ring-rose-500/50 rounded-xl" 
                     />
-                    <p className="text-[9px] sm:text-[10px] text-rose-600 dark:text-rose-400 mt-2 ml-1 font-bold">{formatGlobalDate ? formatGlobalDate(formData.date, 'full') : ''}</p>
+                    <p className="text-[9px] sm:text-[10px] text-rose-600 dark:text-rose-400 mt-2 ml-1 font-bold">{formatGlobalDate && formData.date ? formatGlobalDate(formData.date.split('T')[0], 'full') : ''}</p>
                   </div>
                   
                   <div className="text-left sm:text-right w-full sm:w-auto sm:border-l border-slate-300 dark:border-slate-700 sm:pl-6">
-                    <p className="text-[9px] sm:text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Total Expense</p>
+                    <p className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Total Expense</p>
                     <p className="text-2xl sm:text-3xl md:text-4xl font-black text-rose-600 dark:text-rose-400 tracking-tight mt-1 truncate">
-                      -{currencySymbol}{(formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, formData.asset !== baseCurrency, formData.exchangeRate)).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                      -{currencySymbol}{(Number(formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, formData.asset !== baseCurrency, formData.exchangeRate)) || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                     </p>
                     {formData.isKhataSplit && (
                       <p className="text-[10px] sm:text-xs font-black text-blue-600 dark:text-blue-400 mt-2 bg-blue-50 dark:bg-blue-900/20 px-2 py-1.5 rounded-lg inline-block shadow-sm">
-                        Net Share: {currencySymbol}{Math.max(0, (formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, formData.asset !== baseCurrency, formData.exchangeRate)) - getBaseAmount(getKhataTotal(), formData.asset !== baseCurrency, formData.exchangeRate)).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                        Net Share: {currencySymbol}{Math.max(0, (Number(formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, formData.asset !== baseCurrency, formData.exchangeRate)) || 0) - (Number(getBaseAmount(getKhataTotal(), formData.asset !== baseCurrency, formData.exchangeRate)) || 0)).toLocaleString(undefined, {minimumFractionDigits: 2})}
                       </p>
                     )}
                   </div>

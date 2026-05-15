@@ -3,7 +3,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useAIVoice } from '../../hooks/useAIVoice'; 
 import { collection, addDoc, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDocs, where, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
-
+import { verifyPIN } from '../../utils/cryptoUtils';
 import { 
   HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
   HiOutlineCheckCircle, HiOutlineClock, HiOutlineTrendingUp,
@@ -15,14 +15,6 @@ import {
   FaTrophy, FaPiggyBank, FaStar, FaUniversity, FaMoneyBillWave, 
   FaLock, FaUnlockAlt, FaWallet, FaFlag, FaBullseye, FaRocket 
 } from 'react-icons/fa';
-
-// 🚀 SHA-256 hashing
-const hashPIN = async (pinCode) => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(pinCode);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-};
 
 const getLocalISOString = () => {
   const tzOffset = (new Date()).getTimezoneOffset() * 60000;
@@ -418,38 +410,55 @@ const Goals = () => {
   const initiateSecureDelete = (goal) => { setDeleteContext(goal); setPinInput(''); setPinError(''); };
 
   const executeSecureDelete = async (e) => {
-    e.preventDefault(); if (!pinInput.trim()) return setPinError("PIN required."); setIsVerifying(true); setPinError('');
-    try {
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      const hashedInput = await hashPIN(pinInput.trim());
-      const storedPin = userDoc.data()?.security?.pinHash || userDoc.data()?.securityPin || userDoc.data()?.pin; 
-      if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) { setPinError("Incorrect PIN!"); setIsVerifying(false); return; }
+  e.preventDefault(); 
+  if (!pinInput.trim()) return setPinError("PIN required."); 
+  setIsVerifying(true); 
+  setPinError('');
+  try {
+    const userDoc = await getDoc(doc(db, "users", user.uid));
+    const storedHash = userDoc.data()?.security?.pinHash || userDoc.data()?.securityPin || userDoc.data()?.pin;
+    
+    const { valid, newHash } = await verifyPIN(pinInput.trim(), storedHash, user.uid);
+    
+    if (!valid) {
+      setPinError("Incorrect PIN!");
+      setIsVerifying(false);
+      return;
+    }
+    
+    if (newHash) {
+      await setDoc(doc(db, "users", user.uid), { security: { pinHash: newHash } }, { merge: true });
+    }
 
-      const currentSavedAmount = deleteContext.currentSaved || 0;
-      await deleteDoc(doc(db, "users", user.uid, "savingsGoals", deleteContext.id));
+    const currentSavedAmount = deleteContext.currentSaved || 0;
+    await deleteDoc(doc(db, "users", user.uid, "savingsGoals", deleteContext.id));
 
-      if (currentSavedAmount > 0) {
-        const timestamp = new Date().getTime();
-        const refundId = `REFUND_CANCEL_${timestamp}`;
-        const formattedDate = new Date().toISOString().split('T')[0];
+    if (currentSavedAmount > 0) {
+      const timestamp = new Date().getTime();
+      const refundId = `REFUND_CANCEL_${timestamp}`;
+      const formattedDate = new Date().toISOString().split('T')[0];
 
-        await addDoc(collection(db, "users", user.uid, "bankWallet"), {
-          title: `Goal Refund: ${deleteContext.title}`, type: 'in', date: formattedDate, timestamp, currency: baseCurrency, foreignAmount: currentSavedAmount, exchangeRate: 1, finalBaseAmount: currentSavedAmount, fee: 0, isGoalLock: true, linkedIncomeId: refundId, walletName: 'Auto Refund', transferType: 'Refund/Reversal'
-        });
+      await addDoc(collection(db, "users", user.uid, "bankWallet"), {
+        title: `Goal Refund: ${deleteContext.title}`, type: 'in', date: formattedDate, timestamp, currency: baseCurrency, foreignAmount: currentSavedAmount, exchangeRate: 1, finalBaseAmount: currentSavedAmount, fee: 0, isGoalLock: true, linkedIncomeId: refundId, walletName: 'Auto Refund', transferType: 'Refund/Reversal'
+      });
 
-        await addDoc(collection(db, "users", user.uid, "incomeLogs"), {
-          title: `Goal Refund: ${deleteContext.title}`, category: "Other Income", vault: "bank", asset: baseCurrency, amount: currentSavedAmount, exchangeRate: 1, finalBaseAmount: currentSavedAmount, date: formattedDate, timestamp, linkedIncomeId: refundId,
-        });
-      }
+      await addDoc(collection(db, "users", user.uid, "incomeLogs"), {
+        title: `Goal Refund: ${deleteContext.title}`, category: "Other Income", vault: "bank", asset: baseCurrency, amount: currentSavedAmount, exchangeRate: 1, finalBaseAmount: currentSavedAmount, date: formattedDate, timestamp, linkedIncomeId: refundId,
+      });
+    }
 
-      for (let q of [{ col: "expenseLogs", field: "goalId" }, { col: "incomeLogs", field: "goalId" }, { col: "bankWallet", field: "goalId" }, { col: "cashWallet", field: "goalId" }, { col: "onlineWallet", field: "goalId" }]) {
-        const snaps = await getDocs(query(collection(db, "users", user.uid, q.col), where(q.field, "==", deleteContext.id)));
-        snaps.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, q.col, d.id)));
-      }
+    for (let q of [{ col: "expenseLogs", field: "goalId" }, { col: "incomeLogs", field: "goalId" }, { col: "bankWallet", field: "goalId" }, { col: "cashWallet", field: "goalId" }, { col: "onlineWallet", field: "goalId" }]) {
+      const snaps = await getDocs(query(collection(db, "users", user.uid, q.col), where(q.field, "==", deleteContext.id)));
+      snaps.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, q.col, d.id)));
+    }
 
-      setDeleteContext(null); 
-    } catch (error) { setPinError("System error during deletion."); } finally { setIsVerifying(false); }
-  };
+    setDeleteContext(null); 
+  } catch (error) { 
+    setPinError("System error during deletion."); 
+  } finally { 
+    setIsVerifying(false); 
+  }
+};
 
   const openEditModal = (goal) => {
     let editDateStr = goal.deadline || getLocalISOString();

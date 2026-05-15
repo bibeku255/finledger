@@ -16,7 +16,6 @@ import { FaBitcoin, FaCoins } from 'react-icons/fa';
 // ============================================
 // 🚀 PREMIUM TOAST NOTIFICATION SYSTEM
 // ============================================
-
 const ToastContext = React.createContext(null);
 
 const ToastProvider = ({ children }) => {
@@ -56,7 +55,6 @@ const useToast = () => { const context = React.useContext(ToastContext); if (!co
 // ============================================
 // 🚀 PREMIUM CONFIRMATION MODAL
 // ============================================
-
 const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, confirmText = 'Confirm', cancelText = 'Cancel', type = 'warning' }) => {
   if (!isOpen) return null;
   return (
@@ -81,10 +79,8 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, confirm
 };
 
 // ============================================
-// 🚀 CONSTANTS & CONFIG (CLEANED SCAM COINS)
+// 🚀 CONSTANTS & CONFIG
 // ============================================
-
-
 const MAX_COINS_TO_DISPLAY = 500; 
 
 const SUPPORTED_NETWORKS = [
@@ -99,23 +95,9 @@ const SUPPORTED_NETWORKS = [
 
 const BINANCE_SAFE_COINS = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE', 'TRX', 'LTC', 'BCH', 'ADA', 'XMR', 'XLM', 'DAI', 'ZEC', 'SHIB', 'SUI', 'TON', 'DOT', 'PEPE', 'NEAR', 'POL', 'ATOM', 'ARB', 'BONK', 'CAKE', 'XTZ', 'FLOKI', 'OP', 'TWT', 'BAT', 'DGB', 'KAVA', 'AVAX', 'MEME', 'DASH'];
 
-const defaultCryptoDatabase = [
-  { id: 'bitcoin', symbol: 'BTC', name: 'Bitcoin', logo: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png' },
-  { id: 'ethereum', symbol: 'ETH', name: 'Ethereum', logo: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png' },
-  { id: 'tether', symbol: 'USDT', name: 'Tether', logo: 'https://assets.coingecko.com/coins/images/325/large/Tether.png' },
-  { id: 'ripple', symbol: 'XRP', name: 'XRP', logo: 'https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png' },
-  { id: 'solana', symbol: 'SOL', name: 'Solana', logo: 'https://assets.coingecko.com/coins/images/4128/large/solana.png' },
-  { id: 'binancecoin', symbol: 'BNB', name: 'BNB', logo: 'https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png' },
-  { id: 'tron', symbol: 'TRX', name: 'TRON', logo: 'https://assets.coingecko.com/coins/images/1094/large/tron-logo.png' },
-  { id: 'dogecoin', symbol: 'DOGE', name: 'Dogecoin', logo: 'https://assets.coingecko.com/coins/images/5/large/dogecoin.png' },
-  { id: 'usd-coin', symbol: 'USDC', name: 'USD Coin', logo: 'https://assets.coingecko.com/coins/images/6319/large/usdc.png' },
-  { id: 'the-open-network', symbol: 'TON', name: 'Toncoin', logo: 'https://assets.coingecko.com/coins/images/17980/large/ton_symbol.png' }
-];
-
 // ============================================
 // 🚀 UTILITY FUNCTIONS
 // ============================================
-
 const sanitizeInput = (input) => {
   if (typeof input !== 'string') return '';
   return input.replace(/<script.*?>.*?<\/script>/gi, '').replace(/[<>]/g, '').replace(/javascript:/gi, '').trim().slice(0, 200);
@@ -133,27 +115,15 @@ const normalizeId = (id) => String(id || '').toLowerCase().trim();
 
 const normalizeSymbol = (symbol) => {
   if (!symbol) return '';
-  return symbol.toUpperCase()
-    .replace(/[^A-Z0-9]/g, '') 
-    .replace(/^WETH$/, 'ETH')
-    .replace(/^WBTC$/, 'BTC')
-    .replace(/^WMATIC$/, 'MATIC')
-    .trim();
+  return symbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
 };
 
 const normalizeName = (name) => {
   if (!name) return '';
-  return name.toLowerCase()
-    .replace(/[^a-z0-9\s]/g, '')
-    .replace(/\s+/g, ' ')
-    .replace(/wrapped\s+/i, '')
-    .replace(/\s+token$/i, '')
-    .replace(/\s+coin$/i, '')
-    .trim();
+  return name.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
 };
 
-let jupiterTokenMap = null;
-
+// Caching
 const getCache = (key) => {
   try {
     const item = localStorage.getItem(key);
@@ -180,13 +150,14 @@ const fetchWithRetry = async (url, options = {}, retries = 2) => {
       if (res.status !== 429) return res;
       if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
     } catch (e) {
-      if (e.name === 'AbortError') throw e; 
+      if (e.name === 'AbortError') throw e;
       if (i === retries) return null;
     }
   }
-  return null; 
+  return null;
 };
 
+// Logo generation
 const getTrustWalletLogo = (network, address) => {
   if (!network || !address) return null;
   const networkMap = { bsc: 'smartchain', eth: 'ethereum', polygon_pos: 'polygon', arbitrum: 'arbitrum', optimism: 'optimism', base: 'base', solana: 'solana' };
@@ -194,6 +165,8 @@ const getTrustWalletLogo = (network, address) => {
   if (!mapped) return null;
   return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${mapped}/assets/${address}/logo.png`;
 };
+
+let jupiterTokenMap = null;
 
 const fetchSolanaTokenMetadata = async (mintAddress, signal) => {
   const cacheKey = `meta_sol_${mintAddress}`;
@@ -206,10 +179,9 @@ const fetchSolanaTokenMetadata = async (mintAddress, signal) => {
       if (response && response.ok) {
         const data = await response.json();
         jupiterTokenMap = new Map(data.map(t => [t.address, t]));
-        setCache('jup_all_tokens', true, 60); 
+        setCache('jup_all_tokens', true, 60);
       }
     }
-    
     if (jupiterTokenMap) {
       const token = jupiterTokenMap.get(mintAddress);
       if (token) {
@@ -218,7 +190,6 @@ const fetchSolanaTokenMetadata = async (mintAddress, signal) => {
         return res;
       }
     }
-    
     const dexResponse = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`, { signal });
     if (dexResponse && dexResponse.ok) {
       const data = await dexResponse.json();
@@ -247,7 +218,7 @@ const fetchSolanaTokenPrice = async (mintAddress, signal) => {
       const data = await dexResponse.json();
       if (Array.isArray(data.pairs) && data.pairs.length > 0 && data.pairs[0]?.priceUsd) {
         const price = parseFloat(data.pairs[0].priceUsd);
-        setCache(cacheKey, price, 5); 
+        setCache(cacheKey, price, 5);
         return price;
       }
     }
@@ -274,11 +245,11 @@ const getAddressPlaceholder = (network) => network === 'solana' ? 'Solana mint a
 
 const getExplorerUrl = (network, address) => {
   const explorers = {
-    solana: `https://solscan.io/token/${address}`, 
+    solana: `https://solscan.io/token/${address}`,
     eth: `https://etherscan.io/token/${address}`,
-    bsc: `https://bscscan.com/token/${address}`, 
+    bsc: `https://bscscan.com/token/${address}`,
     polygon_pos: `https://polygonscan.com/token/${address}`,
-    arbitrum: `https://arbiscan.io/token/${address}`, 
+    arbitrum: `https://arbiscan.io/token/${address}`,
     optimism: `https://optimistic.etherscan.io/token/${address}`,
     base: `https://basescan.org/token/${address}`
   };
@@ -286,14 +257,12 @@ const getExplorerUrl = (network, address) => {
 };
 
 // ============================================
-// 🚀 API FETCHING FUNCTIONS
+// 🚀 API FETCHING FUNCTIONS (unchanged, but error propagation improved)
 // ============================================
-
 const fetchCoinGeckoCoins = async (page = 1, perPage = 250) => {
   try {
     const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${perPage}&page=${page}&sparkline=false&price_change_percentage=1h,24h`;
     const res = await fetchWithRetry(url);
-    
     if (res && res.ok) {
       const data = await res.json();
       return data.map(coin => ({
@@ -320,12 +289,9 @@ const fetchCoinGeckoCoins = async (page = 1, perPage = 250) => {
 
 const fetchCoinMarketCapCoins = async (limit = 300) => {
   try {
-    // Proxy URL: apni Vercel serverless function
     const params = `limit=${limit},sort=market_cap,sort_dir=desc,convert=USD`;
     const url = `/api/crypto?endpoint=cryptocurrency/listings/latest&params=${encodeURIComponent(params)}`;
-
     const res = await fetch(url);
-    
     if (res && res.ok) {
       const data = await res.json();
       if (data.data && Array.isArray(data.data)) {
@@ -385,18 +351,14 @@ const deduplicateCoins = (allCoins) => {
   const coinMap = new Map();
   const sortedCoins = allCoins.sort((a, b) => {
     const priorityOrder = { coingecko: 1, coinmarketcap: 2, coincap: 3 };
-    const priorityDiff = (priorityOrder[a.source] || 99) - (priorityOrder[b.source] || 99);
-    if (priorityDiff !== 0) return priorityDiff;
-    return (a.market_cap_rank || 999999) - (b.market_cap_rank || 999999);
+    return (priorityOrder[a.source] || 99) - (priorityOrder[b.source] || 99);
   });
   
   sortedCoins.forEach(coin => {
     if (!coin.symbol || coin.symbol === 'UNKNOWN') return;
     const compositeKey = `${coin.normalizedSymbol}_${coin.normalizedName}`;
     let isDuplicate = false;
-    
     if (coinMap.has(compositeKey)) isDuplicate = true;
-    
     if (!isDuplicate) {
       for (const [key, existing] of coinMap) {
         if (existing.normalizedSymbol === coin.normalizedSymbol && existing.normalizedName !== coin.normalizedName) {
@@ -406,7 +368,6 @@ const deduplicateCoins = (allCoins) => {
         }
       }
     }
-    
     if (!isDuplicate) {
       for (const [key, existing] of coinMap) {
         if (existing.normalizedName === coin.normalizedName && existing.normalizedSymbol !== coin.normalizedSymbol) {
@@ -426,9 +387,8 @@ const deduplicateCoins = (allCoins) => {
 };
 
 // ============================================
-// 🚀 COMPONENTS
+// 🚀 SUB-COMPONENTS (upgraded with subtle animations)
 // ============================================
-
 const LogoRenderer = ({ symbol, customLogo, bg, color }) => {
   const [hasError, setHasError] = useState(false);
   const [imgSrc, setImgSrc] = useState(customLogo || '');
@@ -462,11 +422,13 @@ const LogoRenderer = ({ symbol, customLogo, bg, color }) => {
   );
 };
 
+// Premium Skeleton Card with shimmer
 const SkeletonCard = () => (
-  <div className="flex flex-col items-center p-6 rounded-[2rem] border border-slate-200/50 dark:border-slate-700/50 bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm">
-    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-600 animate-pulse mb-4 shadow-inner" />
-    <div className="h-5 w-16 bg-gradient-to-r from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-600 rounded-lg mb-2 animate-pulse" />
-    <div className="h-3 w-20 bg-gradient-to-r from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-600 rounded animate-pulse" />
+  <div className="flex flex-col items-center p-6 rounded-[2rem] border border-slate-200/50 dark:border-slate-700/50 bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm relative overflow-hidden">
+    <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/20 dark:via-slate-600/20 to-transparent" />
+    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-600 mb-4 shadow-inner" />
+    <div className="h-5 w-16 bg-gradient-to-r from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-600 rounded-lg mb-2" />
+    <div className="h-3 w-20 bg-gradient-to-r from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-600 rounded" />
   </div>
 );
 
@@ -502,6 +464,22 @@ const RateLimitBanner = ({ onDismiss }) => {
   );
 };
 
+// New: Error banner for coin data fetch failure
+const FetchErrorBanner = ({ message, onRetry }) => (
+  <div className="bg-red-50/95 dark:bg-red-900/20 backdrop-blur-sm border border-red-200 dark:border-red-800 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4 animate-in fade-in zoom-in-95">
+    <div className="w-10 h-10 bg-red-100 dark:bg-red-900/50 rounded-full flex items-center justify-center flex-shrink-0">
+      <HiOutlineExclamationCircle className="text-red-600 dark:text-red-400 w-6 h-6" />
+    </div>
+    <div className="flex-1">
+      <p className="font-bold text-red-800 dark:text-red-300">{message}</p>
+      <p className="text-xs text-red-600 dark:text-red-400 mt-1">Check your internet connection or API limits.</p>
+    </div>
+    <button onClick={onRetry} className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-sm shadow-lg shadow-red-500/20 transition-colors">
+      Retry Now
+    </button>
+  </div>
+);
+
 const SourceBadge = ({ source, sourceIcon }) => {
   const colors = {
     coingecko: 'bg-lime-100 dark:bg-lime-900/30 text-lime-700 dark:text-lime-400',
@@ -516,15 +494,16 @@ const SourceBadge = ({ source, sourceIcon }) => {
   );
 };
 
-const PriceBadge = ({ price, change24h }) => {
+const PriceBadge = ({ price, change24h, isLoading }) => {
   const isPositive = change24h >= 0;
   if (!price && price !== 0) return null;
   return (
     <div className="absolute bottom-12 left-1/2 -translate-x-1/2 w-[calc(100%-16px)] bg-white/95 dark:bg-slate-800/95 backdrop-blur-sm rounded-lg py-1 px-2 opacity-0 group-hover/card:opacity-100 transition-all duration-300 shadow-lg border border-slate-200/50 dark:border-slate-700/50 z-10">
       <div className="flex items-center justify-between gap-1">
         <div className="flex flex-col">
-          <span className="text-[10px] font-black text-slate-700 dark:text-slate-200 leading-tight">
+          <span className="text-[10px] font-black text-slate-700 dark:text-slate-200 leading-tight flex items-center gap-1">
             ${typeof price === 'number' ? price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 }) : '0.00'}
+            {isLoading && <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-ping" />}
           </span>
           {change24h !== 0 && (
             <span className={`text-[9px] font-bold flex items-center gap-0.5 ${isPositive ? 'text-green-500' : 'text-red-500'}`}>
@@ -558,9 +537,8 @@ const NetworkBadge = ({ network }) => {
 };
 
 // ============================================
-// 🚀 MAIN COMPONENT
+// 🚀 MAIN COMPONENT (heavily upgraded)
 // ============================================
-
 const CryptoManagerContent = () => {
   const { user, selectedCryptos = [], updateSelectedCryptos } = useAuth();
   const navigate = useNavigate();
@@ -571,7 +549,8 @@ const CryptoManagerContent = () => {
   const [activeCoins, setActiveCoins] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingUserData, setIsLoadingUserData] = useState(true);      // renamed
+  const [isCoinDataLoading, setIsCoinDataLoading] = useState(true);      // NEW: separate loading for top coins
 
   const [topCoins, setTopCoins] = useState([]);
   const [customUserCoins, setCustomUserCoins] = useState([]);
@@ -579,6 +558,7 @@ const CryptoManagerContent = () => {
   const [livePrices, setLivePrices] = useState({});
   const [dataSources, setDataSources] = useState({ coingecko: false, coinmarketcap: false, coincap: false });
   const [fetchProgress, setFetchProgress] = useState('');
+  const [topCoinsError, setTopCoinsError] = useState(null);              // NEW: error state for main fetch
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState('Add Custom Token');
@@ -606,6 +586,25 @@ const CryptoManagerContent = () => {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
+  // Load user data (custom coins, hidden tokens)
+  useEffect(() => {
+    let isMounted = true;
+    const fetchUserData = async () => {
+      if (!user) { if (isMounted) setIsLoadingUserData(false); return; }
+      try {
+        const userSnap = await getDoc(doc(db, "users", user.uid));
+        if (userSnap.exists() && isMounted) {
+          const data = userSnap.data();
+          if (data.hiddenTokens) setHiddenTokens(data.hiddenTokens);
+          if (data.customCoins) setCustomUserCoins(data.customCoins);
+        }
+      } catch (err) {} finally { if (isMounted) setIsLoadingUserData(false); }
+    };
+    fetchUserData();
+    return () => { isMounted = false; };
+  }, [user]);
+
+  // Initialize activeCoins from selectedCryptos
   useEffect(() => {
     if (selectedCryptos && selectedCryptos.length > 0 && activeCoins.length === 0) {
       const identifiers = selectedCryptos.map(c => typeof c === 'string' ? normalizeId(c) : normalizeId(c.id || c.symbol));
@@ -614,6 +613,7 @@ const CryptoManagerContent = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCryptos]);
 
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); document.querySelector('input[type="text"]')?.focus(); }
@@ -624,78 +624,79 @@ const CryptoManagerContent = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAddModalOpen]);
 
-  useEffect(() => {
-    let isMounted = true;
-    const fetchUserData = async () => {
-      if (!user) { if (isMounted) setIsLoading(false); return; }
-      try {
-        const userSnap = await getDoc(doc(db, "users", user.uid));
-        if (userSnap.exists() && isMounted) {
-          const data = userSnap.data();
-          if (data.hiddenTokens) setHiddenTokens(data.hiddenTokens);
-          if (data.customCoins) setCustomUserCoins(data.customCoins);
-        }
-      } catch (err) {} finally { if (isMounted) setIsLoading(false); }
-    };
-    fetchUserData();
-    return () => { isMounted = false; };
-  }, [user]);
-
-  // Fetch the Top 500 Market Coins
+  // Fetch top coins with improved error handling and separate loading flag
   useEffect(() => {
     let isMounted = true;
     const fetchAllCoins = async () => {
       setFetchProgress('Checking cache...');
       const cachedData = getCache('finledger_top_coins_v4');
-      if (cachedData && Array.isArray(cachedData) && cachedData.length > 200) { 
+      if (cachedData && Array.isArray(cachedData) && cachedData.length > 200) {
         if (isMounted) {
           setTopCoins(cachedData);
           setDataSources({ coingecko: true, coinmarketcap: true, coincap: true });
           setFetchProgress(`Loaded ${cachedData.length} coins from cache`);
+          setIsCoinDataLoading(false);
           setTimeout(() => setFetchProgress(''), 2000);
         }
-        return; 
+        return;
       }
 
+      setIsCoinDataLoading(true);
+      setTopCoinsError(null);
       let allCoins = [];
       const sources = { coingecko: false, coinmarketcap: false, coincap: false };
-      
+      let anySuccess = false;
+
       try {
         setFetchProgress('Fetching from CoinGecko (Page 1)...');
         const cgCoins1 = await fetchCoinGeckoCoins(1, 250);
-        if (cgCoins1.length > 0) { allCoins = [...allCoins, ...cgCoins1]; sources.coingecko = true; }
+        if (cgCoins1.length > 0) { allCoins = [...allCoins, ...cgCoins1]; sources.coingecko = true; anySuccess = true; }
         
         setFetchProgress('Fetching from CoinGecko (Page 2)...');
         const cgCoins2 = await fetchCoinGeckoCoins(2, 250);
         if (cgCoins2.length > 0) { allCoins = [...allCoins, ...cgCoins2]; }
-        
+
         setFetchProgress('Fetching from CoinMarketCap...');
         const cmcCoins = await fetchCoinMarketCapCoins(300);
-        if (cmcCoins.length > 0) { allCoins = [...allCoins, ...cmcCoins]; sources.coinmarketcap = true; }
-        
+        if (cmcCoins.length > 0) { allCoins = [...allCoins, ...cmcCoins]; sources.coinmarketcap = true; anySuccess = true; }
+
         setFetchProgress('Fetching from CoinCap...');
         const ccCoins = await fetchCoinCapCoins(100);
-        if (ccCoins.length > 0) { allCoins = [...allCoins, ...ccCoins]; sources.coincap = true; }
-        
+        if (ccCoins.length > 0) { allCoins = [...allCoins, ...ccCoins]; sources.coincap = true; anySuccess = true; }
+
+        if (!anySuccess) {
+          throw new Error("All data sources failed. Please check your connection.");
+        }
+
         setFetchProgress(`Deduplicating ${allCoins.length} coins...`);
         const uniqueCoins = deduplicateCoins(allCoins);
-        
+
         if (isMounted) {
           setTopCoins(uniqueCoins);
           setDataSources(sources);
           setCache('finledger_top_coins_v4', uniqueCoins, 120);
           setFetchProgress(`✅ ${uniqueCoins.length} unique coins`);
+          setIsCoinDataLoading(false);
           setTimeout(() => setFetchProgress(''), 5000);
         }
       } catch (err) {
-        setFetchProgress('Some sources failed');
-        if (allCoins.length > 0 && isMounted) setTopCoins(deduplicateCoins(allCoins));
+        if (isMounted) {
+          setTopCoinsError(err.message || "Failed to load coin data.");
+          if (allCoins.length > 0) {
+            setTopCoins(deduplicateCoins(allCoins));
+            setFetchProgress('⚠️ Partial data loaded (some sources failed)');
+          } else {
+            setFetchProgress('');
+          }
+          setIsCoinDataLoading(false);
+        }
       }
     };
     fetchAllCoins();
     return () => { isMounted = false; };
   }, []);
 
+  // Combine all coin data
   const fullDatabase = useMemo(() => {
     const coinMap = new Map();
     
@@ -736,7 +737,7 @@ const CryptoManagerContent = () => {
     return Array.from(coinMap.values());
   }, [topCoins, customUserCoins, selectedCryptos]);
 
-  // 🚀 FIXED: True 5-Layer Live Fetch Engine for CryptoManager Grid
+  // Live prices fetch (unchanged)
   useEffect(() => {
     if (activeCoins.length === 0) return;
     let isMounted = true;
@@ -759,7 +760,6 @@ const CryptoManagerContent = () => {
           }
         });
 
-        // 1. CoinGecko (Layer 1)
         if (normalCoins.length > 0) {
           const batches = [];
           for (let i = 0; i < normalCoins.length; i += 50) batches.push(normalCoins.slice(i, i + 50));
@@ -772,7 +772,6 @@ const CryptoManagerContent = () => {
           }
         }
 
-        // 2 & 3. GeckoTerminal & DexScreener (Layer 2 & 3)
         let customApiJson = {};
         await Promise.all(contractCoins.map(async (coin) => {
           try {
@@ -816,7 +815,6 @@ const CryptoManagerContent = () => {
               price = cgJson[id].usd;
               change = cgJson[id].usd_24h_change;
             } else if (BINANCE_SAFE_COINS.includes(upperSym)) {
-              // 4. Binance Rescue (Layer 4)
               try {
                 const bRes = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${upperSym}USDT`);
                 if (bRes.ok) {
@@ -829,7 +827,7 @@ const CryptoManagerContent = () => {
 
             if (price > 0) {
               newPrices[id] = { usd: price, usd_24h_change: change };
-              setCache(`price_live_${id}`, { usd: price, usd_24h_change: change }, 0.5); // Cache for 30s
+              setCache(`price_live_${id}`, { usd: price, usd_24h_change: change }, 0.5);
             }
           }));
 
@@ -843,6 +841,7 @@ const CryptoManagerContent = () => {
     return () => { isMounted = false; clearInterval(interval); };
   }, [activeCoins, fullDatabase]);
 
+  // Display coins based on tab and search
   const { displaySelected, displayAvailable } = useMemo(() => {
     const activeSet = new Set(activeCoins);
     const hiddenSet = new Set(hiddenTokens.map(normalizeId));
@@ -870,6 +869,7 @@ const CryptoManagerContent = () => {
 
   const currentListToDisplay = activeTab === 'selected' ? displaySelected : displayAvailable;
 
+  // Toggle coin selection
   const toggleCoin = useCallback((identifier) => {
     const normId = normalizeId(identifier);
     setActiveCoins((prev) => {
@@ -898,8 +898,8 @@ const CryptoManagerContent = () => {
       const livePrice = livePrices[normId];
       return {
         id: normId, symbol: coinData.symbol || identifier.toUpperCase(), name: coinData.name || coinData.symbol || identifier,
-        logo: coinData.logo || null, fallbackPrice: coinData.fallbackPrice || 0, currentPrice: livePrice?.usd || coinData.fallbackPrice || 0,
-        priceChange24h: livePrice?.usd_24h_change || coinData.priceChange24h || 0, lastUpdated: new Date().toISOString(), network: coinData.network || null,
+        logo: coinData.logo || null, fallbackPrice: coinData.fallbackPrice || 0, currentPrice: livePrice?.usd ?? coinData.fallbackPrice ?? 0,
+        priceChange24h: livePrice?.usd_24h_change ?? coinData.priceChange24h ?? 0, lastUpdated: new Date().toISOString(), network: coinData.network || null,
         contractAddress: coinData.contractAddress || null, source: coinData.source || 'unknown'
       };
     });
@@ -909,7 +909,6 @@ const CryptoManagerContent = () => {
   const handleSave = useCallback(async () => {
     if (activeCoins.length === 0) { addToast('Please select at least one asset', 'warning'); return; }
     setIsSaving(true);
-    
     try {
       await syncContextPortfolio(activeCoins);
       addToast(`✅ Portfolio saved with ${activeCoins.length} assets`, 'success');
@@ -1189,13 +1188,16 @@ const CryptoManagerContent = () => {
 
   useEffect(() => { return () => { if (abortControllerRef.current) abortControllerRef.current.abort(); }; }, []);
 
+  // Determine if we should show skeleton for main coin grid
+  const showCoinSkeleton = isLoadingUserData || isCoinDataLoading;
+
   return (
     <>
       <div className="pt-24 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 max-w-7xl mx-auto px-4 md:px-0 min-h-screen">
         
         {showRateLimitBanner && <RateLimitBanner onDismiss={() => setShowRateLimitBanner(false)} />}
 
-        {/* 🚀 FIXED HEADER FOR MOBILE */}
+        {/* Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-[2.5rem] p-6 sm:p-8 shadow-2xl relative overflow-hidden border border-slate-700/50 backdrop-blur-sm">
           <div className="absolute right-[-5%] top-[-20%] opacity-[0.03] text-white blur-[2px] pointer-events-none"><FaBitcoin size={250}/></div>
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.08),transparent_50%)]" />
@@ -1219,13 +1221,18 @@ const CryptoManagerContent = () => {
         </div>
 
         {fetchProgress && (
-          <div className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border border-blue-200 dark:border-blue-700/50 rounded-2xl p-4 flex items-center gap-3">
+          <div className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border border-blue-200 dark:border-blue-700/50 rounded-2xl p-4 flex items-center gap-3 animate-in fade-in">
             {fetchProgress.includes('✅') ? <HiOutlineCheckCircle className="text-green-500 w-5 h-5" /> : <HiOutlineRefresh className="animate-spin text-blue-500 w-5 h-5" />}
             <span className="text-sm font-bold text-slate-700 dark:text-slate-300">{fetchProgress}</span>
           </div>
         )}
 
-        {/* 🚀 FIXED: Mobile Flex Toggle Layout */}
+        {/* Error banner for top coins fetch */}
+        {topCoinsError && (
+          <FetchErrorBanner message={topCoinsError} onRetry={() => window.location.reload()} />
+        )}
+
+        {/* Tab Toggle */}
         <div className="flex w-full md:w-fit mx-auto p-1.5 space-x-1 bg-slate-200/40 dark:bg-slate-800/40 backdrop-blur-md rounded-[1.5rem] shadow-inner border border-slate-200/50 dark:border-slate-700/50">
           <button onClick={() => setActiveTab('selected')} className={`flex-1 flex flex-col sm:flex-row items-center justify-center px-4 sm:px-6 py-3 rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all duration-300 gap-1 sm:gap-2 ${activeTab === 'selected' ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-md scale-100' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 scale-95 opacity-80'}`}>
             <div className="flex items-center gap-1.5"><HiOutlineCollection size={16} /> <span className="truncate">My Selection</span></div>
@@ -1237,22 +1244,38 @@ const CryptoManagerContent = () => {
           </button>
         </div>
 
+        {/* Search Bar with ⌘K hint */}
         <div className="sticky top-[72px] md:top-4 z-40">
           <div className="relative shadow-2xl shadow-slate-200/20 dark:shadow-none rounded-[2rem]">
             <div className="absolute left-5 sm:left-6 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 pointer-events-none"><HiOutlineSearch size={20} className="sm:w-[22px] sm:h-[22px]" /></div>
-            <input type="text" placeholder={`Search ${topCoins.length}+ coins by name or symbol...`} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-700/50 rounded-[2rem] py-4 sm:py-5 pl-14 sm:pl-16 pr-14 sm:pr-16 text-xs sm:text-sm font-bold outline-none text-slate-900 dark:text-white focus:ring-4 focus:ring-blue-500/20 transition-all placeholder:font-medium placeholder:text-slate-400 dark:placeholder:text-slate-500 shadow-sm" />
-            {searchQuery && <button onClick={handleClearSearch} className="absolute right-5 sm:right-6 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors p-1"><HiOutlineXCircle size={20} /></button>}
+            <input 
+              type="text" 
+              placeholder={`Search ${topCoins.length}+ coins by name or symbol...`} 
+              value={searchQuery} 
+              onChange={(e) => setSearchQuery(e.target.value)} 
+              className="w-full bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-700/50 rounded-[2rem] py-4 sm:py-5 pl-14 sm:pl-16 pr-14 sm:pr-16 text-xs sm:text-sm font-bold outline-none text-slate-900 dark:text-white focus:ring-4 focus:ring-blue-500/20 transition-all placeholder:font-medium placeholder:text-slate-400 dark:placeholder:text-slate-500 shadow-sm" 
+            />
+            {searchQuery ? (
+              <button onClick={handleClearSearch} className="absolute right-5 sm:right-6 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors p-1"><HiOutlineXCircle size={20} /></button>
+            ) : (
+              <div className="absolute right-5 sm:right-6 top-1/2 -translate-y-1/2 hidden sm:flex items-center gap-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                <HiOutlineTerminal size={12} /> K
+              </div>
+            )}
           </div>
         </div>
 
+        {/* Coin Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3 sm:gap-5">
-          {isLoading ? (
+          {showCoinSkeleton ? (
             Array.from({ length: 12 }).map((_, idx) => <SkeletonCard key={idx} />)
           ) : currentListToDisplay.length === 0 ? (
             <div className="col-span-full flex flex-col items-center justify-center py-16 sm:py-20 px-4 animate-in fade-in zoom-in-95 duration-300 bg-white/50 dark:bg-slate-900/50 rounded-[2rem] border border-slate-200/50 dark:border-slate-800/50 backdrop-blur-sm">
               <div className="w-20 h-20 sm:w-28 sm:h-28 bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-700 rounded-3xl flex items-center justify-center mb-6 shadow-inner"><HiOutlineCube className="w-10 h-10 sm:w-14 sm:h-14 text-slate-400 dark:text-slate-500" /></div>
               <h3 className="text-xl sm:text-2xl font-black text-slate-700 dark:text-slate-200 mb-2 text-center">{searchQuery ? 'No coins found' : (activeTab === 'selected' ? 'No coins selected' : 'Start exploring!')}</h3>
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 text-center max-w-sm mb-8 px-4">{searchQuery ? `Nothing matches "${searchQuery}" in ${activeTab === 'selected' ? 'your selection' : 'the market'}.` : (activeTab === 'selected' ? "Select coins from the Explore Market tab or add custom tokens." : `Browse ${topCoins.length}+ coins and click to add them to your selection.`)}</p>
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 text-center max-w-sm mb-8 px-4">
+                {searchQuery ? `Nothing matches "${searchQuery}" in ${activeTab === 'selected' ? 'your selection' : 'the market'}.` : (activeTab === 'selected' ? "Select coins from the Explore Market tab or add custom tokens." : `Browse ${topCoins.length}+ coins and click to add them to your selection.`)}
+              </p>
               {activeTab === 'selected' && !searchQuery && <button onClick={() => setActiveTab('market')} className="bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white font-bold px-8 py-3 rounded-xl transition-all shadow-lg shadow-blue-500/30 hover:shadow-xl hover:shadow-blue-500/40 active:scale-95 text-sm sm:text-base">Explore Market</button>}
               {activeTab === 'market' && !searchQuery && <button onClick={openAddModal} className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold px-8 py-3 rounded-xl transition-all shadow-lg shadow-purple-500/30 hover:shadow-xl hover:shadow-purple-500/40 active:scale-95 text-sm sm:text-base">Add Custom Token</button>}
             </div>
@@ -1260,45 +1283,85 @@ const CryptoManagerContent = () => {
             currentListToDisplay.map((coin) => {
               const isSelected = activeCoins.includes(coin.id);
               const livePrice = livePrices[coin.id];
-              const currentPrice = livePrice?.usd || coin.fallbackPrice;
-              const change24h = livePrice?.usd_24h_change || coin.priceChange24h || 0;
-              
+              const currentPrice = livePrice?.usd ?? coin.fallbackPrice ?? 0;
+              const change24h = livePrice?.usd_24h_change ?? coin.priceChange24h ?? 0;
+              const isPriceLoading = !livePrice && activeCoins.includes(coin.id); // show pulse if we haven't fetched live price yet
+
               return (
-                <div key={coin.id} onClick={() => toggleCoin(coin.id)} role="button" tabIndex={0} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggleCoin(coin.id)} className={`group/card cursor-pointer relative flex flex-col items-center p-4 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] border transition-all duration-300 outline-none focus-visible:ring-4 focus-visible:ring-blue-500/30 overflow-hidden ${isSelected ? 'bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border-blue-400/50 shadow-xl shadow-blue-500/10 scale-[1.02]' : 'bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-slate-200/50 dark:border-slate-700/50 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-xl hover:-translate-y-1'}`}>
-                  
-                  {isSelected && <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-10"><div className="relative"><div className="absolute inset-0 bg-blue-500 rounded-full blur-md opacity-50" /><HiOutlineCheckCircle size={20} className="sm:w-[22px] sm:h-[22px] relative text-blue-500" /></div></div>}
+                <div 
+                  key={coin.id} 
+                  onClick={() => toggleCoin(coin.id)} 
+                  role="button" 
+                  tabIndex={0} 
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggleCoin(coin.id)} 
+                  className={`group/card cursor-pointer relative flex flex-col items-center p-4 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] border transition-all duration-300 outline-none focus-visible:ring-4 focus-visible:ring-blue-500/30 overflow-hidden ${
+                    isSelected 
+                      ? 'bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border-blue-400/50 shadow-xl shadow-blue-500/10 scale-[1.02] ring-2 ring-blue-400/30' 
+                      : 'bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-slate-200/50 dark:border-slate-700/50 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-2xl hover:-translate-y-1.5'
+                  }`}
+                >
+                  {isSelected && (
+                    <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-10">
+                      <div className="relative">
+                        <div className="absolute inset-0 bg-blue-500 rounded-full blur-md opacity-50" />
+                        <HiOutlineCheckCircle size={20} className="sm:w-[22px] sm:h-[22px] relative text-blue-500 drop-shadow-sm" />
+                      </div>
+                    </div>
+                  )}
                   
                   <SourceBadge source={coin.source} sourceIcon={coin.sourceIcon} />
-                  {coin.marketCapRank && coin.marketCapRank < 999999 && <span className="absolute top-1 left-1 text-[7px] sm:text-[8px] font-black text-slate-400 dark:text-slate-500">#{coin.marketCapRank}</span>}
+                  {coin.marketCapRank && coin.marketCapRank < 999999 && (
+                    <span className="absolute top-1 left-1 text-[7px] sm:text-[8px] font-black text-slate-400 dark:text-slate-500">#{coin.marketCapRank}</span>
+                  )}
                   
-                  {/* 🚀 FIXED: Mobile Flex Overlap Issue inside Card */}
-                  <div className="absolute bottom-2 left-2 flex gap-1 opacity-100 md:opacity-0 md:group-hover/card:opacity-100 transition-opacity duration-300 z-20">
-                    <Tooltip text="Edit"><button onClick={(e) => { e.stopPropagation(); handleEditClick(e, coin); }} className="w-6 h-6 sm:w-7 sm:h-7 bg-white/90 dark:bg-slate-700/90 backdrop-blur-sm border border-slate-200 dark:border-slate-600 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/50 rounded-full shadow-sm flex items-center justify-center transition-all active:scale-90"><HiOutlinePencil size={10} className="sm:w-3 sm:h-3" /></button></Tooltip>
-                    <Tooltip text="Remove"><button onClick={(e) => { e.stopPropagation(); handleDeleteToken(coin); }} className="w-6 h-6 sm:w-7 sm:h-7 bg-white/90 dark:bg-slate-700/90 backdrop-blur-sm border border-slate-200 dark:border-slate-600 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/50 rounded-full shadow-sm flex items-center justify-center transition-all active:scale-90"><HiOutlineTrash size={10} className="sm:w-3 sm:h-3" /></button></Tooltip>
+                  {/* Action buttons */}
+                  <div className="absolute bottom-2 left-2 flex gap-1 opacity-100 md:opacity-0 md:group-hover/card:opacity-100 transition-all duration-300 z-20 transform md:translate-y-2 md:group-hover/card:translate-y-0">
+                    <Tooltip text="Edit">
+                      <button onClick={(e) => { e.stopPropagation(); handleEditClick(e, coin); }} className="w-6 h-6 sm:w-7 sm:h-7 bg-white/90 dark:bg-slate-700/90 backdrop-blur-sm border border-slate-200 dark:border-slate-600 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/50 rounded-full shadow-sm flex items-center justify-center transition-all active:scale-90">
+                        <HiOutlinePencil size={10} className="sm:w-3 sm:h-3" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip text="Remove">
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteToken(coin); }} className="w-6 h-6 sm:w-7 sm:h-7 bg-white/90 dark:bg-slate-700/90 backdrop-blur-sm border border-slate-200 dark:border-slate-600 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/50 rounded-full shadow-sm flex items-center justify-center transition-all active:scale-90">
+                        <HiOutlineTrash size={10} className="sm:w-3 sm:h-3" />
+                      </button>
+                    </Tooltip>
                   </div>
                   
                   <div className={`w-12 h-12 sm:w-16 sm:h-16 rounded-full mb-3 sm:mb-4 flex items-center justify-center transition-all duration-500 group-hover/card:scale-110 group-hover/card:-translate-y-1 ${isSelected ? 'ring-4 ring-blue-500/20' : ''}`}>
                     <LogoRenderer symbol={coin.symbol} customLogo={coin.logo || getFallbackLogo(coin.symbol, coin.network, coin.contractAddress)} bg={coin.bg} color={coin.color} />
                   </div>
                   <h3 className={`font-black text-sm sm:text-base tracking-tight mb-0.5 w-full text-center truncate px-1 ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-slate-800 dark:text-slate-100'}`}>{coin.symbol}</h3>
-                  {coin.network && <span className="text-[7px] sm:text-[8px] font-black tracking-widest px-1.5 sm:px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 uppercase mb-1">{coin.network}</span>}
+                  {coin.network && <NetworkBadge network={coin.network} />}
                   <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 dark:text-slate-400 truncate w-full text-center px-1 pb-4 sm:pb-0">{coin.name}</p>
                   
-                  {currentPrice > 0 && <PriceBadge price={currentPrice} change24h={change24h} symbol={coin.symbol} />}
+                  {currentPrice > 0 && <PriceBadge price={currentPrice} change24h={change24h} isLoading={isPriceLoading} />}
                 </div>
               );
             })
           )}
         </div>
 
+        {/* Floating Save Button */}
         {activeCoins.length > 0 && (
           <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[200] w-[90%] max-w-md">
-            <button onClick={handleSave} disabled={isSaving} className={`w-full px-6 sm:px-10 py-4 sm:py-5 bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 text-white rounded-full font-black text-xs sm:text-sm uppercase tracking-widest shadow-2xl shadow-blue-500/40 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 sm:gap-3 border border-blue-400/50 ${!isSaving ? 'animate-pulse hover:animate-none' : ''}`}>
-              {isSaving ? <><HiOutlineRefresh className="animate-spin" size={18}/> SAVING...</> : <><HiOutlineCheckCircle size={18}/> SAVE {activeCoins.length} ASSET{activeCoins.length !== 1 ? 'S' : ''}</>}
+            <button 
+              onClick={handleSave} 
+              disabled={isSaving} 
+              className={`w-full px-6 sm:px-10 py-4 sm:py-5 bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 text-white rounded-full font-black text-xs sm:text-sm uppercase tracking-widest shadow-2xl shadow-blue-500/40 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 sm:gap-3 border border-blue-400/50 ${
+                !isSaving ? 'animate-[pulse_2s_infinite] hover:animate-none' : ''
+              }`}
+            >
+              {isSaving ? (
+                <><HiOutlineRefresh className="animate-spin" size={18}/> SAVING...</>
+              ) : (
+                <><HiOutlineCheckCircle size={18}/> SAVE {activeCoins.length} ASSET{activeCoins.length !== 1 ? 'S' : ''}</>
+              )}
             </button>
           </div>
         )}
 
+        {/* Add/Edit Modal */}
         {isAddModalOpen && (
           <div className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
             <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800 animate-in slide-in-from-bottom-10 sm:zoom-in-95 duration-200">
@@ -1320,6 +1383,7 @@ const CryptoManagerContent = () => {
                 </div>
 
                 <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/10 dark:to-cyan-900/10 p-4 sm:p-5 rounded-2xl border border-blue-200 dark:border-blue-500/20 space-y-4">
+                  {/* fetch mode inputs unchanged */}
                   {fetchMode === 'contract' ? (
                     <>
                       <select value={newCoin.network} onChange={(e) => setNewCoin({...newCoin, network: e.target.value})} className="w-full bg-white dark:bg-slate-800 px-4 py-3 sm:py-3.5 rounded-xl font-bold text-slate-700 dark:text-slate-100 outline-none border border-slate-200 dark:border-slate-700 text-[11px] sm:text-sm cursor-pointer focus:ring-2 focus:ring-blue-500/50 transition-shadow">
@@ -1345,15 +1409,6 @@ const CryptoManagerContent = () => {
                         <a href={getExplorerUrl(newCoin.network, newCoin.contractAddress)} target="_blank" rel="noopener noreferrer" className="text-[9px] sm:text-[10px] font-medium text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1">
                           <HiOutlineExternalLink size={12} /> View on {newCoin.network === 'solana' ? 'Solscan' : 'Explorer'}
                         </a>
-                      )}
-                      
-                      {newCoin.network === 'solana' && newCoin.contractAddress && !isFetchingData && !fetchSuccess && (
-                        <div className="pt-2 border-t border-blue-200 dark:border-blue-700/50 mt-2">
-                          <p className="text-[9px] sm:text-[10px] font-medium text-slate-500 dark:text-slate-400 mb-2">Token not found? Try alternative sources:</p>
-                          <div className="flex gap-2">
-                            <button type="button" onClick={() => { setFetchError(null); setFetchStatus(''); }} className="flex-1 py-2 px-3 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-lg text-[9px] sm:text-[10px] font-bold text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors">Enter Manually</button>
-                          </div>
-                        </div>
                       )}
                     </>
                   ) : (
@@ -1426,7 +1481,14 @@ const CryptoManagerContent = () => {
         )}
       </div>
 
-      <ConfirmationModal isOpen={confirmModal.isOpen} onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))} onConfirm={confirmModal.onConfirm} title={confirmModal.title} message={confirmModal.message} type={confirmModal.type} />
+      <ConfirmationModal 
+        isOpen={confirmModal.isOpen} 
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))} 
+        onConfirm={confirmModal.onConfirm} 
+        title={confirmModal.title} 
+        message={confirmModal.message} 
+        type={confirmModal.type} 
+      />
     </>
   );
 };

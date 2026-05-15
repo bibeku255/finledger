@@ -3,6 +3,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { collection, addDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
+import { verifyPIN } from '../../utils/cryptoUtils';
+import { fetchWithRetry } from '../../utils/helpers';
 
 import { 
   HiOutlineTrendingUp, HiOutlineTrendingDown, 
@@ -10,38 +12,18 @@ import {
   HiOutlinePencil, HiOutlineTrash, HiOutlineClock, HiOutlineRefresh,
   HiOutlineLockClosed, HiOutlineChevronDown, HiOutlineShieldCheck,
   HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable,
-  HiOutlineCursorClick
+  HiOutlineCursorClick, HiOutlineCalendar
 } from 'react-icons/hi';
 import { 
   FaExchangeAlt, FaShoppingBag, FaBullseye, FaWallet, FaCoins,
   FaChartLine
 } from 'react-icons/fa';
 
-const fetchWithRetry = async (url, retries = 2) => {
-  for (let i = 0; i <= retries; i++) {
-    try {
-      const res = await fetch(url);
-      if (res.status !== 429) return res;
-      if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
-    } catch (e) {
-      if (i === retries) return null;
-    }
-  }
-  return null; 
-};
-
 const LogoRenderer = ({ symbol, logoUrl, bg, color }) => {
   const [hasError, setHasError] = useState(false);
   useEffect(() => { setHasError(false); }, [logoUrl]);
   if (!logoUrl || hasError) return <span className={`w-full h-full rounded-full flex items-center justify-center font-black text-[10px] sm:text-[11px] ${bg || 'bg-slate-200 dark:bg-slate-700'} ${color || 'text-slate-600 dark:text-white'}`}>{symbol?.toUpperCase()?.substring(0, 3)}</span>;
   return <img src={logoUrl} alt={symbol} className="w-full h-full object-contain rounded-full bg-white dark:bg-slate-800 p-0.5 shadow-sm border border-slate-200 dark:border-slate-700" onError={() => setHasError(true)} />;
-};
-
-const hashPIN = async (pinCode) => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(pinCode);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
 const getLocalISOString = () => {
@@ -96,7 +78,7 @@ const HoldAndSwap = () => {
   const [livePrices, setLivePrices] = useState({});
 
   const [existingLocations, setExistingLocations] = useState([]);
-  const [existingCryptoWallets, setExistingCryptoWallets] = useState([]); // 🚀 Added to fetch Crypto Wallet platforms
+  const [existingCryptoWallets, setExistingCryptoWallets] = useState([]);
 
   const localTimeStr = getLocalISOString();
   const cryptoSymbols = useMemo(() => selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean), [selectedCryptos]);
@@ -105,11 +87,9 @@ const HoldAndSwap = () => {
     coin: cryptoSymbols.length > 0 ? cryptoSymbols[0] : 'BTC', amount: '', entryPrice: '', wallet: '', date: localTimeStr
   });
 
-  // 🚀 FETCH HOLD & SWAP RECORDS + CRYPTO WALLET RECORDS
   useEffect(() => {
     if (!user) return;
     
-    // Fetch Hold & Swap Target Records
     const q = query(collection(db, "users", user.uid, "holdAndSwap"), orderBy("timestamp", "desc"));
     const unsubscribeHold = onSnapshot(q, (snapshot) => { 
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -122,7 +102,6 @@ const HoldAndSwap = () => {
       setIsLoading(false); 
     });
 
-    // 🚀 Fetch Real-time Crypto Vault Holdings & Platforms
     const qVault = query(collection(db, "users", user.uid, "cryptoWalletLogs"), orderBy("timestamp", "desc"));
     const unsubscribeVault = onSnapshot(qVault, (snapshot) => {
        const vaultData = {};
@@ -152,7 +131,6 @@ const HoldAndSwap = () => {
     return () => { unsubscribeHold(); unsubscribeVault(); };
   }, [user]);
 
-  // Combine locations for dropdown suggestions
   const allWalletSuggestions = useMemo(() => Array.from(new Set([...existingLocations, ...existingCryptoWallets])), [existingLocations, existingCryptoWallets]);
 
   useEffect(() => {
@@ -177,7 +155,6 @@ const HoldAndSwap = () => {
     return Array.from(coinMap.values());
   }, [customUserCoins, selectedCryptos]);
 
-  // 🚀 DYNAMIC FETCHING ENGINE
   const fetchTablePrices = useCallback(async () => {
     const coinsToFetch = [...new Set([...cryptoSymbols, ...records.map(r => r.coin)])];
     if (coinsToFetch.length === 0) return;
@@ -257,7 +234,6 @@ const HoldAndSwap = () => {
     return () => clearInterval(interval); 
   }, [fetchTablePrices]);
 
-  // LIVE FORM PRICE ENGINE
   const fetchLivePriceForForm = async () => {
     if (!formData.coin) return;
     setIsFetchingLive(true);
@@ -362,14 +338,34 @@ const HoldAndSwap = () => {
   
   const initiateDelete = (rec) => { setDeleteContext(rec); setPinInput(''); setPinError(''); };
 
+  // 🚀 UPDATED DELETE WITH verifyPIN
   const executeSecureDelete = async (e) => {
-    e.preventDefault(); if (!pinInput.trim()) return setPinError("Please enter your PIN."); setIsVerifying(true);
+    e.preventDefault(); 
+    if (!pinInput.trim()) return setPinError("Please enter your PIN."); 
+    setIsVerifying(true);
     try {
-      const userSnap = await getDoc(doc(db, "users", user.uid)); const userData = userSnap.data();
-      const hashedInput = await hashPIN(pinInput.trim()); const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin;
-      if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) { setPinError("Incorrect PIN."); setIsVerifying(false); return; }
-      await deleteDoc(doc(db, "users", user.uid, "holdAndSwap", deleteContext.id)); setDeleteContext(null);
-    } catch (error) { setPinError("Verification failed."); } finally { setIsVerifying(false); }
+      const userSnap = await getDoc(doc(db, "users", user.uid)); 
+      const storedHash = userSnap.data()?.security?.pinHash || userSnap.data()?.securityPin || userSnap.data()?.pin;
+      
+      const { valid, newHash } = await verifyPIN(pinInput.trim(), storedHash, user.uid);
+      
+      if (!valid) {
+        setPinError("Incorrect PIN.");
+        setIsVerifying(false);
+        return;
+      }
+      
+      if (newHash) {
+        await setDoc(doc(db, "users", user.uid), { security: { pinHash: newHash } }, { merge: true });
+      }
+      
+      await deleteDoc(doc(db, "users", user.uid, "holdAndSwap", deleteContext.id)); 
+      setDeleteContext(null);
+    } catch (error) { 
+      setPinError("Verification failed."); 
+    } finally { 
+      setIsVerifying(false); 
+    }
   };
 
   const openModal = () => { 
@@ -386,7 +382,6 @@ const HoldAndSwap = () => {
   const totalProfit = totalCurrent - totalInvested;
   const profitPercentage = totalInvested > 0 ? ((totalProfit / totalInvested) * 100).toFixed(2) : 0;
 
-  // 🚀 CALCULATE AVAILABLE BALANCE DYNAMICALLY FOR FORM
   const getAvailableBalance = () => {
     if (!formData.coin || !formData.wallet) return null;
     const coinData = walletHoldings[formData.coin];
@@ -470,7 +465,8 @@ const HoldAndSwap = () => {
             </button>
           </div>
           
-          <div className="overflow-x-auto custom-scrollbar">
+          {/* DESKTOP TABLE */}
+          <div className="hidden md:block overflow-x-auto custom-scrollbar">
             <table className="w-full text-left min-w-[700px]">
               <thead className="bg-slate-50/50 dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
                 <tr><th className="p-4 pl-6">Asset & Wallet</th><th className="p-4">Holdings Info</th><th className="p-4">Live Performance</th><th className="p-4">AI Signal</th><th className="p-4 pr-6 text-right">Actions</th></tr>
@@ -524,22 +520,82 @@ const HoldAndSwap = () => {
               </tbody>
             </table>
           </div>
+
+          {/* 📱 MOBILE CARD VIEW */}
+          <div className="md:hidden flex flex-col divide-y divide-slate-100 dark:divide-slate-800/50">
+            {isLoading ? (
+              <div className="p-10 text-center"><HiOutlineRefresh className="animate-spin mx-auto text-2xl text-blue-500" /></div>
+            ) : records.length === 0 ? (
+              <div className="p-10 text-center"><FaBullseye className="text-4xl text-slate-300 dark:text-slate-700 mx-auto mb-3" /><p className="text-sm font-black text-slate-500 uppercase tracking-widest">No Assets Tracked</p></div>
+            ) : records.map((rec) => {
+              const livePrice = livePrices[rec.coin] || rec.entryPrice;
+              const profitPct = (((livePrice - rec.entryPrice) / rec.entryPrice) * 100);
+              const isProfit = profitPct >= 0;
+              const coinObj = fullDatabase.find(c => c.symbol === rec.coin.toUpperCase()) || {};
+
+              return (
+                <div key={rec.id} className="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 p-1 flex items-center justify-center border border-slate-200 dark:border-slate-700 shrink-0">
+                      <LogoRenderer symbol={rec.coin} logoUrl={coinObj.logo} bg={coinObj.bg} color={coinObj.color} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-black text-slate-900 dark:text-white text-sm uppercase">{rec.coin}</p>
+                          <p className="text-[10px] font-bold text-slate-500 flex items-center gap-1 mt-0.5"><FaWallet className="text-blue-400 shrink-0" size={10}/> {rec.wallet}</p>
+                        </div>
+                        <AISignalBadge profitPct={profitPct} />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-2 mb-3 text-xs">
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Amount</p>
+                      <p className="font-black text-slate-800 dark:text-white">{rec.amount} {rec.coin}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Entry</p>
+                      <p className="font-black text-slate-800 dark:text-white">{currencySymbol}{rec.entryPrice < 1 ? rec.entryPrice.toFixed(6) : rec.entryPrice}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Live</p>
+                      <p className="font-black text-slate-800 dark:text-white">{currencySymbol}{livePrice < 1 ? livePrice.toFixed(6) : livePrice.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">P/L</p>
+                      <p className={`font-black flex items-center gap-1 ${isProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                        {isProfit ? <HiOutlineTrendingUp size={14} /> : <HiOutlineTrendingDown size={14} />}
+                        {isProfit ? '+' : ''}{profitPct.toFixed(2)}%
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <p className="text-[9px] font-medium text-slate-400 flex items-center gap-1"><HiOutlineCalendar size={10}/> {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date}</p>
+                    <div className="flex gap-1 ml-auto">
+                      <button onClick={() => handleEdit(rec)} className="p-2 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg border border-blue-200 dark:border-blue-500/30 shadow-sm active:scale-95"><HiOutlinePencil size={14}/></button>
+                      <button onClick={() => { setDeleteContext(rec); setPinInput(''); setPinError(''); }} className="p-2 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-lg border border-rose-200 dark:border-rose-500/30 shadow-sm active:scale-95"><HiOutlineTrash size={14}/></button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* 🚀 UPGRADED ADD/EDIT MODAL WITH LIVE BALANCES */}
+      {/* 🚀 ADD/EDIT MODAL (unchanged from before) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 pt-[60px] md:pt-[120px] animate-in fade-in duration-200">
+          {/* ... (modal content exactly as you had it before) ... */}
           <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[calc(100dvh-4rem)] sm:max-h-[85vh] border border-slate-300 dark:border-slate-700 animate-in slide-in-from-bottom-10 sm:zoom-in-95">
-            
             <div className="px-6 py-5 bg-gradient-to-r from-blue-600 to-cyan-600 text-white flex justify-between items-center sticky top-0 z-10 shrink-0">
               <h3 className="text-xl font-black flex items-center gap-2"><FaBullseye size={20} /> {editingId ? 'Edit Target' : 'Log New Asset'}</h3>
               <button onClick={closeModal} className="p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors"><HiOutlineX size={20} /></button>
             </div>
-
             <form onSubmit={handleSaveEntry} className="p-6 sm:p-8 overflow-y-auto custom-scrollbar flex-1 space-y-5">
-              
-              {/* 🚀 ROW 1: COIN AND LOCATION */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Asset (Watchlist)</label>
@@ -553,7 +609,6 @@ const HoldAndSwap = () => {
                     <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
                   </div>
                 </div>
-
                 <div>
                   <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1">Location</label>
                   <input type="text" required list="wallet-suggestions" value={formData.wallet} onChange={(e) => setFormData({...formData, wallet: e.target.value})} placeholder="e.g., Binance, Trust Wallet" className="w-full mt-1 p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm placeholder-slate-400 dark:placeholder-slate-500 transition-colors" />
@@ -562,19 +617,9 @@ const HoldAndSwap = () => {
                   </datalist>
                 </div>
               </div>
-
-              {/* 🚀 ROW 2: LIVE VAULT BALANCE INTEGRATION */}
               <div 
-                onClick={() => {
-                  if (currentFormBalance > 0) {
-                    setFormData(prev => ({ ...prev, amount: currentFormBalance }));
-                  }
-                }}
-                className={`p-3.5 rounded-xl flex items-center justify-between shadow-sm transition-all duration-200 ${
-                  currentFormBalance > 0 
-                    ? 'bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 cursor-pointer hover:bg-emerald-100 dark:hover:bg-emerald-800/30 hover:shadow-md active:scale-[0.98]' 
-                    : 'bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 opacity-70'
-                }`}
+                onClick={() => { if (currentFormBalance > 0) setFormData(prev => ({ ...prev, amount: currentFormBalance })); }}
+                className={`p-3.5 rounded-xl flex items-center justify-between shadow-sm transition-all duration-200 ${currentFormBalance > 0 ? 'bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 cursor-pointer hover:bg-emerald-100 dark:hover:bg-emerald-800/30 hover:shadow-md active:scale-[0.98]' : 'bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 opacity-70'}`}
               >
                  <div className="flex items-center gap-2">
                    <FaWallet className={currentFormBalance > 0 ? 'text-emerald-500' : 'text-slate-400'} size={14}/>
@@ -587,16 +632,10 @@ const HoldAndSwap = () => {
                    {currentFormBalance % 1 !== 0 ? currentFormBalance.toFixed(6).replace(/\.?0+$/, '') : currentFormBalance} <span className="text-[10px] uppercase opacity-70">{formData.coin}</span>
                  </p>
               </div>
-
-              {/* 🚀 ROW 3: QUANTITY BOUGHT */}
               <div>
-                <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1 flex justify-between">
-                  <span>Quantity Bought</span>
-                </label>
+                <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1 flex justify-between"><span>Quantity Bought</span></label>
                 <input type="number" step="any" required value={formData.amount} onChange={(e) => setFormData({...formData, amount: e.target.value})} placeholder="e.g., 0.5" className="w-full mt-1 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-2xl font-black text-3xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm placeholder-slate-300 dark:placeholder-slate-600 transition-colors" />
               </div>
-
-              {/* 🚀 ROW 4: ENTRY PRICE */}
               <div className="p-4 sm:p-5 bg-blue-50/50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/50 rounded-2xl space-y-3 shadow-sm">
                 <div className="flex items-center justify-between">
                   <label className="text-[10px] font-black text-blue-700 dark:text-blue-400 uppercase tracking-widest flex items-center gap-1"><FaCoins/> Entry Price ({currencySymbol})</label>
@@ -606,8 +645,6 @@ const HoldAndSwap = () => {
                 </div>
                 <input type="number" step="any" required value={formData.entryPrice} onChange={(e) => setFormData({...formData, entryPrice: e.target.value})} placeholder="Average buy price..." className="w-full p-4 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-700/50 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-colors" />
               </div>
-
-              {/* 🚀 ROW 5: DATE & TIME */}
               <div>
                 <label className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest ml-1 flex justify-between">
                   <span>Date & Time</span>
@@ -615,7 +652,6 @@ const HoldAndSwap = () => {
                 </label>
                 <input type="datetime-local" required value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} className="w-full mt-1 p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-colors cursor-pointer" />
               </div>
-
               <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 mt-2 z-10">
                 <button type="submit" disabled={isSaving} className="w-full p-4 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-blue-500/30 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 shrink-0">
                   {isSaving ? <HiOutlineRefresh className="animate-spin text-xl" /> : <HiOutlineShieldCheck size={20} />}

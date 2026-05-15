@@ -2,96 +2,131 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 
 // ============================================
+// 🛡️ PRIVATE HELPERS
+// ============================================
+
+const sanitizeCellForCSV = (val) => {
+  if (val === null || val === undefined) return '';
+  return String(val).replace(/"/g, '""');
+};
+
+const sanitizeCellForPDF = (val) => {
+  if (val === null || val === undefined) return '';
+  return String(val)
+    .replace(/₹/g, 'Rs. ')
+    .replace(/रू/g, 'Rs. ')
+    .replace(/\$/g, 'USD ');
+};
+
+const isNumericColumn = (col) => {
+  const key = String(col.key).toLowerCase();
+  return col.isNumeric || key.includes('amount') || key.includes('fee') || key.includes('balance') || key.includes('net');
+};
+
+const validateInput = (data, columns, fileName) => {
+  if (!data || !Array.isArray(data) || data.length === 0) {
+    throw new Error("No data available to download.");
+  }
+  if (!columns || !Array.isArray(columns) || columns.length === 0) {
+    throw new Error("Columns configuration is missing.");
+  }
+  if (!fileName) {
+    throw new Error("File name is required.");
+  }
+};
+
+// ============================================
 // 📊 1. DOWNLOAD AS EXCEL (Smart CSV with BOM)
 // ============================================
-export const downloadExcelReport = (data, columns, fileName, reportTitle = "Financial Report") => {
+export const downloadExcelReport = async (
+  data,
+  columns,
+  fileName,
+  reportTitle = "Financial Report",
+  { onError, onSuccess } = {}
+) => {
   try {
-    if (!data || !Array.isArray(data) || data.length === 0) {
-      alert("No data available to download.");
-      return;
-    }
+    validateInput(data, columns, fileName);
 
-    // 1. Prepare Headers
-    const headers = columns.map(col => `"${String(col.header).replace(/"/g, '""')}"`).join(',');
+    // 1. Headers
+    const headers = columns.map(col => `"${sanitizeCellForCSV(col.header)}"`).join(',');
 
-    // 2. Prepare Rows & Calculate Totals dynamically
+    // 2. Rows & dynamic totals
     let totals = new Array(columns.length).fill("");
     totals[0] = "TOTAL";
 
     const rows = data.map(row => {
       return columns.map((col, index) => {
-        let val = row[col.key];
-        if (val === null || val === undefined) val = "";
-        
-        // Summing Logic for Amounts
-        const colKey = String(col.key).toLowerCase();
-        if (col.isNumeric || colKey.includes('amount') || colKey.includes('fee') || colKey.includes('balance') || colKey.includes('net')) {
+        let val = sanitizeCellForCSV(row[col.key]);
+
+        // Summing for numeric columns
+        if (isNumericColumn(col)) {
           const numVal = parseFloat(String(val).replace(/[^0-9.-]+/g, ""));
           if (!isNaN(numVal)) {
             totals[index] = (totals[index] === "" ? 0 : totals[index]) + numVal;
           }
         }
-        
-        // Wrap cell value in quotes to prevent Excel column breaks on commas
-        return `"${String(val).replace(/"/g, '""')}"`;
+        return `"${val}"`;
       }).join(',');
     });
 
-    // 3. Format Totals Row
+    // 3. Format totals row
     const totalsRow = totals.map((t, index) => {
       if (typeof t === 'number') return `"${t.toFixed(2)}"`;
       if (index === 0) return `"${t}"`;
-      return `""`; // Empty cells for non-numeric columns
+      return `""`;
     }).join(',');
 
-    // 4. Assemble Final CSV Content
-    // Note: \uFEFF is added so Excel reads the file as UTF-8 (Fixes ₹, रू, $ corruption)
+    // 4. Assemble CSV
     const csvContent = [
       `"${reportTitle.toUpperCase()}"`,
       `"Generated on: ${new Date().toLocaleString()}"`,
-      `""`, // Empty spacing row
+      `""`,
       headers,
       ...rows,
       totalsRow
     ].join('\n');
 
-    // 5. Trigger Native Download
+    // 5. Trigger download
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    
     const link = document.createElement("a");
     link.setAttribute("href", url);
     link.setAttribute("download", `${fileName}_${new Date().toISOString().split('T')[0]}.csv`);
-    
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 
+    if (onSuccess) onSuccess();
   } catch (error) {
     console.error("Excel Generation Error:", error);
-    alert(`Excel Error: ${error.message}`);
+    if (onError) onError(error.message);
+    else throw error; // re-throw agar koi listener nahi
   }
 };
 
-
 // ============================================
-// 📄 2. DOWNLOAD PRO PDF (Verified Working)
+// 📄 2. DOWNLOAD PRO PDF
 // ============================================
-export const downloadPDFReport = (data, columns, fileName, reportTitle = "Financial Report") => {
+export const downloadPDFReport = async (
+  data,
+  columns,
+  fileName,
+  reportTitle = "Financial Report",
+  { onError, onSuccess } = {}
+) => {
   try {
-    if (!data || !Array.isArray(data) || data.length === 0) {
-      alert("No data available to download.");
-      return;
-    }
+    validateInput(data, columns, fileName);
 
     const doc = new jsPDF();
-    
-    // Header & Branding
+
+    // Header
     doc.setFontSize(18);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(30, 58, 138);
     doc.text(reportTitle.toUpperCase(), 14, 18);
-    
+
     doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100);
@@ -101,19 +136,13 @@ export const downloadPDFReport = (data, columns, fileName, reportTitle = "Financ
     let totals = new Array(columns.length).fill("");
     totals[0] = "TOTAL";
 
-    // Format Body & Calculate Totals
-    const body = data.map(row => 
+    const body = data.map(row =>
       columns.map((col, index) => {
-        let cellValue = row[col.key];
-        if (cellValue === null || cellValue === undefined) cellValue = "";
-        cellValue = String(cellValue);
-        
-        // Remove unsupported symbols for standard PDF fonts
-        cellValue = cellValue.replace(/₹/g, 'Rs. ').replace(/रू/g, 'Rs. ').replace(/\$/g, 'USD ');
-        
-        const colKey = String(col.key).toLowerCase();
-        if (col.isNumeric || colKey.includes('amount') || colKey.includes('fee') || colKey.includes('balance') || colKey.includes('net')) {
-          const numVal = parseFloat(cellValue.replace(/[^0-9.-]+/g, ""));
+        let cellValue = sanitizeCellForPDF(row[col.key]);
+
+        // Summing for numeric columns
+        if (isNumericColumn(col)) {
+          const numVal = parseFloat(String(cellValue).replace(/[^0-9.-]+/g, ""));
           if (!isNaN(numVal)) {
             totals[index] = (totals[index] === "" ? 0 : totals[index]) + numVal;
           }
@@ -122,18 +151,16 @@ export const downloadPDFReport = (data, columns, fileName, reportTitle = "Financ
       })
     );
 
-    // Format totals for bottom row
+    // Format totals for final row with currency symbol (use first row's symbol)
+    const firstRowSymbol = body.length > 0 ? (String(body[0][0]).includes('Rs.') ? 'Rs. ' : String(body[0][0]).includes('USD') ? 'USD ' : '') : '';
     totals = totals.map((t, i) => {
       if (typeof t === 'number') {
-        const symbol = String(body[0][i]).includes('Rs.') ? 'Rs. ' : String(body[0][i]).includes('USD') ? 'USD ' : '';
-        return `${symbol}${t.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        return `${firstRowSymbol}${t.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
       }
       return t;
     });
+    body.push(totals);
 
-    body.push(totals); 
-
-    // Generate Table
     autoTable(doc, {
       head: head,
       body: body,
@@ -150,7 +177,7 @@ export const downloadPDFReport = (data, columns, fileName, reportTitle = "Financ
           }
           if (data.row.index === body.length - 1) {
             data.cell.styles.fontStyle = 'bold';
-            data.cell.styles.fillColor = [241, 245, 249]; 
+            data.cell.styles.fillColor = [241, 245, 249];
             data.cell.styles.textColor = [15, 23, 42];
           }
         }
@@ -159,8 +186,10 @@ export const downloadPDFReport = (data, columns, fileName, reportTitle = "Financ
 
     doc.save(`${fileName}_${new Date().toISOString().split('T')[0]}.pdf`);
 
+    if (onSuccess) onSuccess();
   } catch (error) {
     console.error("PDF Error:", error);
-    alert(`PDF Error: ${error.message}`);
+    if (onError) onError(error.message);
+    else throw error;
   }
 };

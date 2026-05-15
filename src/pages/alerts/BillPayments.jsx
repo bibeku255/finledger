@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { collection, addDoc, doc, deleteDoc, updateDoc, onSnapshot, query, orderBy, where, getDocs, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
-
+import { verifyPIN } from '../../utils/cryptoUtils';
 import { 
   HiOutlinePlus, HiOutlineX, HiOutlineTrash, 
   HiOutlineCalendar, HiOutlineCreditCard, HiOutlineCheckCircle,
@@ -17,13 +17,6 @@ import {
 
 // 🚀 GLOBALS
 import { fiatFlagMap } from '../../utils/marketConstants';
-
-const hashPIN = async (pinCode) => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(pinCode);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-};
 
 const getLocalDateTimeString = () => {
   const now = new Date();
@@ -331,45 +324,49 @@ const BillPayments = () => {
   };
 
   const executeSecureDelete = async (e) => {
-    e.preventDefault();
-    if (!pinInput.trim()) return setPinError("Please enter your PIN.");
-    setIsVerifying(true);
-    setPinError('');
+  e.preventDefault();
+  if (!pinInput.trim()) return setPinError("Please enter your PIN.");
+  setIsVerifying(true);
+  setPinError('');
 
-    try {
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      const userData = userDoc.data();
-      const hashedInput = await hashPIN(pinInput.trim());
-      const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin; 
-
-      if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) {
-        setPinError("Incorrect PIN. Deletion blocked! 🛑");
-        setIsVerifying(false);
-        return;
-      }
-
-      await deleteDoc(doc(db, "users", user.uid, "billReminders", deleteContext.id));
-
-      const cleanQueries = [
-         { col: "expenseLogs", field: "billId" },
-         { col: "bankWallet", field: "billId" },
-         { col: "cashWallet", field: "billId" },
-         { col: "onlineWallet", field: "billId" },
-         { col: "cryptoWalletLogs", field: "billId" },
-      ];
-
-      for (let q of cleanQueries) {
-         const snaps = await getDocs(query(collection(db, "users", user.uid, q.col), where(q.field, "==", deleteContext.id)));
-         snaps.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, q.col, d.id)));
-      }
-
-      setDeleteContext(null); 
-    } catch (error) {
-      setPinError("System error during deletion.");
-    } finally {
+  try {
+    const userDoc = await getDoc(doc(db, "users", user.uid));
+    const storedHash = userDoc.data()?.security?.pinHash || userDoc.data()?.securityPin || userDoc.data()?.pin;
+    
+    const { valid, newHash } = await verifyPIN(pinInput.trim(), storedHash, user.uid);
+    
+    if (!valid) {
+      setPinError("Incorrect PIN. Deletion blocked! 🛑");
       setIsVerifying(false);
+      return;
     }
-  };
+    
+    if (newHash) {
+      await setDoc(doc(db, "users", user.uid), { security: { pinHash: newHash } }, { merge: true });
+    }
+
+    await deleteDoc(doc(db, "users", user.uid, "billReminders", deleteContext.id));
+
+    const cleanQueries = [
+       { col: "expenseLogs", field: "billId" },
+       { col: "bankWallet", field: "billId" },
+       { col: "cashWallet", field: "billId" },
+       { col: "onlineWallet", field: "billId" },
+       { col: "cryptoWalletLogs", field: "billId" },
+    ];
+
+    for (let q of cleanQueries) {
+       const snaps = await getDocs(query(collection(db, "users", user.uid, q.col), where(q.field, "==", deleteContext.id)));
+       snaps.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, q.col, d.id)));
+    }
+
+    setDeleteContext(null); 
+  } catch (error) {
+    setPinError("System error during deletion.");
+  } finally {
+    setIsVerifying(false);
+  }
+};
 
   const openPayModal = (bill) => {
     setActiveBill(bill);

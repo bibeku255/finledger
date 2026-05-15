@@ -3,7 +3,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { collection, addDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc, getDocs, where } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
-
+import { verifyPIN } from '../../utils/cryptoUtils';
 import { 
   HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
   HiOutlineSearch, HiOutlineRefresh, HiOutlineTrendingUp, HiOutlineTrendingDown,
@@ -51,13 +51,6 @@ const LogoRenderer = ({ symbol, logoUrl, bg, color }) => {
       onError={() => setHasError(true)} 
     />
   );
-};
-
-const hashPIN = async (pinCode) => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(pinCode);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
 const getLocalISOString = () => {
@@ -417,35 +410,47 @@ const CryptoWallet = () => {
   };
 
   const executeSecureDelete = async (e) => {
-    e.preventDefault(); 
-    if (!pinInput.trim()) return setPinError("Please enter your PIN."); 
-    setIsVerifying(true); 
-    setPinError('');
-    try {
-      const userDoc = await getDoc(doc(db, "users", user.uid)); 
-      const userData = userDoc.data();
-      const hashedInput = await hashPIN(pinInput.trim()); 
-      const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin;
-      
-      if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) { 
-        setPinError("Incorrect PIN."); setIsVerifying(false); return; 
-      }
-      
-      await deleteDoc(doc(db, "users", user.uid, "cryptoWalletLogs", deleteContext.id));
-      
-      const linkedVaults = ['bankWallet', 'onlineWallet', 'cashWallet'];
-      for (const vault of linkedVaults) { 
-        const q = query(collection(db, "users", user.uid, vault), where("linkedCryptoId", "==", deleteContext.id)); 
-        const snap = await getDocs(q); 
-        snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, vault, d.id))); 
-      }
-      setDeleteContext(null);
-    } catch (error) { 
-      setPinError("Verification failed."); 
-    } finally { 
+  e.preventDefault(); 
+  if (!pinInput.trim()) return setPinError("Please enter your PIN."); 
+  setIsVerifying(true); 
+  setPinError('');
+  try {
+    const userDoc = await getDoc(doc(db, "users", user.uid)); 
+    const userData = userDoc.data();
+    const storedHash = userData?.security?.pinHash || userData?.securityPin || userData?.pin;
+    
+    // ✅ Use verifyPIN for consistent verification + auto-upgrade
+    const { valid, newHash } = await verifyPIN(pinInput.trim(), storedHash, user.uid);
+    
+    if (!valid) {
+      setPinError("Incorrect PIN."); 
       setIsVerifying(false); 
+      return; 
     }
-  };
+    
+    // Auto-upgrade if old hash
+    if (newHash) {
+      await setDoc(doc(db, "users", user.uid), 
+        { security: { pinHash: newHash } }, 
+        { merge: true }
+      );
+    }
+    
+    await deleteDoc(doc(db, "users", user.uid, "cryptoWalletLogs", deleteContext.id));
+    
+    const linkedVaults = ['bankWallet', 'onlineWallet', 'cashWallet'];
+    for (const vault of linkedVaults) { 
+      const q = query(collection(db, "users", user.uid, vault), where("linkedCryptoId", "==", deleteContext.id)); 
+      const snap = await getDocs(q); 
+      snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, vault, d.id))); 
+    }
+    setDeleteContext(null);
+  } catch (error) { 
+    setPinError("Verification failed."); 
+  } finally { 
+    setIsVerifying(false); 
+  }
+};
 
   const openModal = (type) => { 
     if (availableCryptos.length === 0) return alert("Your Watchlist is empty! Please add crypto assets in Settings > Tickers first.");

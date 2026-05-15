@@ -1,23 +1,22 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { useNavigate } from 'react-router-dom';
-
-import { 
-  HiOutlineLightBulb, HiOutlineShieldCheck, HiOutlineTrendingUp, 
+import { fetchWithRetry } from '../../utils/helpers';
+import {
+  HiOutlineLightBulb, HiOutlineShieldCheck, HiOutlineTrendingUp,
   HiOutlineExclamation, HiOutlineChartPie, HiOutlineRefresh,
   HiOutlineArrowRight, HiOutlineScale, HiOutlineEye, HiOutlineLightningBolt,
-  HiOutlineSparkles // 🚀 FIXED: Added missing import here
+  HiOutlineSparkles
 } from 'react-icons/hi';
-import { 
+import {
   FaBrain, FaRobot, FaLeaf, FaWallet, FaChartLine
 } from 'react-icons/fa';
 
-// Animated Circular Gauge
+// Animated Circular Gauge (unchanged)
 const ScoreGauge = ({ score, riskLevel }) => {
   const [animatedScore, setAnimatedScore] = useState(0);
-  
   useEffect(() => {
     const timer = setTimeout(() => setAnimatedScore(score), 300);
     return () => clearTimeout(timer);
@@ -50,7 +49,7 @@ const ScoreGauge = ({ score, riskLevel }) => {
   );
 };
 
-// Progress Bar with animation
+// Progress Bar with animation (unchanged)
 const ProgressBar = ({ label, icon: Icon, value, color, bgColor, amount }) => {
   const [width, setWidth] = useState(0);
   useEffect(() => {
@@ -81,7 +80,7 @@ const ProgressBar = ({ label, icon: Icon, value, color, bgColor, amount }) => {
   );
 };
 
-// Strategy Card
+// Strategy Card (unchanged)
 const StrategyCard = ({ action, index }) => {
   const navigate = useNavigate();
   const typeIcons = { opportunity: HiOutlineLightningBolt, risk: HiOutlineExclamation, health: HiOutlineShieldCheck, growth: HiOutlineTrendingUp };
@@ -111,22 +110,53 @@ const StrategyCard = ({ action, index }) => {
 };
 
 const AiStrategy = () => {
-  const { user, baseCurrency = 'INR', formatGlobalDate } = useAuth();
+  const { user, baseCurrency = 'INR', selectedCryptos = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
   const navigate = useNavigate();
-  
+
   const [isAnalyzing, setIsAnalyzing] = useState(true);
   const [analysisProgress, setAnalysisProgress] = useState(0);
 
-  // Real data states
   const [bankBalance, setBankBalance] = useState(0);
   const [cashBalance, setCashBalance] = useState(0);
   const [onlineBalance, setOnlineBalance] = useState(0);
-  const [cryptoBalance, setCryptoBalance] = useState(0); 
+  const [cryptoBalance, setCryptoBalance] = useState(0);
   const [dataLoaded, setDataLoaded] = useState(false);
-  
+
+  const [forceUpdate, setForceUpdate] = useState(0);
+
   const [strategyData, setStrategyData] = useState(null);
 
+  // Custom user coins (for fallback prices)
+  const [customUserCoins, setCustomUserCoins] = useState([]);
+
+  // Build full database (selectedCryptos + customUserCoins)
+  const fullDatabase = useMemo(() => {
+    const coinMap = new Map();
+    selectedCryptos.forEach(c => {
+      if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c);
+      else coinMap.set(c.toUpperCase(), { symbol: c.toUpperCase(), id: c.toLowerCase() });
+    });
+    customUserCoins.forEach(c => {
+      const existing = coinMap.get(c.symbol.toUpperCase());
+      coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c, logo: c.logo || existing?.logo });
+    });
+    return Array.from(coinMap.values());
+  }, [customUserCoins, selectedCryptos]);
+
+  // Fetch custom coins from Firestore
+  useEffect(() => {
+    if (!user) return;
+    const fetchCustomCoins = async () => {
+      const userSnap = await getDoc(doc(db, "users", user.uid));
+      if (userSnap.exists() && userSnap.data().customCoins) {
+        setCustomUserCoins(userSnap.data().customCoins);
+      }
+    };
+    fetchCustomCoins();
+  }, [user]);
+
+  // Real-time data listeners
   useEffect(() => {
     if (!user) return;
 
@@ -139,53 +169,141 @@ const AiStrategy = () => {
       }, 0);
     };
 
+    // Robust crypto balance calculation (same logic as CryptoWallet)
     const fetchCryptoFiatValue = async (cryptoSnapshot) => {
+      // 1. Calculate holdings per coin
       const holdings = {};
       cryptoSnapshot.docs.forEach(doc => {
-         const d = doc.data();
-         const coin = d.coin?.toUpperCase();
-         if(!coin) return;
-         const qty = parseFloat(d.quantity) || 0;
-         const fee = parseFloat(d.networkFee) || 0;
-         
-         if(d.type === 'in') holdings[coin] = (holdings[coin] || 0) + qty;
-         else if(d.type === 'out') holdings[coin] = (holdings[coin] || 0) - qty;
-         else if(d.type === 'transfer') holdings[coin] = (holdings[coin] || 0) - fee;
+        const d = doc.data();
+        const coin = d.coin?.toUpperCase();
+        if (!coin) return;
+        const qty = parseFloat(d.quantity) || 0;
+        const fee = parseFloat(d.networkFee) || 0;
+
+        if (d.type === 'in') {
+          holdings[coin] = (holdings[coin] || 0) + qty;
+        } else if (d.type === 'out') {
+          holdings[coin] = (holdings[coin] || 0) - qty;
+        } else if (d.type === 'transfer') {
+          // transfer reduces total holdings by network fee
+          holdings[coin] = (holdings[coin] || 0) - fee;
+        }
       });
 
-      let usdToFiatRate = 1;
+      // 2. Base currency rate
+      let usdToBase = 1;
       try {
-         const forex = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
-         usdToFiatRate = (await forex.json()).rates[baseCurrency] || 1;
-      } catch(e) {}
+        const forexRes = await fetchWithRetry('https://api.exchangerate-api.com/v4/latest/USD');
+        if (forexRes && forexRes.ok) {
+          usdToBase = parseFloat((await forexRes.json()).rates[baseCurrency]) || 1;
+        }
+      } catch (e) {}
 
-      let totalFiatValueOfCrypto = 0;
       const coinsToFetch = Object.keys(holdings);
-
-      for (const sym of coinsToFetch) {
-         let priceUsd = 0;
-         try {
-            if (['USDT', 'USDC', 'DAI'].includes(sym)) {
-                priceUsd = 1;
-            } else {
-                const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${sym}USDT`);
-                if (bRes.ok) priceUsd = parseFloat((await bRes.json()).price);
-            }
-         } catch(e) {}
-
-         if (!priceUsd) {
-            if (sym === 'FEY') priceUsd = 0.0091;
-            if (sym === 'CTC' || sym === 'ROX') priceUsd = 1.0;
-            if (sym === 'ICE') priceUsd = 0.0035;
-            if (sym === 'PI') priceUsd = 36.50;
-            if (sym === 'JMPT') priceUsd = 0.95;
-         }
-
-         if (holdings[sym] > 0) {
-            totalFiatValueOfCrypto += (holdings[sym] * priceUsd * usdToFiatRate);
-         }
+      if (coinsToFetch.length === 0) {
+        setCryptoBalance(0);
+        return;
       }
-      setCryptoBalance(totalFiatValueOfCrypto);
+
+      // 3. Separate normal coins and contract coins
+      const normalCoins = [];
+      const contractCoins = [];
+      coinsToFetch.forEach(sym => {
+        const upperSym = sym.toUpperCase();
+        const dbCoin = fullDatabase.find(c => c.symbol.toUpperCase() === upperSym);
+        if (dbCoin?.fetchMode === 'contract' && dbCoin.contractAddress) {
+          contractCoins.push({ symbol: upperSym, ...dbCoin });
+        } else {
+          const id = dbCoin?.id || sym.toLowerCase();
+          normalCoins.push({ id, symbol: upperSym });
+        }
+      });
+
+      // 4. Fetch CoinGecko prices for normal coins
+      let cgPrices = {};
+      try {
+        if (normalCoins.length > 0) {
+          const uniqueIds = [...new Set(normalCoins.map(c => c.id))].join(',');
+          const cgRes = await fetchWithRetry(`https://api.coingecko.com/api/v3/simple/price?ids=${uniqueIds}&vs_currencies=usd`);
+          if (cgRes && cgRes.ok) {
+            cgPrices = await cgRes.json();
+          }
+        }
+      } catch (e) {}
+
+      // 5. Fetch prices for contract coins (DexScreener / GeckoTerminal)
+      let contractPrices = {};
+      for (const coin of contractCoins) {
+        let priceUsd = 0;
+        try {
+          const dexRes = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${coin.contractAddress}`);
+          if (dexRes && dexRes.ok) {
+            const dexData = await dexRes.json();
+            if (dexData.pairs?.length > 0) {
+              priceUsd = parseFloat(dexData.pairs[0].priceUsd);
+            }
+          }
+          if (!priceUsd && coin.network) {
+            const gtRes = await fetchWithRetry(`https://api.geckoterminal.com/api/v2/networks/${coin.network}/tokens/${coin.contractAddress}`);
+            if (gtRes && gtRes.ok) {
+              const gtData = await gtRes.json();
+              priceUsd = parseFloat(gtData.data?.attributes?.price_usd) || 0;
+            }
+          }
+        } catch (e) {}
+        contractPrices[coin.symbol] = priceUsd;
+      }
+
+      // 6. Build final price map with fallbacks
+      const priceMap = {};
+      for (const sym of coinsToFetch) {
+        const upperSym = sym.toUpperCase();
+        const dbCoin = fullDatabase.find(c => c.symbol.toUpperCase() === upperSym) || {};
+        const normalId = dbCoin.id || sym.toLowerCase();
+        let priceUsd = 0;
+
+        if (dbCoin.fetchMode === 'contract') {
+          priceUsd = contractPrices[upperSym] || 0;
+        } else {
+          // CoinGecko
+          if (cgPrices[normalId]?.usd) {
+            priceUsd = parseFloat(cgPrices[normalId].usd);
+          }
+        }
+
+        // Binance fallback
+        if (!priceUsd) {
+          try {
+            if (['USDT', 'USDC', 'DAI', 'BUSD'].includes(upperSym)) {
+              priceUsd = 1.00;
+            } else {
+              const bRes = await fetchWithRetry(`https://api.binance.com/api/v3/ticker/price?symbol=${upperSym}USDT`);
+              if (bRes && bRes.ok) {
+                const bData = await bRes.json();
+                priceUsd = parseFloat(bData.price);
+              }
+            }
+          } catch (e) {}
+        }
+
+        // Fallback to user's custom fallbackPrice
+        if (!priceUsd && dbCoin.fallbackPrice) {
+          priceUsd = parseFloat(dbCoin.fallbackPrice);
+        }
+
+        priceMap[upperSym] = priceUsd;
+      }
+
+      // 7. Calculate total fiat value
+      let totalValue = 0;
+      for (const sym of coinsToFetch) {
+        const qty = holdings[sym] || 0;
+        const priceUsd = priceMap[sym] || 0;
+        if (qty > 0 && priceUsd > 0) {
+          totalValue += qty * priceUsd * usdToBase;
+        }
+      }
+      setCryptoBalance(totalValue);
     };
 
     const unsubs = [
@@ -197,12 +315,13 @@ const AiStrategy = () => {
 
     const timeout = setTimeout(() => setDataLoaded(true), 1200);
 
-    return () => { 
-      unsubs.forEach(unsub => unsub()); 
+    return () => {
+      unsubs.forEach(unsub => unsub());
       clearTimeout(timeout);
     };
-  }, [user, baseCurrency]);
+  }, [user, baseCurrency, fullDatabase]); // fullDatabase dependency ensures re-run when custom coins load
 
+  // Progress animation
   useEffect(() => {
     if (!isAnalyzing) return;
     const interval = setInterval(() => {
@@ -214,10 +333,10 @@ const AiStrategy = () => {
     return () => clearInterval(interval);
   }, [isAnalyzing]);
 
+  // Main analysis effect
   useEffect(() => {
     const hasData = bankBalance !== 0 || cashBalance !== 0 || cryptoBalance !== 0 || onlineBalance !== 0;
-    
-    if (!dataLoaded) return; 
+    if (!dataLoaded) return;
 
     const timer = setTimeout(() => {
       if (!hasData) {
@@ -228,8 +347,8 @@ const AiStrategy = () => {
 
       const totalFiat = bankBalance + cashBalance + onlineBalance;
       const totalPortfolio = totalFiat + cryptoBalance;
-      
-      if(totalPortfolio <= 0) {
+
+      if (totalPortfolio <= 0) {
         setStrategyData(generateEmptyStrategy());
         setIsAnalyzing(false);
         return;
@@ -237,38 +356,38 @@ const AiStrategy = () => {
 
       let fiatPct = Math.round((totalFiat / totalPortfolio) * 100);
       let cryptoPct = Math.round((cryptoBalance / totalPortfolio) * 100);
-      let yieldPct = Math.max(0, 100 - fiatPct - cryptoPct); 
+      let yieldPct = Math.max(0, 100 - fiatPct - cryptoPct);
 
       let risk = 'Safe';
       let score = 85;
-      
-      if (cryptoPct > 70) { risk = 'High'; score = 55; } 
-      else if (cryptoPct > 50) { risk = 'Medium-High'; score = 65; } 
-      else if (cryptoPct > 35) { risk = 'Moderate'; score = 78; } 
-      else if (cryptoPct < 5 && totalFiat > 10000) { risk = 'Conservative'; score = 72; } 
+
+      if (cryptoPct > 70) { risk = 'High'; score = 55; }
+      else if (cryptoPct > 50) { risk = 'Medium-High'; score = 65; }
+      else if (cryptoPct > 35) { risk = 'Moderate'; score = 78; }
+      else if (cryptoPct < 5 && totalFiat > 10000) { risk = 'Conservative'; score = 72; }
       else if (cryptoPct >= 5 && cryptoPct <= 35 && fiatPct >= 40) { score = 88; }
 
       const plan = [];
 
       if (fiatPct > 70) {
-        plan.push({ id: 1, type: 'opportunity', icon: <HiOutlineTrendingUp className="text-emerald-500" size={24}/>, title: "Idle Cash Alert", desc: `${currencySymbol}${totalFiat.toLocaleString(undefined, {maximumFractionDigits:0})} in fiat vaults. Inflation at ~5-7% erodes value. Shift 20-30% to stablecoins or high-yield deposits.`, actionText: "Rebalance Capital", link: "/dashboard/accounts/capital-shifting" });
+        plan.push({ id: 1, type: 'opportunity', icon: <HiOutlineTrendingUp className="text-emerald-500" size={24} />, title: "Idle Cash Alert", desc: `${currencySymbol}${totalFiat.toLocaleString(undefined, { maximumFractionDigits: 0 })} in fiat vaults. Inflation at ~5-7% erodes value. Shift 20-30% to stablecoins or high-yield deposits.`, actionText: "Rebalance Capital", link: "/dashboard/accounts/capital-shifting" });
       } else if (fiatPct < 20 && totalFiat <= 5000) {
-        plan.push({ id: 1, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" size={24}/>, title: "Low Emergency Fund", desc: "Emergency fund below recommended 3-6 months expenses. Prioritize building cash reserves before aggressive investing.", actionText: "Add Emergency Fund", link: "/dashboard/accounts/bank" });
+        plan.push({ id: 1, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" size={24} />, title: "Low Emergency Fund", desc: "Emergency fund below recommended 3-6 months expenses. Prioritize building cash reserves before aggressive investing.", actionText: "Add Emergency Fund", link: "/dashboard/accounts/bank" });
       } else {
-        plan.push({ id: 1, type: 'health', icon: <HiOutlineShieldCheck className="text-blue-500" size={24}/>, title: "Healthy Cash Position", desc: `Fiat reserves at ${fiatPct}% — strong safety net for emergencies while maintaining investment exposure.`, actionText: "View Bank Vault", link: "/dashboard/accounts/bank" });
+        plan.push({ id: 1, type: 'health', icon: <HiOutlineShieldCheck className="text-blue-500" size={24} />, title: "Healthy Cash Position", desc: `Fiat reserves at ${fiatPct}% — strong safety net for emergencies while maintaining investment exposure.`, actionText: "View Bank Vault", link: "/dashboard/accounts/bank" });
       }
 
       if (cryptoPct > 50) {
-        plan.push({ id: 2, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" size={24}/>, title: "Overexposed to Crypto", desc: `${cryptoPct}% in volatile assets. Consider profit-booking 15-25% into stablecoins or fiat to reduce drawdown risk.`, actionText: "Book Profits", link: "/dashboard/crypto/hold-and-swap" });
+        plan.push({ id: 2, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" size={24} />, title: "Overexposed to Crypto", desc: `${cryptoPct}% in volatile assets. Consider profit-booking 15-25% into stablecoins or fiat to reduce drawdown risk.`, actionText: "Book Profits", link: "/dashboard/crypto/hold-and-swap" });
       } else if (cryptoPct > 0 && cryptoPct <= 35) {
-        plan.push({ id: 2, type: 'growth', icon: <FaLeaf className="text-purple-500" size={24}/>, title: "Optimize Crypto Holdings", desc: "Balanced exposure. Explore staking (4-12% APY) or DeFi yield opportunities on idle tokens for passive income.", actionText: "Explore Yield Options", link: "/dashboard/crypto/staking-yield" });
+        plan.push({ id: 2, type: 'growth', icon: <FaLeaf className="text-purple-500" size={24} />, title: "Optimize Crypto Holdings", desc: "Balanced exposure. Explore staking (4-12% APY) or DeFi yield opportunities on idle tokens for passive income.", actionText: "Explore Yield Options", link: "/dashboard/crypto/staking-yield" });
       } else if (cryptoPct === 0) {
-        plan.push({ id: 2, type: 'opportunity', icon: <FaChartLine className="text-emerald-500" size={24}/>, title: "Zero Crypto Exposure", desc: "2-5% in BTC/ETH hedges against fiat inflation & currency devaluation. Start small with dollar-cost averaging.", actionText: "Start Crypto Journey", link: "/dashboard/crypto/hold-and-swap" });
+        plan.push({ id: 2, type: 'opportunity', icon: <FaChartLine className="text-emerald-500" size={24} />, title: "Zero Crypto Exposure", desc: "2-5% in BTC/ETH hedges against fiat inflation & currency devaluation. Start small with dollar-cost averaging.", actionText: "Start Crypto Journey", link: "/dashboard/crypto/hold-and-swap" });
       } else {
-        plan.push({ id: 2, type: 'health', icon: <HiOutlineScale className="text-blue-500" size={24}/>, title: "Balanced Crypto Exposure", desc: `${cryptoPct}% allocation is within optimal range for growth-oriented portfolios. Monitor quarterly.`, actionText: "Track Portfolio", link: "/dashboard/crypto/hold-and-swap" });
+        plan.push({ id: 2, type: 'health', icon: <HiOutlineScale className="text-blue-500" size={24} />, title: "Balanced Crypto Exposure", desc: `${cryptoPct}% allocation is within optimal range for growth-oriented portfolios. Monitor quarterly.`, actionText: "Track Portfolio", link: "/dashboard/crypto/hold-and-swap" });
       }
 
-      plan.push({ id: 3, type: 'health', icon: <HiOutlineChartPie className="text-indigo-500" size={24}/>, title: "Portfolio Health Check", desc: `Total tracked: ${currencySymbol}${totalPortfolio.toLocaleString(undefined, {maximumFractionDigits:0})}. Score: ${score}/100. ${score >= 80 ? 'Great job!' : score >= 60 ? 'Room for improvement.' : 'Needs immediate attention.'}`, actionText: "Full Audit Report", link: "/dashboard/accounts/history" });
+      plan.push({ id: 3, type: 'health', icon: <HiOutlineChartPie className="text-indigo-500" size={24} />, title: "Portfolio Health Check", desc: `Total tracked: ${currencySymbol}${totalPortfolio.toLocaleString(undefined, { maximumFractionDigits: 0 })}. Score: ${score}/100. ${score >= 80 ? 'Great job!' : score >= 60 ? 'Room for improvement.' : 'Needs immediate attention.'}`, actionText: "Full Audit Report", link: "/dashboard/accounts/history" });
 
       setStrategyData({
         optimizationScore: score, riskLevel: risk, allocations: { fiat: fiatPct, crypto: cryptoPct, yield: yieldPct },
@@ -279,15 +398,19 @@ const AiStrategy = () => {
     }, 2000);
 
     return () => clearTimeout(timer);
-  }, [bankBalance, cashBalance, cryptoBalance, onlineBalance, currencySymbol, dataLoaded]);
+  }, [bankBalance, cashBalance, cryptoBalance, onlineBalance, currencySymbol, dataLoaded, forceUpdate]);
 
   const generateEmptyStrategy = () => ({
     optimizationScore: 0, riskLevel: 'N/A', allocations: { fiat: 0, crypto: 0, yield: 0 },
     totalPortfolio: 0, totalFiat: 0, cryptoBalance: 0,
-    actionPlan: [{ id: 1, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" size={24}/>, title: "No Financial Data Found", desc: `J.A.R.V.I.S requires transaction data to analyze. Add your first deposit to Bank, Cash, or Crypto vaults to unlock personalized AI insights and portfolio optimization strategies.`, actionText: "Add First Deposit", link: "/dashboard/accounts/bank" }]
+    actionPlan: [{ id: 1, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" size={24} />, title: "No Financial Data Found", desc: `J.A.R.V.I.S requires transaction data to analyze. Add your first deposit to Bank, Cash, or Crypto vaults to unlock personalized AI insights and portfolio optimization strategies.`, actionText: "Add First Deposit", link: "/dashboard/accounts/bank" }]
   });
 
-  const reAnalyze = () => { setIsAnalyzing(true); setAnalysisProgress(0); };
+  const reAnalyze = () => {
+    setIsAnalyzing(true);
+    setAnalysisProgress(0);
+    setForceUpdate(prev => prev + 1);
+  };
 
   if (!dataLoaded || isAnalyzing) {
     return (
@@ -296,7 +419,6 @@ const AiStrategy = () => {
           <div className="absolute inset-0 bg-blue-500 blur-3xl opacity-20 animate-pulse rounded-full scale-[2]" />
           <div className="relative">
             <FaBrain className="text-[80px] sm:text-[100px] text-blue-500 animate-bounce drop-shadow-2xl" />
-            {/* 🚀 SPARKLES ICON FIXED HERE */}
             <HiOutlineSparkles className="absolute -top-4 -right-4 text-3xl text-yellow-400 animate-ping" />
           </div>
         </div>
@@ -344,7 +466,7 @@ const AiStrategy = () => {
           {strategyData?.riskLevel && strategyData.riskLevel !== 'N/A' && (
             <div className={`flex-1 lg:flex-none flex justify-center items-center gap-1.5 px-4 py-3 sm:py-3.5 rounded-2xl text-[10px] sm:text-xs font-black uppercase tracking-widest border backdrop-blur-sm shadow-sm
               ${strategyData.riskLevel === 'Safe' || strategyData.riskLevel === 'Conservative' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : strategyData.riskLevel === 'Moderate' ? 'bg-blue-500/10 text-blue-400 border-blue-500/30' : strategyData.riskLevel === 'Medium-High' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' : 'bg-rose-500/10 text-rose-400 border-rose-500/30'}`}>
-              {strategyData.riskLevel === 'Safe' ? '🛡️' : strategyData.riskLevel === 'Conservative' ? '🔒' : strategyData.riskLevel === 'Moderate' ? '⚖️' : strategyData.riskLevel === 'Medium-High' ? '⚠️' : '🔥'} 
+              {strategyData.riskLevel === 'Safe' ? '🛡️' : strategyData.riskLevel === 'Conservative' ? '🔒' : strategyData.riskLevel === 'Moderate' ? '⚖️' : strategyData.riskLevel === 'Medium-High' ? '⚠️' : '🔥'}
               <span className="truncate">{strategyData.riskLevel} Risk</span>
             </div>
           )}
@@ -361,21 +483,21 @@ const AiStrategy = () => {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 sm:gap-6">
         <div className="p-6 sm:p-8 bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center relative overflow-hidden group">
           <div className="absolute -left-10 -top-10 opacity-[0.02] dark:opacity-5 group-hover:scale-110 transition-transform duration-700">
-            <FaBrain size={200} className="text-slate-900 dark:text-white"/>
+            <FaBrain size={200} className="text-slate-900 dark:text-white" />
           </div>
           <h3 className="text-[10px] sm:text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-6 relative z-10 text-center">Portfolio Health Score</h3>
           <ScoreGauge score={strategyData?.optimizationScore || 0} riskLevel={strategyData?.riskLevel} />
           {strategyData?.totalPortfolio > 0 && (
             <div className="mt-8 text-center relative z-10 bg-slate-50 dark:bg-slate-800/50 px-6 py-3 rounded-2xl border border-slate-100 dark:border-slate-700/50">
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Tracked Wealth</p>
-              <p className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white truncate max-w-[200px]" title={`${currencySymbol}${strategyData.totalPortfolio.toLocaleString()}`}>{currencySymbol}{strategyData.totalPortfolio.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2})}</p>
+              <p className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white truncate max-w-[200px]" title={`${currencySymbol}${strategyData.totalPortfolio.toLocaleString()}`}>{currencySymbol}{strategyData.totalPortfolio.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
             </div>
           )}
         </div>
 
         <div className="xl:col-span-2 p-6 sm:p-8 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-center relative overflow-hidden">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8 relative z-10">
-            <h3 className="text-base sm:text-lg font-black text-slate-800 dark:text-white flex items-center gap-2"><HiOutlineChartPie className="text-blue-500 shrink-0" size={22}/>Asset Allocation Blueprint</h3>
+            <h3 className="text-base sm:text-lg font-black text-slate-800 dark:text-white flex items-center gap-2"><HiOutlineChartPie className="text-blue-500 shrink-0" size={22} />Asset Allocation Blueprint</h3>
             <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-[9px] font-black text-slate-500 uppercase tracking-widest bg-slate-50 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-100 dark:border-slate-700">
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500 shadow-sm" /> Fiat</span>
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500 shadow-sm" /> Crypto</span>
@@ -383,8 +505,8 @@ const AiStrategy = () => {
             </div>
           </div>
           <div className="space-y-6 sm:space-y-8 relative z-10">
-            <ProgressBar label="Fiat & Cash Reserves" icon={FaWallet} value={strategyData?.allocations?.fiat || 0} color="bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]" bgColor="bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20" amount={strategyData?.totalFiat ? `${currencySymbol}${strategyData.totalFiat.toLocaleString(undefined, {maximumFractionDigits:0})}` : undefined} />
-            <ProgressBar label="Digital Assets (Crypto)" icon={FaChartLine} value={strategyData?.allocations?.crypto || 0} color="bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.5)]" bgColor="bg-orange-50 dark:bg-orange-500/10 border border-orange-100 dark:border-orange-500/20" amount={strategyData?.cryptoBalance ? `${currencySymbol}${strategyData.cryptoBalance.toLocaleString(undefined, {maximumFractionDigits:0})}` : undefined} />
+            <ProgressBar label="Fiat & Cash Reserves" icon={FaWallet} value={strategyData?.allocations?.fiat || 0} color="bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]" bgColor="bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20" amount={strategyData?.totalFiat ? `${currencySymbol}${strategyData.totalFiat.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : undefined} />
+            <ProgressBar label="Digital Assets (Crypto)" icon={FaChartLine} value={strategyData?.allocations?.crypto || 0} color="bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.5)]" bgColor="bg-orange-50 dark:bg-orange-500/10 border border-orange-100 dark:border-orange-500/20" amount={strategyData?.cryptoBalance ? `${currencySymbol}${strategyData.cryptoBalance.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : undefined} />
             <ProgressBar label="Yield/Staking (Estimated)" icon={FaLeaf} value={strategyData?.allocations?.yield || 0} color="bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" bgColor="bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20" />
           </div>
           <div className="mt-8 p-4 sm:p-5 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/10 dark:to-cyan-900/10 rounded-2xl border border-blue-200 dark:border-blue-500/20 relative z-10 shadow-sm">
@@ -417,7 +539,6 @@ const AiStrategy = () => {
           <FaRobot className="text-blue-500" size={16} /> Powered by J.A.R.V.I.S Engine v2.0 — <span className="text-blue-600 dark:text-blue-400">Real-time cross-vault analysis</span>
         </p>
       </div>
-
     </div>
   );
 };

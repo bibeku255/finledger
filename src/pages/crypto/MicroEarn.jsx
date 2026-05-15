@@ -3,13 +3,15 @@ import { useAuth } from '../../hooks/useAuth';
 import { collection, addDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc, getDocs, where } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
+import { verifyPIN } from '../../utils/cryptoUtils';
+import { fetchWithRetry } from '../../utils/helpers';
 
 import { 
   HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
   HiOutlineSearch, HiOutlineRefresh, HiOutlineLockClosed, 
   HiOutlineChevronDown, HiOutlineClock, HiOutlineTrendingUp, 
   HiOutlineTrendingDown, HiOutlineDownload, HiOutlineDocumentText, 
-  HiOutlineTable, HiOutlineShieldCheck
+  HiOutlineTable, HiOutlineShieldCheck, HiOutlineCalendar
 } from 'react-icons/hi';
 import { 
   FaBitcoin, FaWallet, FaMedal, FaTrophy, FaBuilding, FaCoins 
@@ -24,31 +26,11 @@ const earningMethodsList = [
   "Staking (Micro)", "Referrals"
 ];
 
-const fetchWithRetry = async (url, retries = 2) => {
-  for (let i = 0; i <= retries; i++) {
-    try {
-      const res = await fetch(url);
-      if (res.status !== 429) return res;
-      if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
-    } catch (e) {
-      if (i === retries) return null;
-    }
-  }
-  return null; 
-};
-
 const LogoRenderer = ({ symbol, logoUrl, bg, color }) => {
   const [hasError, setHasError] = useState(false);
   useEffect(() => { setHasError(false); }, [logoUrl]);
   if (!logoUrl || hasError) return <span className={`w-full h-full flex items-center justify-center font-black text-[10px] ${bg || 'bg-slate-200 dark:bg-slate-700'} ${color || 'text-slate-600 dark:text-white'} rounded-full`}>{symbol?.toUpperCase()?.substring(0, 3)}</span>;
   return <img src={logoUrl} alt={symbol} className="w-full h-full object-contain rounded-full bg-white dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700 shadow-sm" onError={() => setHasError(true)} />;
-};
-
-const hashPIN = async (pinCode) => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(pinCode);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
 const getLocalISOString = () => {
@@ -128,7 +110,7 @@ const MicroEarn = () => {
   const [isMarketSyncing, setIsMarketSyncing] = useState(true);
   const [isFetchingLive, setIsFetchingLive] = useState(false);
   const [customUserCoins, setCustomUserCoins] = useState([]); 
-  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false); // 🚀 EXPORT DROPDOWN STATE
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -138,7 +120,6 @@ const MicroEarn = () => {
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
 
-  // 🚀 DYNAMIC STATE FOR SUGGESTIONS
   const [existingSources, setExistingSources] = useState([]);
   const [existingWallets, setExistingWallets] = useState([]);
 
@@ -157,7 +138,6 @@ const MicroEarn = () => {
       setTransactions(logs); 
       setIsLoading(false); 
       
-      // Dynamically extract past platforms and wallets for suggestions
       const sources = new Set();
       const wallets = new Set();
       logs.forEach(log => {
@@ -357,8 +337,8 @@ const MicroEarn = () => {
       date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rec.date,
       platform: rec.platform,
       coin: rec.coin,
-      received: Number(rec.receivedAmount || 0), // Math format
-      liveValue: Number(rec.currentLiveBaseAmount || 0).toFixed(2), // Math format
+      received: Number(rec.receivedAmount || 0),
+      liveValue: Number(rec.currentLiveBaseAmount || 0).toFixed(2),
       methods: (rec.methods || []).join(', ')
     }));
 
@@ -461,14 +441,26 @@ const MicroEarn = () => {
   
   const initiateDelete = (rec) => { setDeleteContext(rec); setPinInput(''); setPinError(''); };
 
+  // 🚀 UPDATED DELETE WITH verifyPIN
   const executeSecureDelete = async (e) => {
     e.preventDefault(); 
     if (!pinInput.trim()) return setPinError("Please enter your PIN."); 
     setIsVerifying(true);
     try {
-      const userSnap = await getDoc(doc(db, "users", user.uid)); const userData = userSnap.data();
-      const hashedInput = await hashPIN(pinInput.trim()); const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin;
-      if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) { setPinError("Incorrect PIN."); setIsVerifying(false); return; }
+      const userSnap = await getDoc(doc(db, "users", user.uid)); 
+      const storedHash = userSnap.data()?.security?.pinHash || userSnap.data()?.securityPin || userSnap.data()?.pin;
+      
+      const { valid, newHash } = await verifyPIN(pinInput.trim(), storedHash, user.uid);
+      
+      if (!valid) {
+        setPinError("Incorrect PIN.");
+        setIsVerifying(false);
+        return;
+      }
+      
+      if (newHash) {
+        await setDoc(doc(db, "users", user.uid), { security: { pinHash: newHash } }, { merge: true });
+      }
       
       await deleteDoc(doc(db, "users", user.uid, "microEarnLogs", deleteContext.id));
       
@@ -480,7 +472,11 @@ const MicroEarn = () => {
         } 
       }
       setDeleteContext(null);
-    } catch (error) { setPinError("Verification failed."); } finally { setIsVerifying(false); }
+    } catch (error) { 
+      setPinError("Verification failed."); 
+    } finally { 
+      setIsVerifying(false); 
+    }
   };
 
   const openModal = () => { 
@@ -497,7 +493,7 @@ const MicroEarn = () => {
     <div className="h-full min-h-screen overflow-y-auto pb-24">
       <div className="pt-8 md:pt-12 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 md:px-6">
         
-        {/* Premium Header - Z-INDEX FIXED FOR EXPORT DROPDOWN */}
+        {/* Premium Header */}
         <div className="relative rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50 z-20">
           <div className="absolute inset-0 overflow-hidden rounded-[2.5rem] pointer-events-none">
              <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(234,179,8,0.15),transparent_70%)]" />
@@ -513,8 +509,6 @@ const MicroEarn = () => {
             </div>
             
             <div className="flex items-center gap-3 w-full md:w-auto mt-4 md:mt-0">
-              
-              {/* 🚀 EXPORT MENU FIX: High Z-Index, Absolute Positioning */}
               <div className="relative w-full md:w-auto">
                 <button 
                   onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
@@ -569,7 +563,8 @@ const MicroEarn = () => {
         <div className="relative"><HiOutlineSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} /><input type="text" placeholder="Search by platform or coin..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-4 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-bold dark:text-white outline-none focus:border-yellow-500 transition-all shadow-sm placeholder-slate-400 dark:placeholder-slate-500" /></div>
 
         <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-[2rem] overflow-hidden shadow-sm">
-          <div className="overflow-x-auto custom-scrollbar">
+          {/* DESKTOP TABLE */}
+          <div className="hidden md:block overflow-x-auto custom-scrollbar">
             <table className="w-full text-left min-w-[800px]">
               <thead className="bg-slate-50 dark:bg-slate-800/50 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
                 <tr><th className="p-4 pl-6 whitespace-nowrap">Platform</th><th className="p-4 whitespace-nowrap">Methods</th><th className="p-4 whitespace-nowrap">Frequency</th><th className="p-4 text-right whitespace-nowrap">Live Value</th><th className="p-4 text-right whitespace-nowrap">Received</th><th className="p-4 pr-6 text-right whitespace-nowrap">Actions</th></tr>
@@ -600,10 +595,62 @@ const MicroEarn = () => {
               </tbody>
             </table>
           </div>
+
+          {/* 📱 MOBILE CARD VIEW */}
+          <div className="md:hidden flex flex-col divide-y divide-slate-100 dark:divide-slate-800/50">
+            {isLoading ? (
+              <div className="p-10 text-center"><HiOutlineRefresh className="animate-spin mx-auto text-2xl text-yellow-500" /></div>
+            ) : filteredLogs.length === 0 ? (
+              <div className="p-10 text-center text-slate-500 font-bold">No records found</div>
+            ) : filteredLogs.map((rec) => {
+              const coinObj = fullDatabase.find(c => c.symbol.toUpperCase() === rec.coin.toUpperCase());
+              return (
+                <div key={rec.id} className="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 p-0.5 flex items-center justify-center border border-slate-200 dark:border-slate-700 shrink-0"><LogoRenderer symbol={rec.coin} logoUrl={coinObj?.logo} bg={coinObj?.bg} color={coinObj?.color} /></div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-black text-slate-900 dark:text-white text-sm truncate">{rec.platform}</p>
+                      <p className="text-[10px] font-bold text-slate-500 mt-0.5">{formatGlobalDate && rec.date ? formatGlobalDate(rec.date.split('T')[0], 'short') : rec.date}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-2 mb-3 text-xs">
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Received</p>
+                      <p className="font-black text-emerald-600 dark:text-emerald-400">+{rec.receivedAmount} {rec.coin}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Live Value</p>
+                      <p className="font-black text-slate-800 dark:text-white">{currencySymbol}{(rec.currentLiveBaseAmount || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Frequency</p>
+                      <p className={`font-black ${rec.daysSinceLast > 15 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{rec.daysSinceLast !== null ? `${rec.daysSinceLast} days` : 'First Time'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">To Wallet</p>
+                      <p className="font-black text-slate-800 dark:text-white truncate">{rec.destinationWallet}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-wrap gap-1.5 mb-3">
+                    {(rec.methods || []).map((m, i) => <span key={i} className="text-[9px] px-2 py-0.5 bg-yellow-50 dark:bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 font-black uppercase tracking-widest rounded border border-yellow-200/50 dark:border-yellow-500/20">{m}</span>)}
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <div className="flex gap-1 ml-auto">
+                      <button onClick={() => handleEdit(rec)} className="p-2 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg border border-blue-200 dark:border-blue-500/30 shadow-sm active:scale-95"><HiOutlinePencil size={14}/></button>
+                      <button onClick={() => initiateDelete(rec)} className="p-2 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-lg border border-rose-200 dark:border-rose-500/30 shadow-sm active:scale-95"><HiOutlineTrash size={14}/></button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* 🚀 UPGRADED ADD/EDIT MODAL (DYNAMIC AUTO-SUGGEST FIX) */}
+      {/* 🚀 ADD/EDIT MODAL (unchanged from before) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90dvh] sm:max-h-[85vh] border border-slate-300 dark:border-slate-700 animate-in slide-in-from-bottom-10 sm:zoom-in-95">
@@ -658,7 +705,6 @@ const MicroEarn = () => {
                     </select>
                     <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
                   </div>
-                  {/* Live Price Display */}
                   <div className="mt-1.5 ml-2">
                     <p className="text-[10px] font-bold text-slate-500">Live Price: <span className="text-slate-700 dark:text-slate-300">${(livePrices[formData.coin]?.priceUSD || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 6})}</span></p>
                   </div>
