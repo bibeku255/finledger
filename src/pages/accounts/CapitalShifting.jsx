@@ -1,63 +1,179 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { collection, addDoc, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDoc, where, getDocs } from 'firebase/firestore';
+import {
+  collection,
+  addDoc,
+  doc,
+  setDoc,
+  deleteDoc,
+  onSnapshot,
+  query,
+  orderBy,
+  getDoc,
+  where,
+  getDocs,
+} from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
-
-import { 
-  HiOutlineSwitchHorizontal, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
-  HiOutlineLibrary, HiOutlineSearch, HiOutlineRefresh,
-  HiOutlineLockClosed, HiOutlineExclamationCircle,
-  HiOutlineTrendingUp, HiOutlineTrendingDown,
-  HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable,
-  HiOutlineChevronRight, HiOutlineChevronDown, HiOutlineCalendar, 
-  HiOutlineShieldCheck, HiOutlineGlobe, HiOutlineArrowRight
+import { verifyPIN } from '../../utils/cryptoUtils';
+import {
+  HiOutlineSwitchHorizontal,
+  HiOutlineX,
+  HiOutlineTrash,
+  HiOutlinePencil,
+  HiOutlineLibrary,
+  HiOutlineSearch,
+  HiOutlineRefresh,
+  HiOutlineLockClosed,
+  HiOutlineExclamationCircle,
+  HiOutlineTrendingUp,
+  HiOutlineTrendingDown,
+  HiOutlineDownload,
+  HiOutlineDocumentText,
+  HiOutlineTable,
+  HiOutlineChevronRight,
+  HiOutlineChevronDown,
+  HiOutlineCalendar,
+  HiOutlineShieldCheck,
+  HiOutlineGlobe,
+  HiOutlineArrowRight,
+  HiOutlineCheckCircle,
+  HiOutlineInformationCircle,
 } from 'react-icons/hi';
-
-// 🚀 FIXED: Added FaArrowRight which was causing the crash!
-import { 
-  FaGlobe, FaWallet, FaShieldAlt, FaExchangeAlt, 
-  FaArrowDown, FaArrowUp, FaPiggyBank, FaChartLine, 
-  FaUniversity, FaGasPump, FaArrowRight
+import {
+  FaGlobe,
+  FaWallet,
+  FaShieldAlt,
+  FaExchangeAlt,
+  FaArrowDown,
+  FaArrowUp,
+  FaPiggyBank,
+  FaChartLine,
+  FaUniversity,
+  FaGasPump,
+  FaArrowRight,
 } from 'react-icons/fa';
 
 import { fiatFlagMap } from '../../utils/marketConstants';
 
-const cryptoPlatformsList = [
-  "CoinDCX", "WazirX", "ZebPay", "Mudrex", "SunCrypto",
-  "Binance", "Coinbase", "Bybit", "KuCoin", "OKX", "Kraken", "Mexc",
-  "FaucetPay", "Trust Wallet", "MetaMask", "Phantom", "NC Wallet", "Payeer",
-  "Hardware Wallet (Ledger/Trezor)", "Other Wallet"
-];
+// ============================================
+// 🚀 MINI TOAST SYSTEM (Self-contained)
+// ============================================
+const ToastContext = React.createContext(null);
 
-const hashPIN = async (pinCode) => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(pinCode);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+const ToastProvider = ({ children }) => {
+  const [toasts, setToasts] = useState([]);
+  const addToast = (message, type = 'info', duration = 4000) => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type, duration }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, duration);
+  };
+  const removeToast = id => setToasts(prev => prev.filter(t => t.id !== id));
+
+  return (
+    <ToastContext.Provider value={{ addToast, removeToast }}>
+      {children}
+      <div className="fixed top-24 right-4 z-[10000] space-y-2 max-w-sm w-full pointer-events-none px-4 md:px-0">
+        {toasts.map(toast => (
+          <div
+            key={toast.id}
+            className={`pointer-events-auto flex items-start gap-3 p-4 rounded-2xl shadow-2xl backdrop-blur-xl border animate-in slide-in-from-right-4 fade-in duration-300 ${
+              toast.type === 'success'
+                ? 'bg-green-50/95 dark:bg-green-900/90 border-green-200 dark:border-green-700'
+                : toast.type === 'error'
+                ? 'bg-red-50/95 dark:bg-red-900/90 border-red-200 dark:border-red-700'
+                : toast.type === 'warning'
+                ? 'bg-amber-50/95 dark:bg-amber-900/90 border-amber-200 dark:border-amber-700'
+                : 'bg-blue-50/95 dark:bg-blue-900/90 border-blue-200 dark:border-blue-700'
+            }`}
+          >
+            {toast.type === 'success' && (
+              <HiOutlineCheckCircle className="text-green-600 dark:text-green-400 w-5 h-5 flex-shrink-0" />
+            )}
+            {toast.type === 'error' && (
+              <HiOutlineExclamationCircle className="text-red-600 dark:text-red-400 w-5 h-5 flex-shrink-0" />
+            )}
+            {toast.type === 'warning' && (
+              <HiOutlineExclamationCircle className="text-amber-600 dark:text-amber-400 w-5 h-5 flex-shrink-0" />
+            )}
+            {toast.type === 'info' && (
+              <HiOutlineInformationCircle className="text-blue-600 dark:text-blue-400 w-5 h-5 flex-shrink-0" />
+            )}
+            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 flex-1">
+              {toast.message}
+            </p>
+            <button
+              onClick={() => removeToast(toast.id)}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+            >
+              <HiOutlineX size={16} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
 };
+
+const useToast = () => {
+  const context = React.useContext(ToastContext);
+  if (!context) throw new Error('useToast must be used within ToastProvider');
+  return context;
+};
+
+// ============================================
+// 🧩 CONSTANTS & HELPERS
+// ============================================
+const cryptoPlatformsList = [
+  'CoinDCX',
+  'WazirX',
+  'ZebPay',
+  'Mudrex',
+  'SunCrypto',
+  'Binance',
+  'Coinbase',
+  'Bybit',
+  'KuCoin',
+  'OKX',
+  'Kraken',
+  'Mexc',
+  'FaucetPay',
+  'Trust Wallet',
+  'MetaMask',
+  'Phantom',
+  'NC Wallet',
+  'Payeer',
+  'Hardware Wallet',
+  'Other Wallet',
+];
 
 const getLocalDateTimeString = () => {
   const now = new Date();
   now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-  return now.toISOString().slice(0, 16); 
+  return now.toISOString().slice(0, 16);
 };
 
-// Premium Vault Selector Card
+// ============================================
+// 🧩 VAULT SELECTOR COMPONENT
+// ============================================
 const VaultSelector = ({ value, onChange, options, icon: Icon, color, label }) => (
   <div className="space-y-2">
     <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-1.5">
       <Icon size={14} className={color} /> {label}
     </label>
     <div className="relative">
-      <select 
-        value={value} 
+      <select
+        value={value}
         onChange={onChange}
         className="w-full pl-4 pr-10 py-3.5 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 cursor-pointer appearance-none transition-colors shadow-sm"
       >
         {options.map(opt => (
-          <option key={opt.value} value={opt.value}>{opt.label}</option>
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
         ))}
       </select>
       <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
@@ -65,14 +181,32 @@ const VaultSelector = ({ value, onChange, options, icon: Icon, color, label }) =
   </div>
 );
 
-const CapitalShifting = () => {
-  const { user, baseCurrency = 'INR', selectedFiats = [], selectedCryptos = [], formatGlobalDate } = useAuth();
-  const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
+// ============================================
+// 🚀 MAIN CONTENT COMPONENT
+// ============================================
+const CapitalShiftingContent = () => {
+  const {
+    user,
+    baseCurrency = 'INR',
+    selectedFiats = [],
+    selectedCryptos = [],
+    formatGlobalDate,
+  } = useAuth();
+  const currencySymbol =
+    baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
+  const { addToast } = useToast();
 
-  const availableFiats = useMemo(() => Array.from(new Set([baseCurrency, ...selectedFiats])), [baseCurrency, selectedFiats]);
+  const availableFiats = useMemo(
+    () => Array.from(new Set([baseCurrency, ...selectedFiats])),
+    [baseCurrency, selectedFiats]
+  );
   const availableCryptos = useMemo(() => {
-    const customSymbols = selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
-    return Array.from(new Set(["USDT", ...customSymbols])).map(s => s.toUpperCase());
+    const customSymbols = selectedCryptos
+      .map(c => (typeof c === 'string' ? c : c.symbol))
+      .filter(Boolean);
+    return Array.from(new Set(['USDT', ...customSymbols])).map(s =>
+      s.toUpperCase()
+    );
   }, [selectedCryptos]);
 
   const [isProcessing, setIsProcessing] = useState(false);
@@ -80,27 +214,45 @@ const CapitalShifting = () => {
   const [shiftHistory, setShiftHistory] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
-  const [deleteContext, setDeleteContext] = useState(null); 
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [deleteContext, setDeleteContext] = useState(null);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [customUserCoins, setCustomUserCoins] = useState([]);
   const [existingVaultNames, setExistingVaultNames] = useState([]);
 
+  // Confirmation modal for shift execution
+  const [confirmShift, setConfirmShift] = useState(false);
+
   const [transferData, setTransferData] = useState({
-    fromVault: 'online', fromSubWallet: '', fromCryptoPlatform: cryptoPlatformsList[0],
-    fromAsset: availableFiats.includes('USD') ? 'USD' : baseCurrency, grossAmount: '', fromExchangeRate: 1, 
-    networkFeeAsset: availableFiats.includes('USD') ? 'USD' : baseCurrency, networkFee: '', networkFeeExchangeRate: 1,
-    routingPlatform: '', routingAgent: '', 
-    toVault: 'bank', toSubWallet: '', toCryptoPlatform: cryptoPlatformsList[0],
-    toAsset: baseCurrency, netReceived: '', toExchangeRate: 1, taxAndFees: '', 
-    date: getLocalDateTimeString(), referenceId: '' 
+    fromVault: 'online',
+    fromSubWallet: '',
+    fromCryptoPlatform: cryptoPlatformsList[0],
+    fromAsset: availableFiats.includes('USD') ? 'USD' : baseCurrency,
+    grossAmount: '',
+    fromExchangeRate: 1,
+    networkFeeAsset: availableFiats.includes('USD') ? 'USD' : baseCurrency,
+    networkFee: '',
+    networkFeeExchangeRate: 1,
+    routingPlatform: '',
+    routingAgent: '',
+    toVault: 'bank',
+    toSubWallet: '',
+    toCryptoPlatform: cryptoPlatformsList[0],
+    toAsset: baseCurrency,
+    netReceived: '',
+    toExchangeRate: 1,
+    taxAndFees: '',
+    date: getLocalDateTimeString(),
+    referenceId: '',
   });
 
+  // Fetch custom coins
   useEffect(() => {
     const fetchUserData = async () => {
       if (!user) return;
-      const userSnap = await getDoc(doc(db, "users", user.uid));
+      const userSnap = await getDoc(doc(db, 'users', user.uid));
       if (userSnap.exists() && userSnap.data().customCoins) {
         setCustomUserCoins(userSnap.data().customCoins);
       }
@@ -108,38 +260,61 @@ const CapitalShifting = () => {
     fetchUserData();
   }, [user]);
 
+  // Fetch existing vault names for auto-suggest
   useEffect(() => {
-     if(!user) return;
-     const fetchVaults = async () => {
-        const qBank = query(collection(db, "users", user.uid, "bankWallet"));
-        const snapBank = await getDocs(qBank);
-        const qOnline = query(collection(db, "users", user.uid, "onlineWallet"));
-        const snapOnline = await getDocs(qOnline);
-        const names = new Set();
-        snapBank.docs.forEach(d => { if(d.data().bankName) names.add(d.data().bankName) });
-        snapOnline.docs.forEach(d => { if(d.data().walletName) names.add(d.data().walletName) });
-        setExistingVaultNames(Array.from(names));
-     };
-     fetchVaults();
+    if (!user) return;
+    const fetchVaults = async () => {
+      const qBank = query(collection(db, 'users', user.uid, 'bankWallet'));
+      const snapBank = await getDocs(qBank);
+      const qOnline = query(collection(db, 'users', user.uid, 'onlineWallet'));
+      const snapOnline = await getDocs(qOnline);
+      const names = new Set();
+      snapBank.docs.forEach(d => {
+        if (d.data().bankName) names.add(d.data().bankName);
+      });
+      snapOnline.docs.forEach(d => {
+        if (d.data().walletName) names.add(d.data().walletName);
+      });
+      setExistingVaultNames(Array.from(names));
+    };
+    fetchVaults();
   }, [user]);
 
+  // Auto-set network fee asset to same as from asset
   useEffect(() => {
     setTransferData(prev => ({ ...prev, networkFeeAsset: prev.fromAsset }));
   }, [transferData.fromAsset]);
 
+  // Fetch shift history
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, "users", user.uid, "capitalShifts"), orderBy("timestamp", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setShiftHistory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      setIsLoadingHistory(false);
-    });
+    const q = query(
+      collection(db, 'users', user.uid, 'capitalShifts'),
+      orderBy('timestamp', 'desc')
+    );
+    const unsubscribe = onSnapshot(
+      q,
+      snapshot => {
+        setShiftHistory(
+          snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+        );
+        setIsLoadingHistory(false);
+      },
+      error => {
+        console.error('CapitalShifts snapshot error:', error);
+        addToast('Failed to load shift history. Please refresh.', 'error');
+        setIsLoadingHistory(false);
+      }
+    );
     return () => unsubscribe();
-  }, [user]);
+  }, [user, addToast]);
 
+  // Full database for crypto price lookup
   const fullDatabase = useMemo(() => {
     const coinMap = new Map();
-    selectedCryptos.forEach(c => { if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c); });
+    selectedCryptos.forEach(c => {
+      if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c);
+    });
     customUserCoins.forEach(c => {
       const existing = coinMap.get(c.symbol.toUpperCase());
       coinMap.set(c.symbol.toUpperCase(), { ...existing, ...c });
@@ -148,10 +323,19 @@ const CapitalShifting = () => {
   }, [customUserCoins, selectedCryptos]);
 
   const totalShifts = shiftHistory.length;
-  const totalVolume = useMemo(() => 
-    shiftHistory.reduce((acc, s) => acc + (Number(s.grossAmount) || 0) * (Number(s.fromExchangeRate) || 1), 0)
-  , [shiftHistory]);
+  const totalVolume = useMemo(
+    () =>
+      shiftHistory.reduce(
+        (acc, s) =>
+          acc + (Number(s.grossAmount) || 0) * (Number(s.fromExchangeRate) || 1),
+        0
+      ),
+    [shiftHistory]
+  );
 
+  // ============================================
+  // 🌐 LIVE RATE FETCH
+  // ============================================
   const fetchLiveRates = async () => {
     setIsFetchingRate(true);
     try {
@@ -163,51 +347,64 @@ const CapitalShifting = () => {
       const fiatData = await fiatRes.json();
       const usdToBase = fiatData.rates[baseCurrency] || 1;
 
-      const getAssetRate = async (assetSym) => {
+      const getAssetRate = async assetSym => {
         if (assetSym === baseCurrency) return 1;
         if (availableFiats.includes(assetSym) || assetSym.length === 3) {
           try {
-            const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${assetSym}`);
+            const res = await fetch(
+              `https://api.exchangerate-api.com/v4/latest/${assetSym}`
+            );
             const data = await res.json();
             return data.rates[baseCurrency] || 1;
-          } catch(e) {}
+          } catch (e) {}
         }
         if (assetSym === 'USDT' || assetSym === 'USDC') return usdToBase;
-        
+
         const upperSym = assetSym.toUpperCase();
         const coinObj = fullDatabase.find(c => c.symbol === upperSym) || {};
         const searchId = coinObj?.id || assetSym.toLowerCase();
         let priceUsd = null;
 
-        if (coinObj.fetchMode === 'contract' && coinObj.network && coinObj.contractAddress) {
-           try {
-              const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${coinObj.network}/tokens/${coinObj.contractAddress}`);
-              if (gtRes.ok) {
-                 const gtJson = await gtRes.json();
-                 priceUsd = parseFloat(gtJson.data.attributes.price_usd);
-              }
-           } catch(e) {}
-        } 
-        if (!priceUsd) {
-           try {
-             const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
-             const cgData = await cgRes.json();
-             if (cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
-           } catch(e) {}
+        if (
+          coinObj.fetchMode === 'contract' &&
+          coinObj.network &&
+          coinObj.contractAddress
+        ) {
+          try {
+            const gtRes = await fetch(
+              `https://api.geckoterminal.com/api/v2/networks/${coinObj.network}/tokens/${coinObj.contractAddress}`
+            );
+            if (gtRes.ok) {
+              const gtJson = await gtRes.json();
+              priceUsd = parseFloat(gtJson.data.attributes.price_usd);
+            }
+          } catch (e) {}
         }
         if (!priceUsd) {
           try {
-             const binanceSymbol = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
-             const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`);
-             if (bRes.ok) {
-               const bData = await bRes.json();
-               priceUsd = searchId === 'tether' ? 1.00 : parseFloat(bData.price);
-             }
-          } catch (e) { }
+            const cgRes = await fetch(
+              `https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`
+            );
+            const cgData = await cgRes.json();
+            if (cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
+          } catch (e) {}
+        }
+        if (!priceUsd) {
+          try {
+            const binanceSymbol =
+              searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
+            const bRes = await fetch(
+              `https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`
+            );
+            if (bRes.ok) {
+              const bData = await bRes.json();
+              priceUsd = searchId === 'tether' ? 1.0 : parseFloat(bData.price);
+            }
+          } catch (e) {}
         }
 
-        const finalPrice = priceUsd || (coinObj?.fallbackPrice || 0);
-        return finalPrice * usdToBase; 
+        const finalPrice = priceUsd || coinObj?.fallbackPrice || 0;
+        return finalPrice * usdToBase;
       };
 
       if (transferData.fromAsset !== baseCurrency) {
@@ -223,204 +420,399 @@ const CapitalShifting = () => {
         if (rate) newFeeRate = Number(rate).toFixed(4);
       }
 
-      setTransferData(prev => ({ ...prev, fromExchangeRate: newFromRate, toExchangeRate: newToRate, networkFeeExchangeRate: newFeeRate }));
+      setTransferData(prev => ({
+        ...prev,
+        fromExchangeRate: newFromRate,
+        toExchangeRate: newToRate,
+        networkFeeExchangeRate: newFeeRate,
+      }));
     } catch (error) {
-      alert("Failed to fetch live market rates. Please input manually.");
+      addToast('Failed to fetch live market rates. Please input manually.', 'error');
     } finally {
       setIsFetchingRate(false);
     }
   };
 
+  // Derived values
   const isFromForeign = transferData.fromAsset !== baseCurrency;
   const isToForeign = transferData.toAsset !== baseCurrency;
   const isFeeForeign = transferData.networkFeeAsset !== baseCurrency;
 
-  const fromFinalBase = (parseFloat(transferData.grossAmount) || 0) * (parseFloat(transferData.fromExchangeRate) || 1);
-  const toFinalBase = (parseFloat(transferData.netReceived) || 0) * (parseFloat(transferData.toExchangeRate) || 1);
-  const feeFinalBase = (parseFloat(transferData.networkFee) || 0) * (parseFloat(transferData.networkFeeExchangeRate) || 1);
-  const destinationTaxBase = (parseFloat(transferData.taxAndFees) || 0) * (parseFloat(transferData.toExchangeRate) || 1);
+  const fromFinalBase =
+    (parseFloat(transferData.grossAmount) || 0) *
+    (parseFloat(transferData.fromExchangeRate) || 1);
+  const toFinalBase =
+    (parseFloat(transferData.netReceived) || 0) *
+    (parseFloat(transferData.toExchangeRate) || 1);
+  const feeFinalBase =
+    (parseFloat(transferData.networkFee) || 0) *
+    (parseFloat(transferData.networkFeeExchangeRate) || 1);
+  const destinationTaxBase =
+    (parseFloat(transferData.taxAndFees) || 0) *
+    (parseFloat(transferData.toExchangeRate) || 1);
 
-  const handleDownloadReport = (format) => {
+  // ============================================
+  // 📊 EXPORT REPORT
+  // ============================================
+  const handleDownloadReport = async format => {
     setIsExportMenuOpen(false);
-    if (shiftHistory.length === 0) return alert("No transfer records found to download.");
+    if (shiftHistory.length === 0) {
+      addToast('No transfer records found to download.', 'warning');
+      return;
+    }
+
+    setIsGeneratingReport(true);
 
     const reportData = shiftHistory.map(shift => {
-      const fromPlatform = shift.fromVault === 'crypto' ? shift.fromCryptoPlatform : shift.fromSubWallet || 'Main';
-      const toPlatform = shift.toVault === 'crypto' ? shift.toCryptoPlatform : shift.toSubWallet || 'Main';
-      
+      const fromPlatform =
+        shift.fromVault === 'crypto'
+          ? shift.fromCryptoPlatform
+          : shift.fromSubWallet || 'Main';
+      const toPlatform =
+        shift.toVault === 'crypto'
+          ? shift.toCryptoPlatform
+          : shift.toSubWallet || 'Main';
+
       const rawDate = shift.date ? shift.date.split('T')[0] : 'N/A';
-      
-      const grossBase = (Number(shift.grossAmount) || 0) * (Number(shift.fromExchangeRate) || 1);
-      const feeBase = ((Number(shift.networkFee) || 0) * (Number(shift.networkFeeExchangeRate) || 1)) + ((Number(shift.taxAndFees) || 0) * (Number(shift.toExchangeRate) || 1));
-      const netBase = (Number(shift.netReceived) || 0) * (Number(shift.toExchangeRate) || 1);
+
+      const grossBase =
+        (Number(shift.grossAmount) || 0) * (Number(shift.fromExchangeRate) || 1);
+      const feeBase =
+        (Number(shift.networkFee) || 0) *
+          (Number(shift.networkFeeExchangeRate) || 1) +
+        (Number(shift.taxAndFees) || 0) * (Number(shift.toExchangeRate) || 1);
+      const netBase =
+        (Number(shift.netReceived) || 0) * (Number(shift.toExchangeRate) || 1);
 
       return {
         date: formatGlobalDate ? formatGlobalDate(shift.date, 'full') : rawDate,
-        sourceStr: `${Number(shift.grossAmount).toLocaleString()} ${shift.fromAsset} (${shift.fromVault.toUpperCase()}: ${fromPlatform})`,
-        destStr: `${Number(shift.netReceived).toLocaleString()} ${shift.toAsset} (${shift.toVault.toUpperCase()}: ${toPlatform})`,
+        sourceStr: `${Number(shift.grossAmount).toLocaleString()} ${
+          shift.fromAsset
+        } (${shift.fromVault.toUpperCase()}: ${fromPlatform})`,
+        destStr: `${Number(shift.netReceived).toLocaleString()} ${
+          shift.toAsset
+        } (${shift.toVault.toUpperCase()}: ${toPlatform})`,
         routing: shift.routingPlatform || 'Direct',
         grossBase: Number(grossBase.toFixed(2)),
         feeBase: Number(feeBase.toFixed(2)),
-        netBase: Number(netBase.toFixed(2))
+        netBase: Number(netBase.toFixed(2)),
       };
     });
 
     const columns = [
-      { header: 'Date', key: 'date' }, 
+      { header: 'Date', key: 'date' },
       { header: 'Sent From', key: 'sourceStr' },
-      { header: 'Received In', key: 'destStr' }, 
+      { header: 'Received In', key: 'destStr' },
       { header: 'Routing Engine', key: 'routing' },
       { header: `Gross Sent (${currencySymbol})`, key: 'grossBase', isNumeric: true },
       { header: `Total Fees (${currencySymbol})`, key: 'feeBase', isNumeric: true },
-      { header: `Net Value Added (${currencySymbol})`, key: 'netBase', isNumeric: true }
+      {
+        header: `Net Value Added (${currencySymbol})`,
+        key: 'netBase',
+        isNumeric: true,
+      },
     ];
 
-    const fileName = `Capital_Shifting_Ledger`;
+    const fileName = 'Capital_Shifting_Ledger';
     const reportTitle = `Internal Capital Shifting & Routing - Audit Report`;
-    
-    if (format === 'pdf') downloadPDFReport(reportData, columns, fileName, reportTitle);
-    else downloadExcelReport(reportData, columns, fileName, reportTitle);
-  };
 
-  const handleTransfer = async (e) => {
-    e.preventDefault();
-    if (!user) return alert("Please login first!");
-    if ((transferData.fromVault === 'bank' || transferData.fromVault === 'online') && !transferData.fromSubWallet.trim()) {
-        return alert("Please specify the exact Source Bank or Wallet Name.");
-    }
-    if ((transferData.toVault === 'bank' || transferData.toVault === 'online') && !transferData.toSubWallet.trim()) {
-        return alert("Please specify the exact Destination Bank or Wallet Name.");
-    }
-    
-    if(window.confirm(`Confirm shifting ${transferData.grossAmount} ${transferData.fromAsset} to ${transferData.toVault.toUpperCase()}?`)) {
-      setIsProcessing(true);
-      const timestamp = new Date(transferData.date).getTime();
-      const shiftId = `SHIFT_${timestamp}_${Math.floor(Math.random() * 1000)}`;
-      const totalOutBase = fromFinalBase + feeFinalBase;
-
-      let outRecord = {};
-      const fromCollection = transferData.fromVault === 'crypto' ? 'cryptoWalletLogs' : 
-                             transferData.fromVault === 'online' ? 'onlineWallet' : 
-                             transferData.fromVault === 'bank' ? 'bankWallet' : 'cashWallet';
-
-      if (transferData.fromVault === 'crypto') {
-        outRecord = {
-          type: 'out', coin: transferData.fromAsset, quantity: parseFloat(transferData.grossAmount), 
-          platform: transferData.fromCryptoPlatform, reason: `Shifted to ${transferData.toVault}`, 
-          referenceNo: transferData.referenceId, date: transferData.date, timestamp, shiftId, isTransfer: true
-        };
-      } else {
-        outRecord = {
-          title: `Transferred to ${transferData.toVault.toUpperCase()}`,
-          type: 'out', date: transferData.date, timestamp, currency: transferData.fromAsset,
-          foreignAmount: parseFloat(transferData.grossAmount), exchangeRate: parseFloat(transferData.fromExchangeRate) || 1,
-          fee: parseFloat(transferData.networkFee) || 0, feeAsset: transferData.networkFeeAsset, 
-          feeExchangeRate: parseFloat(transferData.networkFeeExchangeRate) || 1,
-          finalBaseAmount: totalOutBase, isTransfer: true, shiftId,
-          notes: `Platform: ${transferData.routingPlatform} | Agent: ${transferData.routingAgent}`,
-          walletName: transferData.fromSubWallet || 'Capital Shift',
-          bankName: transferData.fromSubWallet || 'Capital Shift',
-          walletCategory: 'Fiat Wallet', transferType: 'Internal Transfer'
-        };
-      }
-
-      let inRecord = {};
-      const toCollection = transferData.toVault === 'crypto' ? 'cryptoWalletLogs' : 
-                           transferData.toVault === 'bank' ? 'bankWallet' : 
-                           transferData.toVault === 'online' ? 'onlineWallet' : 'cashWallet';
-
-      if (transferData.toVault === 'crypto') {
-         inRecord = {
-          type: 'in', coin: transferData.toAsset, quantity: parseFloat(transferData.netReceived), 
-          platform: transferData.toCryptoPlatform, reason: `Received from ${transferData.fromVault}`, 
-          referenceNo: transferData.referenceId, date: transferData.date, timestamp, shiftId, isTransfer: true
-        };
-      } else {
-        inRecord = {
-          title: `Received from ${transferData.fromVault.toUpperCase()}`,
-          type: 'in', date: transferData.date, timestamp, currency: transferData.toAsset,
-          foreignAmount: parseFloat(transferData.netReceived), exchangeRate: parseFloat(transferData.toExchangeRate) || 1, 
-          finalBaseAmount: toFinalBase, fee: parseFloat(transferData.taxAndFees) || 0, 
-          isP2P: transferData.routingPlatform ? true : false, isTransfer: true, shiftId, referenceNo: transferData.referenceId,
-          notes: `Platform: ${transferData.routingPlatform} | Agent: ${transferData.routingAgent}`,
-          walletName: transferData.toSubWallet || 'Capital Shift',
-          bankName: transferData.toSubWallet || 'Capital Shift',
-          walletCategory: 'Fiat Wallet', transferType: 'Internal Transfer'
-        };
-      }
-
-      try {
-        await addDoc(collection(db, "users", user.uid, fromCollection), outRecord);
-        await addDoc(collection(db, "users", user.uid, toCollection), inRecord);
-        await addDoc(collection(db, "users", user.uid, "capitalShifts"), { 
-            ...transferData, 
-            fromSubWallet: transferData.fromVault === 'bank' || transferData.fromVault === 'online' ? transferData.fromSubWallet.trim() : '',
-            toSubWallet: transferData.toVault === 'bank' || transferData.toVault === 'online' ? transferData.toSubWallet.trim() : '',
-            shiftId, timestamp 
-        });
-
-        const totalFeeInBase = feeFinalBase + destinationTaxBase;
-        if (totalFeeInBase > 0) {
-            const expenseRecord = {
-                title: `Capital Shift Fee (${transferData.fromVault} to ${transferData.toVault})`,
-                category: "Forex & Bank Charges", vault: transferData.fromVault, 
-                subWallet: transferData.fromVault === 'bank' || transferData.fromVault === 'online' ? transferData.fromSubWallet.trim() : '',
-                asset: baseCurrency, amount: totalFeeInBase, exchangeRate: 1, finalBaseAmount: totalFeeInBase,
-                date: transferData.date, timestamp, linkedExpenseId: shiftId, isSplit: false
-            };
-            await addDoc(collection(db, "users", user.uid, "expenseLogs"), expenseRecord);
-        }
-
-        alert("Capital Shifted Successfully!");
-        setTransferData({ 
-          fromVault: 'online', fromSubWallet: '', fromCryptoPlatform: cryptoPlatformsList[0],
-          fromAsset: availableFiats.includes('USD') ? 'USD' : baseCurrency, grossAmount: '', fromExchangeRate: 1, 
-          networkFeeAsset: availableFiats.includes('USD') ? 'USD' : baseCurrency, networkFee: '', networkFeeExchangeRate: 1,
-          routingPlatform: '', routingAgent: '', 
-          toVault: 'bank', toSubWallet: '', toCryptoPlatform: cryptoPlatformsList[0],
-          toAsset: baseCurrency, netReceived: '', toExchangeRate: 1, taxAndFees: '', 
-          date: getLocalDateTimeString(), referenceId: '' 
-        });
-      } catch (error) {
-        alert("Transfer Failed!");
-      } finally {
-        setIsProcessing(false);
-      }
-    }
-  };
-
-  const initiateDeleteShift = (shift) => { setDeleteContext(shift); setPinInput(''); setPinError(''); };
-
-  const executeSecureDeleteShift = async (e) => {
-    e.preventDefault();
-    if (!pinInput.trim()) { setPinError("Please enter your Security PIN."); return; }
-    setIsVerifying(true); setPinError('');
-    try {
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      const userData = userDoc.data();
-      const hashedInput = await hashPIN(pinInput.trim());
-      const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin; 
-      if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) {
-        setPinError("Incorrect PIN. Deletion blocked! 🛑");
-        setIsVerifying(false); return;
-      }
-      await deleteDoc(doc(db, "users", user.uid, "capitalShifts", deleteContext.id));
-      const collectionsToCheck = ['cashWallet', 'bankWallet', 'onlineWallet', 'cryptoWalletLogs'];
-      for (let col of collectionsToCheck) {
-        const q = query(collection(db, "users", user.uid, col), where("shiftId", "==", deleteContext.shiftId));
-        const querySnapshot = await getDocs(q);
-        querySnapshot.forEach(async (document) => {
-          await deleteDoc(doc(db, "users", user.uid, col, document.id));
-        });
-      }
-      const expQuery = query(collection(db, "users", user.uid, "expenseLogs"), where("linkedExpenseId", "==", deleteContext.shiftId));
-      const expSnapshot = await getDocs(expQuery);
-      expSnapshot.forEach(async (document) => {
-          await deleteDoc(doc(db, "users", user.uid, "expenseLogs", document.id));
+    if (format === 'pdf') {
+      await downloadPDFReport(reportData, columns, fileName, reportTitle, {
+        onSuccess: () => addToast('PDF report downloaded!', 'success'),
+        onError: msg => addToast(`PDF Error: ${msg}`, 'error'),
       });
-      setDeleteContext(null); 
+    } else {
+      await downloadExcelReport(reportData, columns, fileName, reportTitle, {
+        onSuccess: () => addToast('Excel report downloaded!', 'success'),
+        onError: msg => addToast(`Excel Error: ${msg}`, 'error'),
+      });
+    }
+
+    setIsGeneratingReport(false);
+  };
+
+  // ============================================
+  // 🏦 EXECUTE CAPITAL SHIFT 
+  // ============================================
+  const handleTransfer = async () => {
+    if (!user) {
+      addToast('Please login first.', 'error');
+      return;
+    }
+    if (
+      (transferData.fromVault === 'bank' || transferData.fromVault === 'online') &&
+      !transferData.fromSubWallet.trim()
+    ) {
+      addToast('Please specify the exact Source Bank or Wallet Name.', 'warning');
+      return;
+    }
+    if (
+      (transferData.toVault === 'bank' || transferData.toVault === 'online') &&
+      !transferData.toSubWallet.trim()
+    ) {
+      addToast(
+        'Please specify the exact Destination Bank or Wallet Name.',
+        'warning'
+      );
+      return;
+    }
+
+    setConfirmShift(true);
+  };
+
+  // 🚀 FIXED: Double Deduction Bug in Execute Shift
+  const executeShift = async () => {
+    setConfirmShift(false);
+    setIsProcessing(true);
+
+    const timestamp = new Date(transferData.date).getTime();
+    const shiftId = `SHIFT_${timestamp}_${Math.floor(Math.random() * 1000)}`;
+    const totalOutBase = fromFinalBase + feeFinalBase;
+
+    // We ONLY add the fee to the quantity for CRYPTO, because Crypto Wallet just subtracts pure `quantity`.
+    // For Fiat/Bank wallets, the UI dynamically adds `fee` to `foreignAmount`/`finalBaseAmount` when calculating Net Deductions.
+    const cryptoSourceFee = transferData.fromAsset === transferData.networkFeeAsset ? (parseFloat(transferData.networkFee) || 0) : 0;
+    const cryptoTotalOutQty = parseFloat(transferData.grossAmount) + cryptoSourceFee;
+
+    let outRecord = {};
+    const fromCollection =
+      transferData.fromVault === 'crypto'
+        ? 'cryptoWalletLogs'
+        : transferData.fromVault === 'online'
+        ? 'onlineWallet'
+        : transferData.fromVault === 'bank'
+        ? 'bankWallet'
+        : 'cashWallet';
+
+    if (transferData.fromVault === 'crypto') {
+      outRecord = {
+        type: 'out',
+        coin: transferData.fromAsset,
+        quantity: cryptoTotalOutQty, // 🚀 Uses the total quantity + fee
+        platform: transferData.fromCryptoPlatform,
+        reason: `Shifted to ${transferData.toVault}`,
+        referenceNo: transferData.referenceId,
+        date: transferData.date,
+        timestamp,
+        shiftId,
+        isTransfer: true,
+      };
+    } else {
+      outRecord = {
+        title: `Transferred to ${transferData.toVault.toUpperCase()}`,
+        type: 'out',
+        date: transferData.date,
+        timestamp,
+        currency: transferData.fromAsset,
+        foreignAmount: parseFloat(transferData.grossAmount), // 🚀 Only the Gross Amount
+        exchangeRate: parseFloat(transferData.fromExchangeRate) || 1,
+        fee: parseFloat(transferData.networkFee) || 0,
+        feeAsset: transferData.networkFeeAsset,
+        feeExchangeRate: parseFloat(transferData.networkFeeExchangeRate) || 1,
+        finalBaseAmount: fromFinalBase, // 🚀 Only the Gross Base Amount
+        isTransfer: true,
+        shiftId,
+        notes: `Platform: ${transferData.routingPlatform} | Agent: ${transferData.routingAgent}`,
+        walletName: transferData.fromSubWallet || 'Capital Shift',
+        bankName: transferData.fromSubWallet || 'Capital Shift',
+        walletCategory: 'Fiat Wallet',
+        transferType: 'Internal Transfer',
+      };
+    }
+
+    let inRecord = {};
+    const toCollection =
+      transferData.toVault === 'crypto'
+        ? 'cryptoWalletLogs'
+        : transferData.toVault === 'bank'
+        ? 'bankWallet'
+        : transferData.toVault === 'online'
+        ? 'onlineWallet'
+        : 'cashWallet';
+
+    if (transferData.toVault === 'crypto') {
+      inRecord = {
+        type: 'in',
+        coin: transferData.toAsset,
+        quantity: parseFloat(transferData.netReceived),
+        platform: transferData.toCryptoPlatform,
+        reason: `Received from ${transferData.fromVault}`,
+        referenceNo: transferData.referenceId,
+        date: transferData.date,
+        timestamp,
+        shiftId,
+        isTransfer: true,
+      };
+    } else {
+      inRecord = {
+        title: `Received from ${transferData.fromVault.toUpperCase()}`,
+        type: 'in',
+        date: transferData.date,
+        timestamp,
+        currency: transferData.toAsset,
+        foreignAmount: parseFloat(transferData.netReceived),
+        exchangeRate: parseFloat(transferData.toExchangeRate) || 1,
+        finalBaseAmount: toFinalBase,
+        fee: parseFloat(transferData.taxAndFees) || 0,
+        isP2P: transferData.routingPlatform ? true : false,
+        isTransfer: true,
+        shiftId,
+        referenceNo: transferData.referenceId,
+        notes: `Platform: ${transferData.routingPlatform} | Agent: ${transferData.routingAgent}`,
+        walletName: transferData.toSubWallet || 'Capital Shift',
+        bankName: transferData.toSubWallet || 'Capital Shift',
+        walletCategory: 'Fiat Wallet',
+        transferType: 'Internal Transfer',
+      };
+    }
+
+    try {
+      await addDoc(collection(db, 'users', user.uid, fromCollection), outRecord);
+      await addDoc(collection(db, 'users', user.uid, toCollection), inRecord);
+      await addDoc(collection(db, 'users', user.uid, 'capitalShifts'), {
+        ...transferData,
+        fromSubWallet:
+          transferData.fromVault === 'bank' || transferData.fromVault === 'online'
+            ? transferData.fromSubWallet.trim()
+            : '',
+        toSubWallet:
+          transferData.toVault === 'bank' || transferData.toVault === 'online'
+            ? transferData.toSubWallet.trim()
+            : '',
+        shiftId,
+        timestamp,
+      });
+
+      const totalFeeInBase = feeFinalBase + destinationTaxBase;
+      if (totalFeeInBase > 0) {
+        const expenseRecord = {
+          title: `Capital Shift Fee (${transferData.fromVault} to ${transferData.toVault})`,
+          category: 'Forex & Bank Charges',
+          vault: transferData.fromVault,
+          subWallet:
+            transferData.fromVault === 'bank' || transferData.fromVault === 'online'
+              ? transferData.fromSubWallet.trim()
+              : '',
+          asset: baseCurrency,
+          amount: totalFeeInBase,
+          exchangeRate: 1,
+          finalBaseAmount: totalFeeInBase,
+          date: transferData.date,
+          timestamp,
+          linkedExpenseId: shiftId,
+          isSplit: false,
+        };
+        await addDoc(
+          collection(db, 'users', user.uid, 'expenseLogs'),
+          expenseRecord
+        );
+      }
+
+      addToast('Capital Shift Executed Successfully!', 'success');
+      setTransferData({
+        fromVault: 'online',
+        fromSubWallet: '',
+        fromCryptoPlatform: cryptoPlatformsList[0],
+        fromAsset: availableFiats.includes('USD') ? 'USD' : baseCurrency,
+        grossAmount: '',
+        fromExchangeRate: 1,
+        networkFeeAsset: availableFiats.includes('USD') ? 'USD' : baseCurrency,
+        networkFee: '',
+        networkFeeExchangeRate: 1,
+        routingPlatform: '',
+        routingAgent: '',
+        toVault: 'bank',
+        toSubWallet: '',
+        toCryptoPlatform: cryptoPlatformsList[0],
+        toAsset: baseCurrency,
+        netReceived: '',
+        toExchangeRate: 1,
+        taxAndFees: '',
+        date: getLocalDateTimeString(),
+        referenceId: '',
+      });
     } catch (error) {
-      setPinError("System error during deletion. Try again.");
+      addToast('Transfer Failed! Please try again.', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // ============================================
+  // 🗑️ DELETE SHIFT
+  // ============================================
+  const initiateDeleteShift = shift => {
+    setDeleteContext(shift);
+    setPinInput('');
+    setPinError('');
+  };
+
+  const executeSecureDeleteShift = async e => {
+    e.preventDefault();
+    if (!pinInput.trim()) {
+      setPinError('Please enter your Security PIN.');
+      return;
+    }
+    setIsVerifying(true);
+    setPinError('');
+    try {
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      const storedHash =
+        userDoc.data()?.security?.pinHash ||
+        userDoc.data()?.securityPin ||
+        userDoc.data()?.pin;
+
+      const { valid, newHash } = await verifyPIN(
+        pinInput.trim(),
+        storedHash,
+        user.uid
+      );
+
+      if (!valid) {
+        setPinError('Incorrect PIN. Deletion blocked! 🛑');
+        setIsVerifying(false);
+        return;
+      }
+
+      if (newHash) {
+        await setDoc(
+          doc(db, 'users', user.uid),
+          { security: { pinHash: newHash } },
+          { merge: true }
+        );
+      }
+
+      await deleteDoc(doc(db, 'users', user.uid, 'capitalShifts', deleteContext.id));
+      const collectionsToCheck = [
+        'cashWallet',
+        'bankWallet',
+        'onlineWallet',
+        'cryptoWalletLogs',
+      ];
+      for (let col of collectionsToCheck) {
+        const q = query(
+          collection(db, 'users', user.uid, col),
+          where('shiftId', '==', deleteContext.shiftId)
+        );
+        const querySnapshot = await getDocs(q);
+        querySnapshot.forEach(async document => {
+          await deleteDoc(doc(db, 'users', user.uid, col, document.id));
+        });
+      }
+      const expQuery = query(
+        collection(db, 'users', user.uid, 'expenseLogs'),
+        where('linkedExpenseId', '==', deleteContext.shiftId)
+      );
+      const expSnapshot = await getDocs(expQuery);
+      expSnapshot.forEach(async document => {
+        await deleteDoc(
+          doc(db, 'users', user.uid, 'expenseLogs', document.id)
+        );
+      });
+      setDeleteContext(null);
+      addToast('Shift deleted successfully. Reversed across vaults.', 'info');
+    } catch (error) {
+      setPinError('System error during deletion. Try again.');
     } finally {
       setIsVerifying(false);
     }
@@ -430,16 +822,31 @@ const CapitalShifting = () => {
     { value: 'crypto', label: '🚀 Crypto Engine' },
     { value: 'online', label: '🌐 Online Wallet' },
     { value: 'bank', label: '🏦 Bank Account' },
-    { value: 'cash', label: '💵 Physical Cash' }
+    { value: 'cash', label: '💵 Physical Cash' },
   ];
+
+  const HistorySkeleton = () => (
+    <div className="space-y-4 animate-pulse">
+      {[1, 2, 3].map(i => (
+        <div
+          key={i}
+          className="flex items-center gap-6 p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700"
+        >
+          <div className="h-10 w-24 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+          <div className="h-10 w-24 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+          <div className="h-10 w-24 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+          <div className="h-10 w-16 bg-slate-200 dark:bg-slate-700 rounded-lg ml-auto" />
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <div className="w-full h-auto pb-28">
       <div className="pt-20 sm:pt-24 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-6xl mx-auto px-4 md:px-6">
         
-        {/* 🚀 FIXED: Mobile Export Box Clipping Issue resolved by separating overflow-hidden */}
+        {/* 🚀 HEADER */}
         <div className="relative rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50 z-20">
-          {/* Background Elements - Wrapped securely to stop spillage without clipping dropdowns */}
           <div className="absolute inset-0 overflow-hidden rounded-[2.5rem] pointer-events-none">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(99,102,241,0.1),transparent_70%)]" />
             <div className="absolute right-0 top-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl" />
@@ -452,25 +859,36 @@ const CapitalShifting = () => {
                   <HiOutlineSwitchHorizontal size={28} className="text-white" />
                 </div>
                 <div>
-                  <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight">Capital Shifting</h1>
-                  <p className="text-xs sm:text-sm font-medium text-slate-400 mt-1">Move assets across vaults with full ledger integrity</p>
+                  <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight">
+                    Capital Shifting
+                  </h1>
+                  <p className="text-xs sm:text-sm font-medium text-slate-400 mt-1">
+                    Move assets across vaults with full ledger integrity
+                  </p>
                 </div>
               </div>
             </div>
             
             <div className="grid grid-cols-2 md:flex items-center gap-3 w-full md:w-auto">
-              
-              {/* 🚀 EXPORT MENU BUG FIX: No longer relying on group-hover, pure state toggle with high z-index */}
               <div className="relative w-full md:w-auto">
                 <button 
-                  onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                  onClick={() => !isGeneratingReport && setIsExportMenuOpen(!isExportMenuOpen)}
                   onBlur={() => setTimeout(() => setIsExportMenuOpen(false), 200)}
-                  className="w-full flex items-center justify-center gap-2 px-5 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 shadow-sm"
+                  disabled={isGeneratingReport}
+                  className="w-full flex items-center justify-center gap-2 px-5 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 shadow-sm disabled:opacity-50"
                 >
-                  <HiOutlineDownload size={16} /> Export
+                  {isGeneratingReport ? (
+                    <>
+                      <HiOutlineRefresh className="animate-spin" size={16} /> Generating...
+                    </>
+                  ) : (
+                    <>
+                      <HiOutlineDownload size={16} /> Export
+                    </>
+                  )}
                 </button>
                 
-                {isExportMenuOpen && (
+                {isExportMenuOpen && !isGeneratingReport && (
                   <div className="absolute top-[110%] right-0 w-full md:w-48 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl flex flex-col p-1.5 z-[100] animate-in fade-in zoom-in-95">
                     <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2.5 px-4 py-3 hover:bg-slate-700 text-slate-200 text-[11px] font-black rounded-lg transition-colors">
                       <HiOutlineDocumentText className="text-rose-400" size={18}/> PDF Document
@@ -508,9 +926,10 @@ const CapitalShifting = () => {
           </div>
         </div>
 
-        <form onSubmit={handleTransfer} className="space-y-6">
-          
-          {/* 🔴 SOURCE SECTION */}
+        {/* ============================================ */}
+        {/* 🔴 SOURCE SECTION */}
+        {/* ============================================ */}
+        <form onSubmit={(e) => { e.preventDefault(); handleTransfer(); }} className="space-y-6">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-300 dark:border-slate-700 overflow-hidden z-10 relative">
             <div className="px-6 py-4 bg-slate-50 dark:bg-rose-500/5 border-b border-slate-300 dark:border-slate-700">
               <h2 className="text-sm font-black text-rose-700 dark:text-rose-500 uppercase tracking-widest flex items-center gap-2">
@@ -832,7 +1251,7 @@ const CapitalShifting = () => {
               </div>
             </div>
             <button 
-              type="submit" 
+              type="submit"
               disabled={isProcessing || !transferData.grossAmount || !transferData.netReceived} 
               className="w-full md:w-auto px-8 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-indigo-500/30 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
             >
@@ -842,7 +1261,9 @@ const CapitalShifting = () => {
           </div>
         </form>
 
-        {/* 📋 HISTORY TABLE (Responsive Table Fix) */}
+        {/* ============================================ */}
+        {/* 📋 MOBILE-RESPONSIVE HISTORY CARDS */}
+        {/* ============================================ */}
         <div className="mt-10">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest flex items-center gap-2">
@@ -852,13 +1273,7 @@ const CapitalShifting = () => {
           </div>
           
           {isLoadingHistory ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <div className="relative">
-                <div className="absolute inset-0 bg-indigo-500 rounded-full blur-xl opacity-30 animate-pulse" />
-                <HiOutlineRefresh className="animate-spin text-3xl text-indigo-500 relative" />
-              </div>
-              <p className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest mt-3 animate-pulse">Loading History...</p>
-            </div>
+            <HistorySkeleton />
           ) : shiftHistory.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 bg-white dark:bg-slate-900 rounded-2xl border border-slate-300 dark:border-slate-800 shadow-sm">
               <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-xl flex items-center justify-center mb-3 border border-slate-200 dark:border-slate-700">
@@ -869,83 +1284,163 @@ const CapitalShifting = () => {
             </div>
           ) : (
             <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm">
-              <div className="overflow-x-auto custom-scrollbar">
-                <table className="w-full text-left min-w-[800px]">
-                  <thead className="bg-slate-200/50 dark:bg-slate-800/50 text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest border-b border-slate-300 dark:border-slate-700">
-                    <tr>
-                      <th className="p-4 pl-6">Date & Route</th>
-                      <th className="p-4">Source</th>
-                      <th className="p-4">Destination</th>
-                      <th className="p-4 pr-6 text-right"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800/80">
-                    {shiftHistory.map((shift) => {
-                      const dateObj = new Date(shift.date);
-                      const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              <div className="flex flex-col">
+                {shiftHistory.map((shift) => {
+                  const dateObj = new Date(shift.date);
+                  const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-                      return (
-                        <tr key={shift.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
-                          <td className="p-4 pl-6">
-                            <p className="font-black text-slate-900 dark:text-white text-sm flex items-center gap-2">
-                              {formatGlobalDate ? formatGlobalDate(shift.date, 'short') : shift.date.split('T')[0]}
-                              <span className="opacity-60 border-l border-slate-300 dark:border-slate-600 pl-2 ml-1 text-[11px]">{timeStr}</span>
-                            </p>
-                            <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600 dark:text-slate-400 mt-1">
-                              <span className="text-rose-700 dark:text-rose-400">{shift.fromVault}</span> 
-                              <HiOutlineArrowRight size={10} className="text-slate-400 dark:text-slate-500" /> 
-                              <span className="text-emerald-700 dark:text-emerald-400">{shift.toVault}</span>
+                  return (
+                    <div key={shift.id} className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800/50 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors flex flex-col gap-3 group">
+                      
+                      {/* Top Header */}
+                      <div className="flex justify-between items-start gap-2">
+                         <div>
+                            <h3 className="text-sm sm:text-base font-black text-slate-800 dark:text-white flex items-center gap-2">
+                               <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-indigo-100 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">
+                                  <HiOutlineSwitchHorizontal size={12} />
+                               </div>
+                               Capital Shift
+                            </h3>
+                            <div className="mt-2 flex items-center gap-1.5 text-[10px] sm:text-xs font-bold text-slate-600 dark:text-slate-400">
+                               <span className="text-rose-600 dark:text-rose-400 uppercase tracking-widest">{shift.fromVault}</span> 
+                               <HiOutlineArrowRight size={10} className="text-slate-400 dark:text-slate-500" /> 
+                               <span className="text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">{shift.toVault}</span>
                             </div>
+                         </div>
+                         <div className="text-right">
+                            <p className="text-sm sm:text-base font-black text-slate-800 dark:text-white truncate">
+                               {Number(shift.grossAmount).toLocaleString()} <span className="text-[10px] text-slate-500 uppercase">{shift.fromAsset}</span>
+                            </p>
+                            <p className="text-[9px] sm:text-[10px] font-bold text-slate-500 mt-0.5 uppercase tracking-widest">Shifted Volume</p>
+                         </div>
+                      </div>
+
+                      {/* Middle Details Box */}
+                      <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 flex flex-col sm:flex-row gap-3 justify-between items-start sm:items-center border border-slate-100 dark:border-slate-800/50 mt-1">
+                         <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full shadow-sm bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 border border-rose-200 dark:border-rose-800/50">
+                               <FaArrowUp size={10} />
+                            </div>
+                            <div>
+                               <p className="font-black text-rose-600 dark:text-rose-400 text-xs sm:text-sm">
+                                  -{Number(shift.grossAmount).toLocaleString()} <span className="text-[9px] uppercase">{shift.fromAsset}</span>
+                               </p>
+                               <p className="text-[9px] font-bold text-slate-400 flex items-center gap-1 uppercase tracking-widest mt-0.5">
+                                  <FaUniversity size={9}/> {shift.fromSubWallet || shift.fromCryptoPlatform || 'Main'}
+                               </p>
+                               {shift.networkFee > 0 && (
+                                  <p className="text-[8px] font-bold text-rose-700 dark:text-rose-400 mt-1 bg-rose-50 dark:bg-rose-500/10 inline-block px-1.5 py-0.5 rounded border border-rose-200 dark:border-rose-500/20">Fee: {shift.networkFee} {shift.networkFeeAsset}</p>
+                               )}
+                            </div>
+                         </div>
+                         
+                         <HiOutlineArrowRight className="text-slate-300 dark:text-slate-600 hidden sm:block mx-2" />
+                         <HiOutlineArrowRight className="text-slate-300 dark:text-slate-600 block sm:hidden rotate-90 mx-auto my-1" />
+                         
+                         <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full shadow-sm bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-200 dark:border-emerald-800/50">
+                               <FaArrowDown size={10} />
+                            </div>
+                            <div>
+                               <p className="font-black text-emerald-600 dark:text-emerald-400 text-xs sm:text-sm">
+                                  +{Number(shift.netReceived).toLocaleString()} <span className="text-[9px] uppercase">{shift.toAsset}</span>
+                               </p>
+                               <p className="text-[9px] font-bold text-slate-400 flex items-center gap-1 uppercase tracking-widest mt-0.5">
+                                  <FaUniversity size={9}/> {shift.toSubWallet || shift.toCryptoPlatform || 'Main'}
+                               </p>
+                               {shift.taxAndFees > 0 && (
+                                  <p className="text-[8px] font-bold text-rose-700 dark:text-rose-400 mt-1 bg-rose-50 dark:bg-rose-500/10 inline-block px-1.5 py-0.5 rounded border border-rose-200 dark:border-rose-500/20">Tax: {shift.taxAndFees} {shift.toAsset}</p>
+                               )}
+                            </div>
+                         </div>
+                      </div>
+
+                      {/* Bottom Footer */}
+                      <div className="flex items-end justify-between mt-1 pt-2">
+                         <div className="flex flex-col gap-1.5">
+                            <p className="text-[10px] font-bold text-slate-400 flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/50 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 w-fit">
+                               <HiOutlineCalendar size={12} className="text-slate-500" /> {formatGlobalDate ? formatGlobalDate(shift.date, 'short') : shift.date.split('T')[0]} <span className="opacity-50 ml-1">{timeStr}</span>
+                            </p>
                             {shift.routingPlatform && (
-                              <p className="text-[9px] mt-1 text-indigo-800 dark:text-indigo-300 font-bold bg-indigo-100 dark:bg-indigo-500/20 inline-block px-2 py-0.5 rounded border border-indigo-300 dark:border-indigo-500/40 shadow-sm">
-                                Via: {shift.routingPlatform}
-                              </p>
+                               <p className="text-[8px] sm:text-[9px] text-indigo-700 dark:text-indigo-400 font-bold bg-indigo-50 dark:bg-indigo-500/10 px-2 py-1 rounded-md border border-indigo-200 dark:border-indigo-500/30 shadow-sm w-fit uppercase tracking-widest">
+                                 Via: {shift.routingPlatform}
+                               </p>
                             )}
-                          </td>
-                          <td className="p-4">
-                            <p className="font-black text-rose-700 dark:text-rose-400 text-sm">
-                              -{Number(shift.grossAmount).toLocaleString()} {shift.fromAsset}
-                            </p>
-                            {shift.fromSubWallet && (
-                              <p className="text-[10px] font-bold text-slate-600 dark:text-slate-400 mt-0.5">{shift.fromSubWallet}</p>
-                            )}
-                            {shift.networkFee > 0 && (
-                              <p className="text-[10px] font-bold text-rose-700 dark:text-rose-400 mt-0.5 bg-rose-50 dark:bg-rose-500/10 inline-block px-1 rounded">Fee: {shift.networkFee} {shift.networkFeeAsset}</p>
-                            )}
-                          </td>
-                          <td className="p-4">
-                            <p className="font-black text-emerald-700 dark:text-emerald-400 text-sm">
-                              +{Number(shift.netReceived).toLocaleString()} {shift.toAsset}
-                            </p>
-                            {shift.toSubWallet && (
-                              <p className="text-[10px] font-bold text-slate-600 dark:text-slate-400 mt-0.5">{shift.toSubWallet}</p>
-                            )}
-                            {shift.taxAndFees > 0 && (
-                              <p className="text-[10px] font-bold text-rose-700 dark:text-rose-400 mt-0.5 bg-rose-50 dark:bg-rose-500/10 inline-block px-1 rounded">Tax: {shift.taxAndFees} {shift.toAsset}</p>
-                            )}
-                          </td>
-                          <td className="p-4 pr-6 text-right">
+                         </div>
+                         
+                         <div className="flex items-center gap-2">
                             <button 
-                              onClick={() => initiateDeleteShift(shift)} 
-                              className="p-2.5 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-200 dark:hover:bg-rose-500/20 border border-slate-300 dark:border-slate-700 rounded-lg transition-all md:opacity-0 group-hover:opacity-100 shadow-sm"
+                               onClick={() => initiateDeleteShift(shift)} 
+                               className="p-2 sm:p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-lg sm:rounded-xl hover:bg-rose-100 dark:hover:bg-rose-500/20 transition-colors border border-rose-200 dark:border-rose-500/30 active:scale-95 shadow-sm md:opacity-0 group-hover:opacity-100"
                             >
-                              <HiOutlineTrash size={16} />
+                               <HiOutlineTrash size={14} className="sm:w-[16px] sm:h-[16px]" />
                             </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                         </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Delete Confirmation Modal */}
-      {deleteContext && (
+      {/* ============================================ */}
+      {/* 🔐 CONFIRMATION MODAL FOR EXECUTING SHIFT */}
+      {/* ============================================ */}
+      {confirmShift && (
         <div className="fixed inset-0 z-[500] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700">
+            <div className="px-6 py-5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
+              <h3 className="text-xl font-black flex items-center gap-2">
+                <FaExchangeAlt size={20} /> Confirm Capital Shift
+              </h3>
+              <p className="text-xs text-white/70 mt-1">
+                This action will create entries in both source and destination vaults.
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="text-sm font-bold text-slate-700 dark:text-slate-300 space-y-2">
+                <p>
+                  <span className="text-rose-500">From:</span>{' '}
+                  {transferData.grossAmount} {transferData.fromAsset} ({transferData.fromVault})
+                </p>
+                <p>
+                  <span className="text-emerald-500">To:</span>{' '}
+                  {transferData.netReceived} {transferData.toAsset} ({transferData.toVault})
+                </p>
+                {transferData.routingPlatform && (
+                  <p className="text-indigo-500">
+                    Via: {transferData.routingPlatform}
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setConfirmShift(false)}
+                  className="flex-1 py-3 px-4 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={executeShift}
+                  disabled={isProcessing}
+                  className="flex-1 py-3 px-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-bold text-sm hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50"
+                >
+                  Confirm Shift
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================ */}
+      {/* 🗑️ DELETE PIN MODAL */}
+      {/* ============================================ */}
+      {deleteContext && (
+        <div className="fixed inset-0 z-[600] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden border border-slate-300 dark:border-slate-700">
             <div className="px-6 py-5 bg-gradient-to-r from-rose-600 to-pink-600 text-white">
               <div className="flex items-center gap-3">
@@ -971,7 +1466,7 @@ const CapitalShifting = () => {
                 <input 
                   type="password" maxLength={6} required autoFocus
                   value={pinInput} onChange={(e) => setPinInput(e.target.value)}
-                  className="w-full text-center tracking-[0.3em] text-xl p-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors shadow-sm"
+                  className="w-full text-center tracking-[0.3em] text-xl p-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors shadow-sm focus:border-rose-500"
                 />
                 {pinError && <p className="text-xs font-bold text-rose-700 dark:text-rose-400 mt-2 text-center">{pinError}</p>}
               </div>
@@ -980,7 +1475,7 @@ const CapitalShifting = () => {
                 <button type="button" onClick={() => setDeleteContext(null)} className="flex-1 p-4 rounded-xl font-black text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 transition-colors shadow-sm">
                   Cancel
                 </button>
-                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-xl font-black text-sm bg-gradient-to-r from-rose-600 to-pink-600 text-white hover:from-rose-700 hover:to-pink-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30 active:scale-95">
+                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-xl font-black text-white bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30 active:scale-95">
                   {isVerifying ? <HiOutlineRefresh className="animate-spin" size={18} /> : <HiOutlineTrash size={18} />}
                   Confirm Delete
                 </button>
@@ -993,5 +1488,11 @@ const CapitalShifting = () => {
     </div>
   );
 };
+
+const CapitalShifting = () => (
+  <ToastProvider>
+    <CapitalShiftingContent />
+  </ToastProvider>
+);
 
 export default CapitalShifting;
