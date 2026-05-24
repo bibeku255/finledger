@@ -1,21 +1,63 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+// src/pages/crypto/SwapAndBridge.jsx
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useAuth } from '../../hooks/useAuth';
-import { collection, addDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDocs, where, getDoc } from 'firebase/firestore';
+import {
+  collection, addDoc, setDoc, deleteDoc, doc,
+  onSnapshot, query, orderBy, getDocs, where, getDoc
+} from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
 import { verifyPIN } from '../../utils/cryptoUtils';
-import { fetchWithRetry } from '../../utils/helpers';
-import { 
+import { useCryptoPrice } from '../../context/CryptoPriceContext';
+import {
   HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
-  HiOutlineSearch, HiOutlineRefresh, HiOutlineLockClosed, 
+  HiOutlineSearch, HiOutlineRefresh, HiOutlineLockClosed,
   HiOutlineChevronDown, HiOutlineSwitchHorizontal,
-  HiOutlineExclamationCircle, HiOutlineDownload, 
+  HiOutlineExclamationCircle, HiOutlineDownload,
   HiOutlineDocumentText, HiOutlineTable, HiOutlineShieldCheck,
-  HiOutlineArrowRight, HiOutlineCalendar
+  HiOutlineArrowRight, HiOutlineCalendar,
+  HiOutlineCheckCircle, HiOutlineInformationCircle
 } from 'react-icons/hi';
 import { FaExchangeAlt, FaRoute, FaGhost, FaBuilding, FaWallet } from 'react-icons/fa';
 
+// ============================================
+// 🚀 MINI TOAST SYSTEM
+// ============================================
+const ToastContext = React.createContext(null);
+const ToastProvider = ({ children }) => {
+  const [toasts, setToasts] = useState([]);
+  const addToast = (message, type = 'info', duration = 4000) => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type, duration }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
+  };
+  const removeToast = id => setToasts(prev => prev.filter(t => t.id !== id));
+  return (
+    <ToastContext.Provider value={{ addToast, removeToast }}>
+      {children}
+      <div className="fixed top-24 right-4 z-[10000] space-y-2 max-w-sm w-full pointer-events-none px-4 md:px-0">
+        {toasts.map(toast => (
+          <div key={toast.id} className={`pointer-events-auto flex items-start gap-3 p-4 rounded-2xl shadow-2xl backdrop-blur-xl border animate-in slide-in-from-right-4 fade-in duration-300 ${
+            toast.type === 'success' ? 'bg-green-50/95 dark:bg-green-900/90 border-green-200 dark:border-green-700' :
+            toast.type === 'error' ? 'bg-red-50/95 dark:bg-red-900/90 border-red-200 dark:border-red-700' :
+            toast.type === 'warning' ? 'bg-amber-50/95 dark:bg-amber-900/90 border-amber-200 dark:border-amber-700' :
+            'bg-blue-50/95 dark:bg-blue-900/90 border-blue-200 dark:border-blue-700'
+          }`}>
+            {toast.type === 'success' && <HiOutlineCheckCircle className="text-green-600 dark:text-green-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'error' && <HiOutlineExclamationCircle className="text-red-600 dark:text-red-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'warning' && <HiOutlineExclamationCircle className="text-amber-600 dark:text-amber-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'info' && <HiOutlineInformationCircle className="text-blue-600 dark:text-blue-400 w-5 h-5 flex-shrink-0" />}
+            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 flex-1">{toast.message}</p>
+            <button onClick={() => removeToast(toast.id)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"><HiOutlineX size={16} /></button>
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+};
+const useToast = () => React.useContext(ToastContext);
+
+// Helpers
 const LogoRenderer = ({ symbol, logoUrl, bg, color }) => {
   const [hasError, setHasError] = useState(false);
   useEffect(() => { setHasError(false); }, [logoUrl]);
@@ -23,7 +65,6 @@ const LogoRenderer = ({ symbol, logoUrl, bg, color }) => {
   return <img src={logoUrl} alt={symbol} className="w-full h-full object-contain p-0.5 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-sm" onError={() => setHasError(true)} />;
 };
 
-// 🚀 FIXED: 100% Bulletproof Local Time Generator
 const getLocalISOString = () => {
   const now = new Date();
   const year = now.getFullYear();
@@ -34,9 +75,13 @@ const getLocalISOString = () => {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
-const SwapAndBridge = () => {
-  const { user, baseCurrency = 'USD', selectedCryptos = [], formatGlobalDate } = useAuth();
+// ============================================
+// 🚀 MAIN CONTENT COMPONENT
+// ============================================
+const SwapAndBridgeContent = () => {
+  const { user, baseCurrency = 'USD', selectedCryptos = [], formatGlobalDate, getCalendarMonthKey } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
+  const { addToast } = useToast();
 
   const [records, setRecords] = useState([]);
   const [walletHoldings, setWalletHoldings] = useState({});
@@ -45,14 +90,12 @@ const SwapAndBridge = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
-  const [livePrices, setLivePrices] = useState({});
-  const [fiatRate, setFiatRate] = useState(1);
   const [customUserCoins, setCustomUserCoins] = useState([]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  
-  const [deleteContext, setDeleteContext] = useState(null); 
+
+  const [deleteContext, setDeleteContext] = useState(null);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
@@ -70,42 +113,75 @@ const SwapAndBridge = () => {
     datetime: getLocalISOString(), linkedId: ''
   });
 
+  // Collapsible months state
+  const getCurrentMonthKey = () => getCalendarMonthKey ? getCalendarMonthKey(new Date().toISOString()) : `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
+  const [openMonths, setOpenMonths] = useState(new Set([getCurrentMonthKey()]));
+  const toggleMonth = (monthKey) => {
+    setOpenMonths(prev => {
+      const next = new Set(prev);
+      next.has(monthKey) ? next.delete(monthKey) : next.add(monthKey);
+      return next;
+    });
+  };
+
+  // ✅ Global Crypto Price Context
+  const { livePrices, fiatRate } = useCryptoPrice();
+
+  // Real-time listeners
   useEffect(() => {
     if (!user) return;
-    
+
     const qSB = query(collection(db, "users", user.uid, "swapBridgeLogs"), orderBy("timestamp", "desc"));
     const unsubscribeSB = onSnapshot(qSB, (snapshot) => {
       setRecords(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setIsLoading(false);
+    }, (err) => {
+      addToast('Failed to load swap/bridge records.', 'error');
       setIsLoading(false);
     });
 
     const qVault = query(collection(db, "users", user.uid, "cryptoWalletLogs"), orderBy("timestamp", "desc"));
     const unsubscribeVault = onSnapshot(qVault, (snapshot) => {
-       const vaultData = {};
-       const platforms = new Set();
-       snapshot.docs.forEach(doc => {
-          const t = doc.data();
-          if (t.platform) platforms.add(t.platform);
-          if (t.fromPlatform) platforms.add(t.fromPlatform);
-          if (t.toPlatform) platforms.add(t.toPlatform);
+      const vaultData = {};
+      const platforms = new Set();
+      snapshot.docs.forEach(doc => {
+        const t = doc.data();
+        if (t.platform) platforms.add(t.platform);
+        if (t.fromPlatform) platforms.add(t.fromPlatform);
+        if (t.toPlatform) platforms.add(t.toPlatform);
 
-          if (!vaultData[t.coin]) vaultData[t.coin] = { platforms: {} };
-          const qty = parseFloat(t.quantity) || 0;
-          const fee = parseFloat(t.networkFee) || 0;
-          
-          if (t.type === 'in') { vaultData[t.coin].platforms[t.platform] = (vaultData[t.coin].platforms[t.platform] || 0) + qty; }
-          else if (t.type === 'out') { vaultData[t.coin].platforms[t.platform] = (vaultData[t.coin].platforms[t.platform] || 0) - qty; }
-          else if (t.type === 'transfer') { 
-             vaultData[t.coin].platforms[t.fromPlatform] = (vaultData[t.coin].platforms[t.fromPlatform] || 0) - qty; 
-             vaultData[t.coin].platforms[t.toPlatform] = (vaultData[t.coin].platforms[t.toPlatform] || 0) + (qty - fee); 
-          }
-       });
-       setWalletHoldings(vaultData);
-       setExistingPlatforms(Array.from(platforms));
+        if (!vaultData[t.coin]) vaultData[t.coin] = { platforms: {} };
+        const qty = parseFloat(t.quantity) || 0;
+        const fee = parseFloat(t.networkFee || t.fee) || 0;
+        const totalQty = parseFloat(t.totalQuantity) || (qty + fee); // ✅ fallback
+
+        if (t.type === 'in') {
+          vaultData[t.coin].platforms[t.platform] = (vaultData[t.coin].platforms[t.platform] || 0) + qty;
+        } else if (t.type === 'out') {
+          // ✅ Out में quantity + fee दोनों घटाएँ
+          vaultData[t.coin].platforms[t.platform] = (vaultData[t.coin].platforms[t.platform] || 0) - totalQty;
+        } else if (t.type === 'transfer') {
+          vaultData[t.coin].platforms[t.fromPlatform] = (vaultData[t.coin].platforms[t.fromPlatform] || 0) - qty;
+          vaultData[t.coin].platforms[t.toPlatform] = (vaultData[t.coin].platforms[t.toPlatform] || 0) + (qty - fee);
+        }
+      });
+
+      // Clean tiny balances
+      Object.keys(vaultData).forEach(coin => {
+        Object.keys(vaultData[coin].platforms).forEach(plat => {
+          if (vaultData[coin].platforms[plat] <= 0.00000001) delete vaultData[coin].platforms[plat];
+        });
+        if (Object.keys(vaultData[coin].platforms).length === 0) delete vaultData[coin];
+      });
+
+      setWalletHoldings(vaultData);
+      setExistingPlatforms(Array.from(platforms));
+    }, (err) => {
+      addToast('Failed to load wallet balances.', 'error');
     });
 
     return () => { unsubscribeSB(); unsubscribeVault(); };
-  }, [user]);
+  }, [user, addToast]);
 
   useEffect(() => {
     const fetchUserData = async () => {
@@ -119,8 +195,8 @@ const SwapAndBridge = () => {
 
   const fullDatabase = useMemo(() => {
     const coinMap = new Map();
-    selectedCryptos.forEach(c => { 
-      if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c); 
+    selectedCryptos.forEach(c => {
+      if (typeof c === 'object') coinMap.set(c.symbol.toUpperCase(), c);
       else coinMap.set(c.toUpperCase(), { symbol: c.toUpperCase(), id: c.toLowerCase() });
     });
     customUserCoins.forEach(c => {
@@ -130,89 +206,15 @@ const SwapAndBridge = () => {
     return Array.from(coinMap.values());
   }, [customUserCoins, selectedCryptos]);
 
-  useEffect(() => {
-    const fetchLivePrices = async () => {
-      try {
-        const fiatRes = await fetchWithRetry('https://api.exchangerate-api.com/v4/latest/USD');
-        let userBaseRate = 1;
-        if (fiatRes && fiatRes.ok) userBaseRate = (await fiatRes.json()).rates[baseCurrency] || 1;
-        setFiatRate(userBaseRate);
+  // ❌ REMOVED: fetchLivePrices और उससे जुड़ा useEffect
+  // ✅ Helper: base currency price for a coin from context
+  const getLivePrice = useCallback((symbol) => {
+    if (!symbol) return 0;
+    const priceUSD = livePrices[symbol.toUpperCase()]?.priceUSD || 0;
+    return priceUSD * fiatRate;
+  }, [livePrices, fiatRate]);
 
-        const coinsToFetch = Array.from(new Set([...activeCryptos, 'USDT', formData.fromCoin, formData.toCoin, formData.bridgeCoin])).filter(Boolean);
-        if (coinsToFetch.length === 0) return;
-
-        let cgJson = {};
-        let geckoTerminalData = {};
-        const normalCoins = [];
-        const contractCoins = [];
-
-        coinsToFetch.forEach(sym => {
-           const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase());
-           if (dbCoin?.fetchMode === 'contract' && dbCoin.network && dbCoin.contractAddress) contractCoins.push(dbCoin);
-           else normalCoins.push(dbCoin?.id || sym.toLowerCase());
-        });
-
-        if (normalCoins.length > 0) {
-           try {
-             const cgRes = await fetchWithRetry(`https://api.coingecko.com/api/v3/simple/price?ids=${[...new Set(normalCoins)].join(',')}&vs_currencies=usd`);
-             if (cgRes && cgRes.ok) cgJson = await cgRes.json();
-           } catch(e) {}
-        }
-
-        for (const customCoin of contractCoins) {
-           try {
-              const gtRes = await fetchWithRetry(`https://api.geckoterminal.com/api/v2/networks/${customCoin.network}/tokens/${customCoin.contractAddress}`);
-              if (gtRes && gtRes.ok) {
-                 const gtJson = await gtRes.json();
-                 geckoTerminalData[customCoin.id] = { usd: parseFloat(gtJson.data.attributes.price_usd) };
-              } else {
-                 const dexRes = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${customCoin.contractAddress}`);
-                 if(dexRes && dexRes.ok) {
-                    const dexData = await dexRes.json();
-                    if(dexData.pairs?.length > 0) geckoTerminalData[customCoin.id] = { usd: parseFloat(dexData.pairs[0].priceUsd) };
-                 }
-              }
-           } catch (error) {}
-        }
-        
-        const priceMap = {};
-        
-        await Promise.all(coinsToFetch.map(async (sym) => {
-          const upperSym = sym.toUpperCase();
-          const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || {};
-          const searchId = dbCoin.id || sym.toLowerCase();
-          let priceUsd = dbCoin.fetchMode === 'contract' ? geckoTerminalData[searchId]?.usd : cgJson[searchId]?.usd;
-
-          if (!priceUsd) {
-            try {
-               const bSym = searchId === 'tether' ? 'BTCUSDT' : `${upperSym}USDT`;
-               const bRes = await fetchWithRetry(`https://api.binance.com/api/v3/ticker/price?symbol=${bSym}`);
-               if (bRes && bRes.ok) {
-                  const bData = await bRes.json();
-                  priceUsd = searchId === 'tether' ? 1.00 : parseFloat(bData.price);
-               }
-            } catch(e) {}
-          }
-
-          if (!priceUsd && dbCoin.fallbackPrice) priceUsd = dbCoin.fallbackPrice;
-          if(priceUsd) priceMap[upperSym] = priceUsd;
-        }));
-
-        setLivePrices(priceMap);
-      } catch (error) {}
-    };
-    
-    fetchLivePrices();
-    const interval = setInterval(fetchLivePrices, 60000);
-    return () => clearInterval(interval);
-  }, [activeCryptos, baseCurrency, formData.fromCoin, formData.toCoin, formData.bridgeCoin, fullDatabase]);
-
-  const getLivePrice = (symbol) => {
-    if (livePrices[symbol]) return livePrices[symbol] * fiatRate; 
-    const dbCoin = fullDatabase.find(c => c.symbol === symbol.toUpperCase());
-    return (dbCoin?.fallbackPrice || 0) * fiatRate;
-  };
-
+  // Analytics (overall totals)
   const analytics = useMemo(() => {
     let totalVolume = 0;
     let totalFeesLost = 0;
@@ -240,7 +242,7 @@ const SwapAndBridge = () => {
       const feeBase = feeCoins * getLivePrice(formData.bridgeCoin);
       return { feeCoins, feeBase, isLoss: feeCoins > 0 };
     }
-  }, [formData, livePrices, fiatRate]);
+  }, [formData, getLivePrice]);
 
   const getAvailableBalance = () => {
     let coin, platform;
@@ -257,16 +259,21 @@ const SwapAndBridge = () => {
   };
   const currentFormBalance = getAvailableBalance();
 
-  const filteredLogs = records.filter(t => 
+  // Filter records based on search
+  const filteredLogs = records.filter(t =>
     t.fromCoin?.toLowerCase().includes(searchTerm.toLowerCase()) || t.toCoin?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     t.bridgeCoin?.toLowerCase().includes(searchTerm.toLowerCase()) || t.platform?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     t.fromPlatform?.toLowerCase().includes(searchTerm.toLowerCase()) || t.toPlatform?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // Export with toast
   const handleDownloadReport = (format) => {
     setIsExportMenuOpen(false);
-    if (filteredLogs.length === 0) return alert("No swap/bridge records found based on your search.");
-    
+    if (filteredLogs.length === 0) {
+      addToast("No swap/bridge records found based on your search.", "warning");
+      return;
+    }
+
     const reportData = filteredLogs.map(rec => {
       let actionLabel = rec.actionType === 'swap' ? 'Coin Swap' : 'Bridge / Transfer';
       let fromLabel = rec.actionType === 'swap' ? `${rec.fromAmount} ${rec.fromCoin} (via ${rec.platform})` : `${rec.bridgeSentAmount} ${rec.bridgeCoin} (from ${rec.fromPlatform})`;
@@ -275,19 +282,19 @@ const SwapAndBridge = () => {
 
       return {
         date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rec.date.split('T')[0],
-        type: actionLabel, 
-        fromDetails: fromLabel, 
-        toDetails: toLabel, 
+        type: actionLabel,
+        fromDetails: fromLabel,
+        toDetails: toLabel,
         pnlType: isProfit ? 'Profit (In)' : 'Fee (Out)',
-        pnlBase: Number(Math.abs(rec.hiddenFeeBase || 0).toFixed(2)) 
+        pnlBase: Number(Math.abs(rec.hiddenFeeBase || 0).toFixed(2))
       };
     });
 
     const columns = [
-      { header: 'Date', key: 'date' }, 
-      { header: 'Action Type', key: 'type' }, 
+      { header: 'Date', key: 'date' },
+      { header: 'Action Type', key: 'type' },
       { header: 'Source / Deducted', key: 'fromDetails' },
-      { header: 'Destination / Received', key: 'toDetails' }, 
+      { header: 'Destination / Received', key: 'toDetails' },
       { header: 'P&L Type', key: 'pnlType' },
       { header: `P&L Impact (${currencySymbol})`, key: 'pnlBase', isNumeric: true }
     ];
@@ -295,16 +302,27 @@ const SwapAndBridge = () => {
     const fileName = `Swap_Bridge_Tracker`;
     const reportTitle = `Crypto Swap & Bridge - Full Activity Log`;
 
-    if (format === 'pdf') downloadPDFReport(reportData, columns, fileName, reportTitle);
-    else downloadExcelReport(reportData, columns, fileName, reportTitle);
+    try {
+      if (format === 'pdf') {
+        downloadPDFReport(reportData, columns, fileName, reportTitle, {
+          onSuccess: () => addToast('PDF report downloaded!', 'success'),
+          onError: (msg) => addToast(`PDF Error: ${msg}`, 'error')
+        });
+      } else {
+        downloadExcelReport(reportData, columns, fileName, reportTitle, {
+          onSuccess: () => addToast('Excel report downloaded!', 'success'),
+          onError: (msg) => addToast(`Excel Error: ${msg}`, 'error')
+        });
+      }
+    } catch (e) {
+      addToast('Failed to generate report.', 'error');
+    }
   };
 
   const handleSaveEntry = async (e) => {
     e.preventDefault(); if (!user) return; setIsSaving(true);
 
     const timestamp = editingId ? records.find(r => r.id === editingId)?.timestamp : new Date(formData.datetime).getTime();
-    
-    // 🚀 FIXED: Date formatting string parsing (Safe for timezones)
     const formattedDate = formData.datetime.split('T')[0];
     const uniqueId = formData.linkedId || `SB_${timestamp}_${Math.floor(Math.random() * 1000)}`;
 
@@ -314,13 +332,13 @@ const SwapAndBridge = () => {
     let expenseSyncData = null;
 
     if (formData.actionType === 'swap') {
-      if(!formData.platform.trim()) { alert("Please enter platform."); setIsSaving(false); return; }
+      if(!formData.platform.trim()) { addToast("Please enter platform.", "warning"); setIsSaving(false); return; }
       const fQty = parseFloat(formData.fromAmount); const tQty = parseFloat(formData.toAmount);
-      if (fQty <= 0 || tQty <= 0) { alert("Amounts must be > 0"); setIsSaving(false); return; }
+      if (fQty <= 0 || tQty <= 0) { addToast("Amounts must be greater than zero.", "warning"); setIsSaving(false); return; }
 
       const fromVal = fQty * getLivePrice(formData.fromCoin);
       const toVal = tQty * getLivePrice(formData.toCoin);
-      const diff = fromVal - toVal; 
+      const diff = fromVal - toVal;
 
       masterRecord = { ...masterRecord, platform: formData.platform.trim(), fromCoin: formData.fromCoin, fromAmount: fQty, toCoin: formData.toCoin, toAmount: tQty, baseVolume: fromVal, hiddenFeeBase: Math.max(0, diff) };
       cryptoWalletSyncData.push({ type: 'out', coin: formData.fromCoin, quantity: fQty, platform: formData.platform.trim(), reason: `Swapped to ${formData.toCoin}`, referenceNo: uniqueId, date: formattedDate, timestamp, linkedRecordId: uniqueId });
@@ -329,9 +347,9 @@ const SwapAndBridge = () => {
       if (diff > 0) expenseSyncData = { title: `Swap Spread Fee (${formData.fromCoin} to ${formData.toCoin})`, category: 'Bank & Transaction Fees', amount: diff, currency: baseCurrency, finalBaseAmount: diff, date: formattedDate, timestamp, linkedExpenseId: uniqueId, isVirtualCrypto: true, vault: 'crypto' };
       else if (diff < 0) incomeSyncData = { title: `Arbitrage Profit (${formData.fromCoin} to ${formData.toCoin})`, category: 'Crypto APR / Yield', asset: baseCurrency, amount: Math.abs(diff), exchangeRate: 1, finalBaseAmount: Math.abs(diff), date: formattedDate, timestamp, linkedIncomeId: uniqueId, isVirtualCrypto: true, vault: 'crypto' };
     } else {
-      if(!formData.fromPlatform.trim() || !formData.toPlatform.trim()) { alert("Please enter both platforms."); setIsSaving(false); return; }
+      if(!formData.fromPlatform.trim() || !formData.toPlatform.trim()) { addToast("Please enter both platforms.", "warning"); setIsSaving(false); return; }
       const sQty = parseFloat(formData.bridgeSentAmount); const rQty = parseFloat(formData.bridgeReceivedAmount);
-      if (sQty <= 0 || rQty <= 0) { alert("Amounts must be > 0"); setIsSaving(false); return; }
+      if (sQty <= 0 || rQty <= 0) { addToast("Amounts must be greater than zero.", "warning"); setIsSaving(false); return; }
 
       const feeCoins = sQty - rQty;
       const feeBase = feeCoins * getLivePrice(formData.bridgeCoin);
@@ -351,36 +369,40 @@ const SwapAndBridge = () => {
           const snap = await getDocs(q);
           snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, col, d.id)));
         }
-      } else { await addDoc(collection(db, "users", user.uid, "swapBridgeLogs"), masterRecord); }
-      
+        addToast('Entry updated!', 'success');
+      } else {
+        await addDoc(collection(db, "users", user.uid, "swapBridgeLogs"), masterRecord);
+        addToast('Swap/Bridge recorded & synced!', 'success');
+      }
+
       for (const data of cryptoWalletSyncData) await addDoc(collection(db, "users", user.uid, "cryptoWalletLogs"), data);
       if (incomeSyncData) await addDoc(collection(db, "users", user.uid, "incomeLogs"), incomeSyncData);
       if (expenseSyncData) await addDoc(collection(db, "users", user.uid, "expenseLogs"), expenseSyncData);
 
       closeModal();
-    } catch (error) { alert("Failed to save."); } finally { setIsSaving(false); }
+    } catch (error) { addToast("Failed to save.", "error"); } finally { setIsSaving(false); }
   };
 
   const executeSecureDelete = async (e) => {
-    e.preventDefault(); 
-    if (!pinInput.trim()) return setPinError("Enter PIN."); 
+    e.preventDefault();
+    if (!pinInput.trim()) return setPinError("Enter PIN.");
     setIsVerifying(true);
     try {
       const userDoc = await getDoc(doc(db, "users", user.uid));
       const storedHash = userDoc.data()?.security?.pinHash || userDoc.data()?.securityPin || userDoc.data()?.pin;
-      
+
       const { valid, newHash } = await verifyPIN(pinInput.trim(), storedHash, user.uid);
-      
+
       if (!valid) {
         setPinError("Incorrect PIN.");
         setIsVerifying(false);
         return;
       }
-      
+
       if (newHash) {
         await setDoc(doc(db, "users", user.uid), { security: { pinHash: newHash } }, { merge: true });
       }
-      
+
       await deleteDoc(doc(db, "users", user.uid, "swapBridgeLogs", deleteContext.id));
       for (const col of ["cryptoWalletLogs", "incomeLogs", "expenseLogs"]) {
         const field = col === "incomeLogs" ? "linkedIncomeId" : col === "expenseLogs" ? "linkedExpenseId" : "linkedRecordId";
@@ -388,11 +410,12 @@ const SwapAndBridge = () => {
         const snap = await getDocs(q);
         snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, col, d.id)));
       }
-      setDeleteContext(null); 
-    } catch (error) { 
-      setPinError("Error."); 
-    } finally { 
-      setIsVerifying(false); 
+      setDeleteContext(null);
+      addToast('Record deleted and balances reversed.', 'info');
+    } catch (error) {
+      setPinError("Error.");
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -411,20 +434,105 @@ const SwapAndBridge = () => {
     setEditingId(rec.id); setIsModalOpen(true);
   };
 
-  const closeModal = () => { 
+  const closeModal = () => {
     if (abortControllerRef.current) abortControllerRef.current.abort();
-    setIsModalOpen(false); setEditingId(null); 
-    setFormData(prev => ({ ...prev, fromAmount: '', toAmount: '', bridgeSentAmount: '', bridgeReceivedAmount: '', linkedId: '', datetime: getLocalISOString() })); 
+    setIsModalOpen(false); setEditingId(null);
+    setFormData(prev => ({ ...prev, fromAmount: '', toAmount: '', bridgeSentAmount: '', bridgeReceivedAmount: '', linkedId: '', datetime: getLocalISOString() }));
   };
+
+  // ==============================
+  // 🚀 MONTH GROUPING
+  // ==============================
+  const processedMonths = useMemo(() => {
+    const sorted = [...filteredLogs].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const grouped = {};
+
+    sorted.forEach(rec => {
+      const dateObj = new Date(rec.date || new Date());
+      const monthKey = getCalendarMonthKey ? getCalendarMonthKey(rec.date) : `${dateObj.getFullYear()}-${String(dateObj.getMonth()+1).padStart(2,'0')}`;
+      if (!grouped[monthKey]) {
+        grouped[monthKey] = {
+          monthKey,
+          monthName: formatGlobalDate ? formatGlobalDate(dateObj, 'monthYear') : dateObj.toLocaleString('default', { month: 'long', year: 'numeric' }),
+          records: [],
+          totalVolume: 0,
+          totalFees: 0,
+        };
+      }
+      const vol = rec.baseVolume || 0;
+      const fee = rec.hiddenFeeBase || 0;
+      grouped[monthKey].records.push(rec);
+      grouped[monthKey].totalVolume += vol;
+      grouped[monthKey].totalFees += fee;
+    });
+
+    return Object.keys(grouped)
+      .sort((a, b) => (grouped[b].records[0]?.timestamp || 0) - (grouped[a].records[0]?.timestamp || 0))
+      .map(key => {
+        const month = grouped[key];
+        month.records = month.records.reverse();
+        return month;
+      });
+  }, [filteredLogs, formatGlobalDate, getCalendarMonthKey]);
+
+  // Skeleton loaders
+  const SkeletonCards = () => (
+    <div className="space-y-4">
+      {[1,2,3].map(i => (
+        <div key={i} className="p-4 border-b border-slate-100 dark:border-slate-800/50 animate-pulse">
+          <div className="flex justify-between mb-3">
+            <div className="space-y-2">
+              <div className="h-4 w-24 bg-slate-200 dark:bg-slate-700 rounded" />
+              <div className="h-3 w-16 bg-slate-200 dark:bg-slate-700 rounded" />
+            </div>
+            <div className="h-4 w-16 bg-slate-200 dark:bg-slate-700 rounded" />
+          </div>
+          <div className="flex justify-between items-center gap-2">
+            <div className="flex gap-2 items-center">
+              <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700" />
+              <div className="h-4 w-20 bg-slate-200 dark:bg-slate-700 rounded" />
+            </div>
+            <div className="h-4 w-8 bg-slate-200 dark:bg-slate-700 rounded" />
+            <div className="flex gap-2 items-center">
+              <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700" />
+              <div className="h-4 w-20 bg-slate-200 dark:bg-slate-700 rounded" />
+            </div>
+          </div>
+          <div className="mt-3 h-3 w-32 bg-slate-200 dark:bg-slate-700 rounded" />
+        </div>
+      ))}
+    </div>
+  );
+
+  const SkeletonTable = () => (
+    <div className="hidden md:block overflow-x-auto">
+      <table className="w-full text-left min-w-[700px]">
+        <thead className="bg-white dark:bg-slate-900 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
+          <tr><th className="p-4 pl-6">Type</th><th className="p-4">Source</th><th className="p-4">Destination</th><th className="p-4 text-right">P&L</th><th className="p-4 pr-6 text-right">Actions</th></tr>
+        </thead>
+        <tbody>
+          {[1,2,3].map(i => (
+            <tr key={i} className="animate-pulse">
+              <td className="p-4 pl-6"><div className="h-8 w-20 bg-slate-200 dark:bg-slate-700 rounded-lg" /></td>
+              <td className="p-4"><div className="h-4 w-24 bg-slate-200 dark:bg-slate-700 rounded" /></td>
+              <td className="p-4"><div className="h-4 w-24 bg-slate-200 dark:bg-slate-700 rounded" /></td>
+              <td className="p-4 text-right"><div className="h-4 w-16 bg-slate-200 dark:bg-slate-700 rounded ml-auto" /></td>
+              <td className="p-4 pr-6"><div className="h-8 w-16 bg-slate-200 dark:bg-slate-700 rounded" /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 
   return (
     <div className="pt-24 space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 max-w-7xl mx-auto px-4 md:px-6">
-      
+
       {/* HEADER SECTION */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-[2rem] md:rounded-[2.5rem] p-5 sm:p-6 md:p-8 shadow-2xl relative overflow-hidden border border-slate-700/50 backdrop-blur-sm z-20">
         <div className="absolute right-[-5%] top-[-20%] opacity-[0.03] text-white blur-[2px] pointer-events-none"><FaExchangeAlt size={250}/></div>
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.08),transparent_50%)] pointer-events-none" />
-        
+
         <div className="relative z-50">
           <div className="flex items-center gap-3 mb-2 md:mb-3">
             <div className="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-br from-blue-500/20 to-cyan-500/20 text-blue-400 rounded-xl md:rounded-2xl flex items-center justify-center shadow-[inset_0_0_20px_rgba(59,130,246,0.2)] ring-1 ring-blue-500/30">
@@ -436,11 +544,11 @@ const SwapAndBridge = () => {
             </div>
           </div>
         </div>
-        
+
         <div className="relative z-50 flex items-center gap-2 md:gap-3 w-full md:w-auto">
           {/* EXPORT MENU */}
           <div className="relative w-1/2 md:w-auto z-50">
-            <button 
+            <button
               onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
               onBlur={() => setTimeout(() => setIsExportMenuOpen(false), 200)}
               className="w-full flex items-center justify-center gap-2 px-3 sm:px-4 py-3 sm:py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 shadow-sm"
@@ -454,20 +562,21 @@ const SwapAndBridge = () => {
               </div>
             )}
           </div>
-          
+
           <button onClick={() => setIsModalOpen(true)} className="w-1/2 md:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white px-3 sm:px-5 py-3 sm:py-3.5 rounded-xl md:rounded-2xl font-black text-[10px] sm:text-xs md:text-sm uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-blue-500/25 whitespace-nowrap">
             <HiOutlinePlus size={18} className="hidden sm:inline" /> Action
           </button>
         </div>
       </div>
 
+      {/* Analytics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5 relative z-10">
         <div className="p-5 sm:p-6 md:p-8 bg-white dark:bg-slate-900 rounded-[1.5rem] md:rounded-[2rem] shadow-sm border border-slate-200 dark:border-slate-800 relative overflow-hidden flex flex-col justify-center">
           <div className="absolute right-[-10%] top-[-10%] opacity-[0.03] dark:opacity-5 text-slate-900 dark:text-white"><FaExchangeAlt size={120}/></div>
           <p className="text-[10px] sm:text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1 sm:mb-2 relative z-10">Total Volume Moved</p>
           <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-slate-800 dark:text-white tracking-tight relative z-10 truncate" title={`${currencySymbol}${analytics.totalVolume.toLocaleString()}`}>{currencySymbol}{analytics.totalVolume.toLocaleString(undefined, {maximumFractionDigits: 0})}</h2>
         </div>
-        
+
         <div className="p-5 sm:p-6 md:p-8 bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/20 dark:to-rose-900/10 rounded-[1.5rem] md:rounded-[2rem] shadow-sm border border-rose-200 dark:border-rose-800/50 md:col-span-2 relative overflow-hidden flex flex-col justify-center">
           <div className="absolute right-0 top-0 opacity-10 text-rose-500 -mt-4 -mr-4"><FaGhost size={140}/></div>
           <p className="text-[10px] sm:text-[11px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-widest mb-1 sm:mb-2 relative z-10 flex items-center gap-1 sm:gap-2">
@@ -479,123 +588,224 @@ const SwapAndBridge = () => {
         </div>
       </div>
 
+      {/* Search */}
       <div className="relative mt-6 md:mt-8">
         <HiOutlineSearch className="absolute left-4 sm:left-5 top-1/2 -translate-y-1/2 text-slate-400 text-lg sm:text-xl" />
         <input type="text" placeholder="Search by coin or platform..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 sm:pl-14 pr-4 py-3 sm:py-4 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-bold text-sm sm:text-base text-slate-700 dark:text-white outline-none focus:border-blue-500 transition-colors shadow-sm placeholder-slate-400" />
       </div>
 
-      {/* 🚀 NEW MOBILE-FRIENDLY CARD-BASED UI */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[1.5rem] md:rounded-[2rem] overflow-hidden shadow-sm">
-        <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/20">
-          <h2 className="text-lg sm:text-xl font-black text-slate-800 dark:text-white tracking-tight">Activity Log</h2>
+      {/* 🚀 COLLAPSIBLE MONTHS ACTIVITY LOG */}
+      {isLoading ? (
+        <>
+          <SkeletonCards />
+          <SkeletonTable />
+        </>
+      ) : processedMonths.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm">
+          <FaExchangeAlt className="text-5xl text-slate-300 dark:text-slate-600 mb-4" />
+          <p className="text-lg font-black text-slate-700 dark:text-slate-300">No swaps or transfers yet</p>
+          <p className="text-sm text-slate-500">{searchTerm ? 'Adjust your search.' : 'Start by logging your first swap/bridge.'}</p>
         </div>
-        
-        <div className="flex flex-col">
-          {filteredLogs.map((rec) => {
-            const fromCoinObj = fullDatabase.find(c => c.symbol === (rec.actionType === 'swap' ? rec.fromCoin : rec.bridgeCoin).toUpperCase());
-            const toCoinObj = fullDatabase.find(c => c.symbol === (rec.actionType === 'swap' ? rec.toCoin : rec.bridgeCoin).toUpperCase());
+      ) : (
+        processedMonths.map(month => {
+          const isOpen = openMonths.has(month.monthKey);
+          const totalVolume = month.totalVolume;
+          const totalFees = month.totalFees;
 
-            return (
-              <div key={rec.id} className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800/50 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors flex flex-col gap-3">
-                 <div className="flex justify-between items-start gap-2">
-                    <div>
-                       <h3 className="text-sm sm:text-base font-black text-slate-800 dark:text-white flex items-center gap-2">
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${rec.actionType === 'swap' ? 'bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400' : 'bg-purple-100 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400'}`}>
-                             {rec.actionType === 'swap' ? <FaExchangeAlt size={10} /> : <FaRoute size={10} />}
-                          </div>
-                          {rec.actionType === 'swap' ? 'Coin Swap' : 'Bridge Transfer'}
-                       </h3>
-                       <div className={`mt-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase tracking-widest ${rec.actionType === 'swap' ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400' : 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-400'}`}>
-                          {rec.actionType === 'swap' ? 'Swap Executed' : 'Network Bridge'}
-                       </div>
-                    </div>
-                    
-                    <div className="text-right">
-                       {rec.hiddenFeeBase === 0 ? (
-                          <>
-                             <p className="text-sm sm:text-base font-black text-emerald-600 dark:text-emerald-400">+Profit</p>
-                             <p className="text-[9px] sm:text-[10px] font-bold text-slate-500 mt-0.5">Synced to Income</p>
-                          </>
-                       ) : (
-                          <>
-                             <p className="text-sm sm:text-base font-black text-rose-600 dark:text-rose-400">
-                               -{currencySymbol}{(rec.hiddenFeeBase || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                             </p>
-                             <p className="text-[9px] sm:text-[10px] font-bold text-slate-500 mt-0.5">Fee (Expense)</p>
-                          </>
-                       )}
-                    </div>
-                 </div>
-
-                 <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 flex flex-col sm:flex-row gap-3 justify-between items-start sm:items-center border border-slate-100 dark:border-slate-800/50 mt-1">
-                    <div className="flex items-center gap-2">
-                       <div className="w-8 h-8 rounded-full shadow-sm bg-white dark:bg-slate-800 shrink-0 border border-slate-200 dark:border-slate-700">
-                          <LogoRenderer symbol={rec.actionType === 'swap' ? rec.fromCoin : rec.bridgeCoin} logoUrl={fromCoinObj?.logo} bg={fromCoinObj?.bg} color={fromCoinObj?.color} />
-                       </div>
-                       <div>
-                          <p className="font-black text-slate-800 dark:text-white text-xs sm:text-sm">
-                             {rec.actionType === 'swap' ? rec.fromAmount : rec.bridgeSentAmount} <span className="text-[9px] text-slate-500 uppercase">{rec.actionType === 'swap' ? rec.fromCoin : rec.bridgeCoin}</span>
-                          </p>
-                          <p className="text-[9px] font-bold text-slate-400 flex items-center gap-1 uppercase tracking-widest mt-0.5">
-                             <FaBuilding size={9}/> {rec.actionType === 'swap' ? rec.platform : rec.fromPlatform}
-                          </p>
-                       </div>
-                    </div>
-                    
-                    <HiOutlineArrowRight className="text-slate-300 dark:text-slate-600 hidden sm:block mx-2" />
-                    <HiOutlineArrowRight className="text-slate-300 dark:text-slate-600 block sm:hidden rotate-90 mx-auto my-1" />
-                    
-                    <div className="flex items-center gap-2">
-                       <div className="w-8 h-8 rounded-full shadow-sm bg-white dark:bg-slate-800 shrink-0 border border-slate-200 dark:border-slate-700">
-                          <LogoRenderer symbol={rec.actionType === 'swap' ? rec.toCoin : rec.bridgeCoin} logoUrl={toCoinObj?.logo} bg={toCoinObj?.bg} color={toCoinObj?.color} />
-                       </div>
-                       <div>
-                          <p className="font-black text-emerald-600 dark:text-emerald-400 text-xs sm:text-sm">
-                             +{rec.actionType === 'swap' ? rec.toAmount : rec.bridgeReceivedAmount} <span className="text-[9px] text-slate-500 uppercase">{rec.actionType === 'swap' ? rec.toCoin : rec.bridgeCoin}</span>
-                          </p>
-                          <p className="text-[9px] font-bold text-slate-400 flex items-center gap-1 uppercase tracking-widest mt-0.5">
-                             <FaWallet size={9}/> {rec.actionType === 'swap' ? rec.platform : rec.toPlatform}
-                          </p>
-                       </div>
-                    </div>
-                 </div>
-
-                 <div className="flex items-end justify-between mt-1 pt-2">
-                    <p className="text-[10px] font-bold text-slate-400 flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/50 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
-                       <HiOutlineCalendar size={12} className="text-slate-500" /> {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date}
+          return (
+            <div key={month.monthKey} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[2rem] overflow-hidden shadow-sm">
+              {/* Month Header */}
+              <button
+                onClick={() => toggleMonth(month.monthKey)}
+                className="w-full px-6 py-5 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors text-left"
+              >
+                <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2.5">
+                  <div className="p-2 bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded-lg">
+                    <HiOutlineCalendar size={18} />
+                  </div>
+                  {month.monthName}
+                </h2>
+                <div className="flex items-center gap-4">
+                  <div className="text-right hidden sm:block">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Volume / Fees</p>
+                    <p className="text-sm font-black text-slate-700 dark:text-slate-300">
+                      {currencySymbol}{totalVolume.toLocaleString(undefined, {minimumFractionDigits: 0})} &nbsp;
+                      <span className="text-rose-500">-{currencySymbol}{totalFees.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
                     </p>
-                    <div className="flex items-center gap-2">
-                       <button onClick={() => handleEdit(rec)} className="p-2 sm:p-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg sm:rounded-xl hover:bg-blue-100 dark:hover:bg-blue-500/20 transition-colors border border-blue-200 dark:border-blue-500/30 active:scale-95 shadow-sm">
-                          <HiOutlinePencil size={14}/>
-                       </button>
-                       <button onClick={() => { setDeleteContext(rec); setPinInput(''); setPinError(''); }} className="p-2 sm:p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-lg sm:rounded-xl hover:bg-rose-100 dark:hover:bg-rose-500/20 transition-colors border border-rose-200 dark:border-rose-500/30 active:scale-95 shadow-sm">
-                          <HiOutlineTrash size={14}/>
-                       </button>
-                    </div>
-                 </div>
-              </div>
-            );
-          })}
-          {filteredLogs.length === 0 && (
-             <div className="p-6 sm:p-8 text-center text-slate-500 font-bold text-xs sm:text-sm">
-               No swaps or transfers logged yet.
-             </div>
-          )}
-        </div>
-      </div>
+                  </div>
+                  <HiOutlineChevronDown size={20} className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
+                </div>
+              </button>
 
-      {/* MODAL - ADD/EDIT */}
+              {isOpen && (
+                <div className="animate-in fade-in duration-200">
+                  {/* Mobile Cards */}
+                  <div className="md:hidden flex flex-col divide-y divide-slate-100 dark:divide-slate-800/50">
+                    {month.records.map(rec => {
+                      const fromCoinObj = fullDatabase.find(c => c.symbol === (rec.actionType === 'swap' ? rec.fromCoin : rec.bridgeCoin).toUpperCase());
+                      const toCoinObj = fullDatabase.find(c => c.symbol === (rec.actionType === 'swap' ? rec.toCoin : rec.bridgeCoin).toUpperCase());
+                      return (
+                        <div key={rec.id} className="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <h3 className="text-sm font-black text-slate-800 dark:text-white flex items-center gap-2">
+                                <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${rec.actionType === 'swap' ? 'bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400' : 'bg-purple-100 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400'}`}>
+                                  {rec.actionType === 'swap' ? <FaExchangeAlt size={10} /> : <FaRoute size={10} />}
+                                </div>
+                                {rec.actionType === 'swap' ? 'Swap' : 'Bridge'}
+                              </h3>
+                              <div className={`mt-1 inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${rec.actionType === 'swap' ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400' : 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-400'}`}>
+                                {rec.actionType === 'swap' ? 'Swap Executed' : 'Network Bridge'}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              {rec.hiddenFeeBase === 0 ? (
+                                <p className="text-sm font-black text-emerald-600 dark:text-emerald-400">+Profit</p>
+                              ) : (
+                                <p className="text-sm font-black text-rose-600 dark:text-rose-400">-{currencySymbol}{(rec.hiddenFeeBase || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 flex flex-col sm:flex-row gap-3 justify-between items-start sm:items-center border border-slate-100 dark:border-slate-800/50 mt-1">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-full shadow-sm bg-white dark:bg-slate-800 shrink-0 border border-slate-200 dark:border-slate-700">
+                                <LogoRenderer symbol={rec.actionType === 'swap' ? rec.fromCoin : rec.bridgeCoin} logoUrl={fromCoinObj?.logo} bg={fromCoinObj?.bg} color={fromCoinObj?.color} />
+                              </div>
+                              <div>
+                                <p className="font-black text-slate-800 dark:text-white text-xs">
+                                  {rec.actionType === 'swap' ? rec.fromAmount : rec.bridgeSentAmount} <span className="text-[9px] text-slate-500 uppercase">{rec.actionType === 'swap' ? rec.fromCoin : rec.bridgeCoin}</span>
+                                </p>
+                                <p className="text-[9px] font-bold text-slate-400 flex items-center gap-1 uppercase mt-0.5">
+                                  <FaBuilding size={9}/> {rec.actionType === 'swap' ? rec.platform : rec.fromPlatform}
+                                </p>
+                              </div>
+                            </div>
+                            <HiOutlineArrowRight className="text-slate-300 dark:text-slate-600 rotate-90 sm:rotate-0 mx-auto sm:mx-0" size={14} />
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-full shadow-sm bg-white dark:bg-slate-800 shrink-0 border border-slate-200 dark:border-slate-700">
+                                <LogoRenderer symbol={rec.actionType === 'swap' ? rec.toCoin : rec.bridgeCoin} logoUrl={toCoinObj?.logo} bg={toCoinObj?.bg} color={toCoinObj?.color} />
+                              </div>
+                              <div>
+                                <p className="font-black text-emerald-600 dark:text-emerald-400 text-xs">
+                                  +{rec.actionType === 'swap' ? rec.toAmount : rec.bridgeReceivedAmount} <span className="text-[9px] text-slate-500 uppercase">{rec.actionType === 'swap' ? rec.toCoin : rec.bridgeCoin}</span>
+                                </p>
+                                <p className="text-[9px] font-bold text-slate-400 flex items-center gap-1 uppercase mt-0.5">
+                                  <FaWallet size={9}/> {rec.actionType === 'swap' ? rec.platform : rec.toPlatform}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-end justify-between mt-2 pt-2">
+                            <p className="text-[10px] font-bold text-slate-400 flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/50 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                              <HiOutlineCalendar size={12} /> {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date}
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => handleEdit(rec)} className="p-2 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-500/20 transition-colors border border-blue-200 dark:border-blue-500/30 active:scale-95 shadow-sm"><HiOutlinePencil size={14}/></button>
+                              <button onClick={() => { setDeleteContext(rec); setPinInput(''); setPinError(''); }} className="p-2 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-500/20 transition-colors border border-rose-200 dark:border-rose-500/30 active:scale-95 shadow-sm"><HiOutlineTrash size={14}/></button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Desktop Table */}
+                  <div className="hidden md:block overflow-x-auto custom-scrollbar">
+                    <table className="w-full text-left min-w-[800px]">
+                      <thead className="bg-white dark:bg-slate-900 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
+                        <tr>
+                          <th className="p-4 pl-6">Type</th>
+                          <th className="p-4">Source</th>
+                          <th className="p-4">Destination</th>
+                          <th className="p-4 text-right">P&L</th>
+                          <th className="p-4 pr-6 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
+                        {month.records.map(rec => {
+                          const fromCoinObj = fullDatabase.find(c => c.symbol === (rec.actionType === 'swap' ? rec.fromCoin : rec.bridgeCoin).toUpperCase());
+                          const toCoinObj = fullDatabase.find(c => c.symbol === (rec.actionType === 'swap' ? rec.toCoin : rec.bridgeCoin).toUpperCase());
+                          return (
+                            <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors group">
+                              <td className="p-4 pl-6">
+                                <div className="flex items-center gap-2">
+                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shadow-sm ${rec.actionType === 'swap' ? 'bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400' : 'bg-purple-100 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400'}`}>
+                                    {rec.actionType === 'swap' ? <FaExchangeAlt size={12} /> : <FaRoute size={12} />}
+                                  </div>
+                                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">
+                                    {rec.actionType === 'swap' ? 'Swap' : 'Bridge'}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="p-4">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-8 h-8 rounded-full shadow-sm bg-white dark:bg-slate-800 shrink-0 border border-slate-200 dark:border-slate-700">
+                                    <LogoRenderer symbol={rec.actionType === 'swap' ? rec.fromCoin : rec.bridgeCoin} logoUrl={fromCoinObj?.logo} bg={fromCoinObj?.bg} color={fromCoinObj?.color} />
+                                  </div>
+                                  <div>
+                                    <p className="font-black text-slate-800 dark:text-white text-xs">
+                                      {rec.actionType === 'swap' ? rec.fromAmount : rec.bridgeSentAmount} <span className="text-[9px] text-slate-500 uppercase">{rec.actionType === 'swap' ? rec.fromCoin : rec.bridgeCoin}</span>
+                                    </p>
+                                    <p className="text-[9px] font-bold text-slate-400 mt-0.5">
+                                      {rec.actionType === 'swap' ? rec.platform : rec.fromPlatform}
+                                    </p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="p-4">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-8 h-8 rounded-full shadow-sm bg-white dark:bg-slate-800 shrink-0 border border-slate-200 dark:border-slate-700">
+                                    <LogoRenderer symbol={rec.actionType === 'swap' ? rec.toCoin : rec.bridgeCoin} logoUrl={toCoinObj?.logo} bg={toCoinObj?.bg} color={toCoinObj?.color} />
+                                  </div>
+                                  <div>
+                                    <p className="font-black text-emerald-600 dark:text-emerald-400 text-xs">
+                                      +{rec.actionType === 'swap' ? rec.toAmount : rec.bridgeReceivedAmount} <span className="text-[9px] text-slate-500 uppercase">{rec.actionType === 'swap' ? rec.toCoin : rec.bridgeCoin}</span>
+                                    </p>
+                                    <p className="text-[9px] font-bold text-slate-400 mt-0.5">
+                                      {rec.actionType === 'swap' ? rec.platform : rec.toPlatform}
+                                    </p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="p-4 text-right">
+                                {rec.hiddenFeeBase === 0 ? (
+                                  <span className="text-emerald-600 dark:text-emerald-400 text-xs font-black">+Profit</span>
+                                ) : (
+                                  <span className="text-rose-600 dark:text-rose-400 text-xs font-black">
+                                    -{currencySymbol}{(rec.hiddenFeeBase || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-4 pr-6">
+                                <div className="flex items-center justify-end gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button onClick={() => handleEdit(rec)} className="p-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 border border-blue-200 dark:border-blue-500/30 rounded-xl transition-all shadow-sm active:scale-95"><HiOutlinePencil size={16}/></button>
+                                  <button onClick={() => { setDeleteContext(rec); setPinInput(''); setPinError(''); }} className="p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 border border-rose-200 dark:border-rose-500/30 rounded-xl transition-all shadow-sm active:scale-95"><HiOutlineTrash size={16}/></button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
+
+      {/* MODAL (unchanged) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 pt-[60px] md:pt-[120px] animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-t-[2rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[calc(100dvh-4rem)] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-300 dark:border-slate-700">
-            
             <div className="px-5 sm:px-8 py-4 sm:py-5 flex justify-between items-center transition-colors duration-300 bg-gradient-to-r from-blue-600 to-cyan-600 text-white shrink-0">
               <h3 className="text-lg sm:text-xl font-black flex items-center gap-2"><HiOutlineSwitchHorizontal size={20} className="sm:w-[24px] sm:h-[24px]"/> {editingId ? 'Edit Record' : 'Execute Action'}</h3>
               <button type="button" onClick={closeModal} className="p-1.5 sm:p-2 bg-white/20 rounded-full hover:bg-white/30 transition-colors"><HiOutlineX size={18} className="sm:w-5 sm:h-5" /></button>
             </div>
-            
             <form onSubmit={handleSaveEntry} className="p-5 sm:p-8 overflow-y-auto custom-scrollbar flex-1 space-y-5 sm:space-y-6">
-              
               <div className="flex bg-slate-100 dark:bg-slate-800 p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-slate-300 dark:border-slate-700 shadow-sm shrink-0">
                 <button type="button" onClick={() => setFormData({...formData, actionType: 'swap'})} className={`flex-1 py-2.5 sm:py-3 text-[10px] sm:text-xs font-black uppercase tracking-widest rounded-lg sm:rounded-xl transition-all flex justify-center items-center gap-1.5 sm:gap-2 ${formData.actionType === 'swap' ? 'bg-white dark:bg-slate-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}><FaExchangeAlt/> Swap Coins</button>
                 <button type="button" onClick={() => setFormData({...formData, actionType: 'bridge'})} className={`flex-1 py-2.5 sm:py-3 text-[10px] sm:text-xs font-black uppercase tracking-widest rounded-lg sm:rounded-xl transition-all flex justify-center items-center gap-1.5 sm:gap-2 ${formData.actionType === 'bridge' ? 'bg-white dark:bg-slate-700 shadow-sm text-purple-600 dark:text-purple-400' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}><FaRoute/> Transfer</button>
@@ -615,7 +825,7 @@ const SwapAndBridge = () => {
                   </div>
 
                   {currentFormBalance > 0 && (
-                    <div 
+                    <div
                       onClick={() => setFormData(prev => ({...prev, fromAmount: currentFormBalance}))}
                       className="p-3 sm:p-3.5 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 rounded-xl flex items-center justify-between cursor-pointer hover:bg-emerald-100 dark:hover:bg-emerald-800/30 transition-all shadow-sm active:scale-[0.98] -mt-2"
                     >
@@ -699,7 +909,7 @@ const SwapAndBridge = () => {
                       </div>
 
                       {currentFormBalance > 0 && (
-                        <div 
+                        <div
                           onClick={() => setFormData(prev => ({...prev, bridgeSentAmount: currentFormBalance}))}
                           className="mt-1 p-2 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 rounded-lg flex items-center justify-between cursor-pointer hover:bg-emerald-100 dark:hover:bg-emerald-800/30 transition-all shadow-sm active:scale-[0.98]"
                         >
@@ -758,7 +968,7 @@ const SwapAndBridge = () => {
         </div>
       )}
 
-      {/* 🔐 DELETE SECURITY MODAL */}
+      {/* DELETE MODAL */}
       {deleteContext && (
         <div className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 pt-[100px] md:pt-[120px] animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2rem] sm:rounded-[2.5rem] shadow-2xl p-6 sm:p-8 border border-rose-200 dark:border-rose-900/50 relative overflow-hidden max-h-[calc(100dvh-6rem)] sm:max-h-[85vh] flex flex-col animate-in slide-in-from-bottom-10 sm:zoom-in-95">
@@ -785,5 +995,11 @@ const SwapAndBridge = () => {
     </div>
   );
 };
+
+const SwapAndBridge = () => (
+  <ToastProvider>
+    <SwapAndBridgeContent />
+  </ToastProvider>
+);
 
 export default SwapAndBridge;

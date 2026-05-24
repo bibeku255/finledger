@@ -1,48 +1,79 @@
+// src/pages/accounts/IncomeStreams.jsx
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { collection, addDoc, doc, deleteDoc, updateDoc, onSnapshot, query, orderBy, where, getDocs, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
-
+import { verifyPIN } from '../../utils/cryptoUtils';
 import { 
   HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
   HiOutlineSearch, HiOutlineRefresh, HiOutlineBriefcase,
   HiOutlineLockClosed, HiOutlineExclamationCircle, HiOutlineChevronDown,
   HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable,
   HiOutlineCalendar, HiOutlineShieldCheck, HiOutlineTrendingUp, HiOutlineTrendingDown,
-  HiOutlineCash
+  HiOutlineCash, HiOutlineCheckCircle, HiOutlineInformationCircle
 } from 'react-icons/hi';
 import { 
   FaMoneyBillWave, FaBitcoin, FaUniversity, FaWallet, 
   FaExchangeAlt, FaChartLine, FaArrowDown, FaRandom, FaLock, FaUserFriends
 } from 'react-icons/fa';
 
-import { currenciesList } from '../../utils/marketConstants';
+import { currenciesList, fiatFlagMap } from '../../utils/marketConstants';
 
-// 🚀 UPGRADED: Income Categories based on your App Architecture
-const incomeCategories = [
-  "Salary & Wages", 
-  "Freelancing & Contracts", 
-  "Business & Sales", 
-  "Micro-Tasks & Airdrops",        // For MicroEarn.jsx
-  "Crypto Trading Profits",        // For HoldAndSwap.jsx
-  "Crypto Staking & Yield",        // For StakingAndYield.jsx
-  "P2P Exchange Profit", 
-  "Interest Received (Khata/Loans)", // For PartyLedger.jsx
-  "Dividends & Investments", 
-  "Rental Income", 
-  "Refunds & Cashbacks",
-  "Gifts & Grants", 
-  "Other Income"
-];
+// ============================================
+// 🚀 MINI TOAST SYSTEM 
+// ============================================
+const ToastContext = React.createContext(null);
 
-const hashPIN = async (pinCode) => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(pinCode);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+const ToastProvider = ({ children }) => {
+  const [toasts, setToasts] = useState([]);
+  const addToast = (message, type = 'info', duration = 4000) => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type, duration }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, duration);
+  };
+  const removeToast = id => setToasts(prev => prev.filter(t => t.id !== id));
+
+  return (
+    <ToastContext.Provider value={{ addToast, removeToast }}>
+      {children}
+      <div className="fixed top-24 right-4 z-[10000] space-y-2 max-w-sm w-full pointer-events-none px-4 md:px-0">
+        {toasts.map(toast => (
+          <div
+            key={toast.id}
+            className={`pointer-events-auto flex items-start gap-3 p-4 rounded-2xl shadow-2xl backdrop-blur-xl border animate-in slide-in-from-right-4 fade-in duration-300 ${
+              toast.type === 'success' ? 'bg-green-50/95 dark:bg-green-900/90 border-green-200 dark:border-green-700'
+                : toast.type === 'error' ? 'bg-red-50/95 dark:bg-red-900/90 border-red-200 dark:border-red-700'
+                : toast.type === 'warning' ? 'bg-amber-50/95 dark:bg-amber-900/90 border-amber-200 dark:border-amber-700'
+                : 'bg-blue-50/95 dark:bg-blue-900/90 border-blue-200 dark:border-blue-700'
+            }`}
+          >
+            {toast.type === 'success' && <HiOutlineCheckCircle className="text-green-600 dark:text-green-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'error' && <HiOutlineExclamationCircle className="text-red-600 dark:text-red-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'warning' && <HiOutlineExclamationCircle className="text-amber-600 dark:text-amber-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'info' && <HiOutlineInformationCircle className="text-blue-600 dark:text-blue-400 w-5 h-5 flex-shrink-0" />}
+            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 flex-1">{toast.message}</p>
+            <button onClick={() => removeToast(toast.id)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"><HiOutlineX size={16} /></button>
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
 };
+
+const useToast = () => React.useContext(ToastContext);
+
+// ============================================
+// 🧩 CONSTANTS & HELPERS
+// ============================================
+const incomeCategories = [
+  "Salary & Wages", "Freelancing & Contracts", "Business & Sales", "Micro-Tasks & Airdrops",
+  "Crypto Trading Profits", "Crypto Staking & Yield", "P2P Exchange Profit", "Interest Received (Khata/Loans)",
+  "Dividends & Investments", "Rental Income", "Refunds & Cashbacks", "Gifts & Grants", "Other Income"
+];
 
 const getLocalDateTimeString = () => {
   const now = new Date();
@@ -50,11 +81,26 @@ const getLocalDateTimeString = () => {
   return now.toISOString().slice(0, 16); 
 };
 
-const IncomeStreams = () => {
-  const { user, baseCurrency = 'INR', selectedCryptos = [], selectedFiats = [], formatGlobalDate } = useAuth();
+// ============================================
+// 🚀 MAIN CONTENT COMPONENT
+// ============================================
+const IncomeStreamsContent = () => {
+  const { user, baseCurrency = 'INR', selectedCryptos = [], selectedFiats = [], formatGlobalDate, getCalendarMonthKey } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
+  const { addToast } = useToast();
 
   const availableFiats = useMemo(() => Array.from(new Set([baseCurrency, ...selectedFiats])), [baseCurrency, selectedFiats]);
+
+  const getCurrentMonthKey = () => getCalendarMonthKey(new Date().toISOString());
+  const [openMonths, setOpenMonths] = useState(new Set([getCurrentMonthKey()]));
+  const toggleMonth = (monthKey) => {
+    setOpenMonths(prev => {
+      const next = new Set(prev);
+      if (next.has(monthKey)) next.delete(monthKey);
+      else next.add(monthKey);
+      return next;
+    });
+  };
 
   const [incomes, setIncomes] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -63,7 +109,8 @@ const IncomeStreams = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
-  
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [deleteContext, setDeleteContext] = useState(null); 
@@ -72,7 +119,6 @@ const IncomeStreams = () => {
   const [isVerifying, setIsVerifying] = useState(false);
   const [customUserCoins, setCustomUserCoins] = useState([]); 
   
-  // 🚀 DYNAMIC SUGGESTIONS LISTS
   const [bankWalletLogs, setBankWalletLogs] = useState([]);
   const [existingCryptoPlatforms, setExistingCryptoPlatforms] = useState([]);
 
@@ -82,15 +128,17 @@ const IncomeStreams = () => {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setIncomes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setIsLoading(false);
+    }, (error) => {
+      addToast('Failed to load income streams.', 'error');
+      setIsLoading(false);
     });
     return () => unsubscribe();
-  }, [user]);
+  }, [user, addToast]);
 
   useEffect(() => {
     const fetchUserData = async () => {
       if (!user) return;
-      const userRef = doc(db, "users", user.uid);
-      const userSnap = await getDoc(userRef);
+      const userSnap = await getDoc(doc(db, "users", user.uid));
       if (userSnap.exists() && userSnap.data().customCoins) setCustomUserCoins(userSnap.data().customCoins);
     };
     fetchUserData();
@@ -106,25 +154,19 @@ const IncomeStreams = () => {
     return Array.from(coinMap.values());
   }, [customUserCoins, selectedCryptos]);
 
-  const availableCryptos = useMemo(() => {
-    return Array.from(new Set(["USDT", ...fullDatabase.map(c => c.symbol.toUpperCase())]));
-  }, [fullDatabase]);
+  const availableCryptos = useMemo(() => Array.from(new Set(["USDT", ...fullDatabase.map(c => c.symbol.toUpperCase())])), [fullDatabase]);
 
   useEffect(() => {
      if(!user) return;
      const fetchVaults = async () => {
-        const qBank = query(collection(db, "users", user.uid, "bankWallet"));
-        const snapBank = await getDocs(qBank);
-        const qOnline = query(collection(db, "users", user.uid, "onlineWallet"));
-        const snapOnline = await getDocs(qOnline);
-
+        const snapBank = await getDocs(query(collection(db, "users", user.uid, "bankWallet")));
+        const snapOnline = await getDocs(query(collection(db, "users", user.uid, "onlineWallet")));
         const names = new Set();
         snapBank.docs.forEach(d => { if(d.data().bankName) names.add(d.data().bankName) });
         snapOnline.docs.forEach(d => { if(d.data().walletName) names.add(d.data().walletName) });
         setBankWalletLogs(Array.from(names));
 
-        const qCrypto = query(collection(db, "users", user.uid, "cryptoWalletLogs"));
-        const snapCrypto = await getDocs(qCrypto);
+        const snapCrypto = await getDocs(query(collection(db, "users", user.uid, "cryptoWalletLogs")));
         const cryptoNames = new Set();
         snapCrypto.docs.forEach(d => { if(d.data().platform) cryptoNames.add(d.data().platform) });
         setExistingCryptoPlatforms(Array.from(cryptoNames));
@@ -134,12 +176,12 @@ const IncomeStreams = () => {
   
   const existingBanks = useMemo(() => Array.from(new Set(bankWalletLogs)), [bankWalletLogs]);
 
-  const defaultSplitSource = { vault: 'bank', subWallet: '', asset: baseCurrency, cryptoPlatform: '', amount: '', exchangeRate: 1 };
+  const defaultSplitSource = { vault: 'bank', subWallet: '', asset: baseCurrency, cryptoPlatform: '', amount: '', fee: '', exchangeRate: 1 };
 
   const [formData, setFormData] = useState({
     title: '', category: incomeCategories[0], date: getLocalDateTimeString(), linkedIncomeId: '',
     isSplit: false, vault: 'bank', subWallet: '', cryptoPlatform: '', asset: baseCurrency, 
-    amount: '', exchangeRate: 1, isSynced: false,
+    amount: '', fee: '', exchangeRate: 1, isSynced: false,
     splitSources: [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ]
   });
 
@@ -172,7 +214,6 @@ const IncomeStreams = () => {
               if (gtRes.ok) { const gtJson = await gtRes.json(); priceUsd = parseFloat(gtJson.data.attributes.price_usd); }
            } catch(e) {}
         } 
-
         if (!priceUsd) {
            try {
                const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
@@ -180,7 +221,6 @@ const IncomeStreams = () => {
                if (cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
            } catch(e) {}
         }
-
         if (!priceUsd) {
             try {
                 if (['USDT', 'USDC', 'DAI'].includes(upperSym)) priceUsd = 1.00; 
@@ -199,14 +239,22 @@ const IncomeStreams = () => {
         updatedSplits[index].exchangeRate = finalRate.toFixed(6);
         setFormData(prev => ({ ...prev, splitSources: updatedSplits }));
       }
-    } catch (error) { alert("Rate fetch failed. Please enter manually."); } finally { setIsFetchingRate(false); }
+    } catch (error) { addToast("Rate fetch failed. Enter manually.", "error"); } 
+    finally { setIsFetchingRate(false); }
   };
 
-  const getBaseAmount = (amount, isForeign, rate) => (parseFloat(amount) || 0) * (isForeign ? (parseFloat(rate) || 1) : 1);
-  const getSplitTotalBase = () => formData.splitSources.reduce((acc, curr) => acc + getBaseAmount(curr.amount, curr.asset !== baseCurrency, curr.exchangeRate), 0);
+  // ✅ PERFECTED CALCULATION ENGINE
+  const getNetBaseAmount = (amount, fee, isForeign, rate) => {
+    const gross = parseFloat(amount) || 0;
+    const deduction = parseFloat(fee) || 0;
+    const net = Math.max(0, gross - deduction);
+    return net * (isForeign ? (parseFloat(rate) || 1) : 1);
+  };
+
+  const getSplitTotalBase = () => formData.splitSources.reduce((acc, curr) => acc + getNetBaseAmount(curr.amount, curr.fee, curr.asset !== baseCurrency, curr.exchangeRate), 0);
 
   const isForeign = formData.asset !== baseCurrency;
-  const finalBaseAmount = formData.isSplit ? getSplitTotalBase() : getBaseAmount(formData.amount, isForeign, formData.exchangeRate);
+  const finalBaseAmount = formData.isSplit ? getSplitTotalBase() : getNetBaseAmount(formData.amount, formData.fee, isForeign, formData.exchangeRate);
 
   const processedIncomes = useMemo(() => {
     const filtered = incomes.filter(inc => {
@@ -222,19 +270,21 @@ const IncomeStreams = () => {
     sorted.forEach(t => {
       const dateObj = new Date(t.date || new Date());
       const monthName = formatGlobalDate ? formatGlobalDate(dateObj, 'monthYear') : dateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
-      const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
+      const monthKey = getCalendarMonthKey(t.date);
       
-      if (!grouped[monthKey]) grouped[monthKey] = { monthName, openingBalance: runningBalance, records: [], closingBalance: 0, monthTotal: 0 };
+      if (!grouped[monthKey]) grouped[monthKey] = { monthName, monthKey, openingBalance: runningBalance, records: [], closingBalance: 0, monthTotal: 0 };
       
-      const finalAmt = Number(t.finalBaseAmount || 0);
+      const finalAmt = Number(t.finalBaseAmount || 0); 
       runningBalance += finalAmt; 
       grouped[monthKey].monthTotal += finalAmt;
       grouped[monthKey].records.push({ ...t, finalAmount: finalAmt });
       grouped[monthKey].closingBalance = runningBalance;
     });
     
-    return Object.keys(grouped).sort().reverse().map(key => ({ ...grouped[key], records: grouped[key].records.reverse() }));
-  }, [incomes, searchTerm, filterCategory, formatGlobalDate]);
+    return Object.keys(grouped)
+      .sort((a, b) => (grouped[b].records[0]?.timestamp || 0) - (grouped[a].records[0]?.timestamp || 0))
+      .map(key => ({ ...grouped[key], records: grouped[key].records.reverse() }));
+  }, [incomes, searchTerm, filterCategory, formatGlobalDate, getCalendarMonthKey]);
 
   const totalIncomeBase = incomes.reduce((acc, curr) => acc + (Number(curr.finalBaseAmount) || 0), 0);
   const thisMonthIncome = useMemo(() => {
@@ -243,33 +293,38 @@ const IncomeStreams = () => {
     return incomes.filter(i => i.date?.startsWith(thisMonth)).reduce((acc, i) => acc + (Number(i.finalBaseAmount) || 0), 0);
   }, [incomes]);
 
-  const handleDownloadReport = (format) => {
+  const handleDownloadReport = async (format) => {
     setIsExportMenuOpen(false);
     const filteredForReport = processedIncomes.flatMap(month => month.records);
-    if (filteredForReport.length === 0) return alert("No records found to download based on filters.");
+    if (filteredForReport.length === 0) { addToast("No records found.", "warning"); return; }
+    setIsGeneratingReport(true);
 
     const reportData = filteredForReport.map(rec => {
       const cleanTitle = (rec.title || 'N/A').replace(/(\r\n|\n|\r)/gm, " ");
       const sourceText = rec.isSplit ? 'Split Income' : `${rec.vault.charAt(0).toUpperCase() + rec.vault.slice(1)} Vault${rec.subWallet ? ` (${rec.subWallet})` : ''}`;
       const nativeAmtText = rec.isSplit ? 'Multiple Assets' : `${(Number(rec.amount) || 0).toLocaleString()} ${rec.asset}`;
-      const rawDate = rec.date ? rec.date.split('T')[0] : 'N/A';
+      const feeBaseValue = rec.isSplit ? Number(rec.baseFee || 0) : Number(rec.fee || 0);
 
       return {
-        date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rawDate,
+        date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : (rec.date ? rec.date.split('T')[0] : 'N/A'),
         source: cleanTitle, category: rec.category, vault: sourceText, nativeAmount: nativeAmtText,
-        baseValue: Number(rec.finalBaseAmount || 0) 
+        fee: feeBaseValue, baseValue: Number(rec.finalBaseAmount || 0) 
       };
     });
 
     const columns = [
       { header: 'Date', key: 'date' }, { header: 'Source / Item', key: 'source' },
       { header: 'Category', key: 'category' }, { header: 'Vault Deposited', key: 'vault' },
-      { header: 'Native Amount', key: 'nativeAmount' }, { header: `Base Value (${currencySymbol})`, key: 'baseValue', isNumeric: true }
+      { header: 'Gross Amount', key: 'nativeAmount' }, { header: `Fee (${currencySymbol})`, key: 'fee', isNumeric: true },
+      { header: `Net Value (${currencySymbol})`, key: 'baseValue', isNumeric: true }
     ];
 
     const fileName = `Income_Streams_Report`;
-    const reportTitle = `Income Streams Ledger${filterCategory !== 'all' ? ` - ${filterCategory}` : ''}${searchTerm ? ` (Filtered)` : ''}`;
-    format === 'pdf' ? downloadPDFReport(reportData, columns, fileName, reportTitle) : downloadExcelReport(reportData, columns, fileName, reportTitle);
+    const reportTitle = `Income Streams Ledger${filterCategory !== 'all' ? ` - ${filterCategory}` : ''}`;
+
+    if (format === 'pdf') { await downloadPDFReport(reportData, columns, fileName, reportTitle, { onSuccess: () => addToast('PDF report downloaded!', 'success'), onError: (msg) => addToast(`PDF Error: ${msg}`, 'error') }); } 
+    else { await downloadExcelReport(reportData, columns, fileName, reportTitle, { onSuccess: () => addToast('Excel report downloaded!', 'success'), onError: (msg) => addToast(`Excel Error: ${msg}`, 'error') }); }
+    setIsGeneratingReport(false);
   };
 
   const getVaultIcon = (v) => {
@@ -280,36 +335,62 @@ const IncomeStreams = () => {
     return <FaRandom className="text-amber-500" />;
   };
 
-  const createVaultRecord = (sourceData, linkId, amountToAdd) => {
-    const isForeignAsset = sourceData.asset !== baseCurrency;
-    const baseAmt = getBaseAmount(amountToAdd, isForeignAsset, sourceData.exchangeRate);
-    
-    if (sourceData.vault === 'crypto') {
-      return {
-        collection: 'cryptoWalletLogs',
-        data: { type: 'in', coin: sourceData.asset, quantity: amountToAdd, platform: sourceData.cryptoPlatform, reason: `Income: ${formData.category} (${formData.title})`, referenceNo: linkId, date: formData.date, timestamp: new Date(formData.date).getTime(), linkedIncomeId: linkId }
-      };
-    }
+// ✅ PERFECTED VAULT INJECTION PROTOCOL
+const createVaultRecord = (sourceData, linkId, amountToAdd, feeToAdd = 0) => {
+  const isForeignAsset = sourceData.asset !== baseCurrency;
+  const exRate = isForeignAsset ? parseFloat(sourceData.exchangeRate) : 1;
+  const grossNative = amountToAdd;
+  const nativeFee = feeToAdd;
+  const baseFee = nativeFee * exRate;
+  const netNative = grossNative - nativeFee;
+  const netBase = netNative * exRate;
+  const safeTitle = formData.title || 'Income Entry';
+  const safeCat = formData.category || 'Other Income';
+  const safeDate = formData.date || getLocalDateTimeString();
+
+  if (sourceData.vault === 'crypto') {
     return {
-      collection: sourceData.vault + 'Wallet',
-      data: { title: `Income: ${formData.category} (${formData.title})`, type: 'in', date: formData.date, timestamp: new Date(formData.date).getTime(), currency: sourceData.asset, foreignAmount: amountToAdd, exchangeRate: isForeignAsset ? parseFloat(sourceData.exchangeRate) : 1, fee: 0, finalBaseAmount: baseAmt, isIncome: true, linkedIncomeId: linkId, walletName: sourceData.subWallet || 'Default Wallet', bankName: sourceData.subWallet || 'Default Bank', transferType: 'Income Deposit' }
+      collection: 'cryptoWalletLogs',
+      data: { 
+        type: 'in', coin: sourceData.asset, quantity: netNative, platform: sourceData.cryptoPlatform || 'Unknown', 
+        reason: `Income: ${safeCat} (${safeTitle})`, referenceNo: linkId, date: safeDate, 
+        timestamp: new Date(safeDate).getTime(), linkedIncomeId: linkId, fee: nativeFee, grossQuantity: grossNative,
+        finalBaseAmount: netBase
+      }
     };
+  }
+  return {
+    collection: sourceData.vault + 'Wallet',
+    data: { 
+      title: `Income: ${safeCat} (${safeTitle})`, type: 'in', date: safeDate, 
+      timestamp: new Date(safeDate).getTime(), currency: sourceData.asset, 
+      foreignAmount: grossNative, foreignFee: nativeFee, fee: baseFee, exchangeRate: exRate, 
+      finalBaseAmount: netBase, isIncome: true, linkedIncomeId: linkId, 
+      walletName: sourceData.subWallet || 'Main Vault', bankName: sourceData.subWallet || 'Main Vault', 
+      transferType: 'Income Deposit',
+      vaultId: sourceData.vault === 'bank'
+        ? 'bank_' + (sourceData.subWallet || 'Main').trim().toUpperCase()
+        : sourceData.vault === 'online'
+        ? 'online_' + (sourceData.subWallet || 'Main').trim().toUpperCase()
+        : 'cash_main'
+    }
   };
+}; 
 
   const handleSaveEntry = async (e) => {
     e.preventDefault();
-    if (!user) return alert("Please login!");
+    if (!user) { addToast("Please login first!", "error"); return; }
 
     if (!formData.isSplit) {
-      if (formData.vault === 'crypto' && !formData.cryptoPlatform.trim()) return alert("Please specify the crypto platform.");
-      if ((formData.vault === 'bank' || formData.vault === 'online') && !formData.subWallet.trim()) return alert("Please specify Bank or Wallet Name.");
-      if (!formData.amount || parseFloat(formData.amount) <= 0) return alert("Amount must be greater than zero.");
+      if (formData.vault === 'crypto' && !(formData.cryptoPlatform || '').trim()) { addToast("Specify crypto platform.", "warning"); return; }
+      if ((formData.vault === 'bank' || formData.vault === 'online') && !(formData.subWallet || '').trim()) { addToast("Specify Bank/Wallet Name.", "warning"); return; }
+      if (!formData.amount || parseFloat(formData.amount) <= 0) { addToast("Amount must be > 0.", "warning"); return; }
     } else {
       for (let i = 0; i < formData.splitSources.length; i++) {
         const s = formData.splitSources[i];
-        if (!s.amount || parseFloat(s.amount) <= 0) return alert(`Amount in Source ${i + 1} must be > 0.`);
-        if (s.vault === 'crypto' && !s.cryptoPlatform.trim()) return alert(`Specify platform for Source ${i + 1}.`);
-        if ((s.vault === 'bank' || s.vault === 'online') && !s.subWallet.trim()) return alert(`Specify Bank/Wallet for Source ${i + 1}.`);
+        if (!s.amount || parseFloat(s.amount) <= 0) { addToast(`Source ${i + 1} amount must be > 0.`, "warning"); return; }
+        if (s.vault === 'crypto' && !(s.cryptoPlatform || '').trim()) { addToast(`Specify platform for Source ${i + 1}.`, "warning"); return; }
+        if ((s.vault === 'bank' || s.vault === 'online') && !(s.subWallet || '').trim()) { addToast(`Specify Bank/Wallet for Source ${i + 1}.`, "warning"); return; }
       }
     }
 
@@ -317,57 +398,69 @@ const IncomeStreams = () => {
     const timestamp = editingId ? incomes.find(i => i.id === editingId)?.timestamp : new Date(formData.date).getTime();
     const linkId = formData.linkedIncomeId || `INC_${timestamp}_${Math.floor(Math.random() * 1000)}`;
 
+    const baseGrossTotal = formData.isSplit 
+      ? formData.splitSources.reduce((acc, curr) => acc + (parseFloat(curr.amount)||0)*(parseFloat(curr.exchangeRate)||1), 0) 
+      : (parseFloat(formData.amount)||0) * (formData.asset !== baseCurrency ? parseFloat(formData.exchangeRate) : 1);
+    
+    const baseFeeTotal = formData.isSplit 
+      ? formData.splitSources.reduce((acc, curr) => acc + (parseFloat(curr.fee)||0)*(parseFloat(curr.exchangeRate)||1), 0) 
+      : (parseFloat(formData.fee)||0) * (formData.asset !== baseCurrency ? parseFloat(formData.exchangeRate) : 1);
+
     const incomeRecord = {
       title: formData.title, category: formData.category, asset: formData.isSplit ? 'Multiple' : formData.asset,
-      amount: formData.isSplit ? finalBaseAmount : parseFloat(formData.amount),
+      amount: formData.isSplit ? baseGrossTotal : parseFloat(formData.amount), // Native if single, base if split
+      fee: formData.isSplit ? baseFeeTotal : (parseFloat(formData.fee) || 0), // Native if single, base if split
+      baseFee: baseFeeTotal, // Safely stored for uniform UI rendering
       exchangeRate: formData.isSplit ? 1 : (formData.asset !== baseCurrency ? parseFloat(formData.exchangeRate) : 1),
       finalBaseAmount, date: formData.date, timestamp, linkedIncomeId: linkId, isSplit: formData.isSplit,
       vault: formData.isSplit ? 'split' : formData.vault,
       subWallet: !formData.isSplit && (formData.vault === 'bank' || formData.vault === 'online') ? formData.subWallet : '', 
       cryptoPlatform: !formData.isSplit && formData.vault === 'crypto' ? formData.cryptoPlatform : '', 
-      splitDetails: formData.isSplit ? formData.splitSources.map(s => ({ vault: s.vault, subWallet: s.subWallet, asset: s.asset, amount: parseFloat(s.amount), cryptoPlatform: s.vault === 'crypto' ? s.cryptoPlatform : '', exchangeRate: parseFloat(s.exchangeRate) })) : null
+      splitDetails: formData.isSplit ? formData.splitSources.map(s => ({ vault: s.vault, subWallet: s.subWallet, asset: s.asset, amount: parseFloat(s.amount), fee: parseFloat(s.fee) || 0, cryptoPlatform: s.vault === 'crypto' ? s.cryptoPlatform : '', exchangeRate: parseFloat(s.exchangeRate) })) : null
     };
 
     try {
       if (editingId) {
         if (formData.isSynced) {
            await updateDoc(doc(db, "users", user.uid, "incomeLogs", editingId), { subWallet: formData.subWallet, vault: formData.vault });
-           const vaults = ['bankWallet', 'onlineWallet'];
+           const vaults = ['bankWallet', 'onlineWallet', 'cashWallet'];
            for (const v of vaults) {
-              if(linkId) {
-                const q = query(collection(db, "users", user.uid, v), where("linkedIncomeId", "==", linkId));
-                const snap = await getDocs(q);
-                snap.forEach(async (d) => await updateDoc(doc(db, "users", user.uid, v, d.id), { walletName: formData.subWallet, bankName: formData.subWallet }));
-              }
+              const q = query(collection(db, "users", user.uid, v), where("linkedIncomeId", "==", linkId));
+              const snap = await getDocs(q);
+              const updatePromises = snap.docs.map(d => updateDoc(doc(db, "users", user.uid, v, d.id), { walletName: formData.subWallet, bankName: formData.subWallet }));
+              await Promise.all(updatePromises);
            }
         } else {
            const vaults = ['cashWallet', 'bankWallet', 'onlineWallet', 'cryptoWalletLogs'];
            for (const v of vaults) {
              const q = query(collection(db, "users", user.uid, v), where("linkedIncomeId", "==", linkId));
              const snap = await getDocs(q);
-             snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, v, d.id)));
+             const deletePromises = snap.docs.map(d => deleteDoc(doc(db, "users", user.uid, v, d.id)));
+             await Promise.all(deletePromises);
            }
-           
            await updateDoc(doc(db, "users", user.uid, "incomeLogs", editingId), incomeRecord);
            
            if (formData.isSplit) {
-             for (let s of formData.splitSources) { const rec = createVaultRecord(s, linkId, parseFloat(s.amount)); await addDoc(collection(db, "users", user.uid, rec.collection), rec.data); }
+             for (let s of formData.splitSources) { const rec = createVaultRecord(s, linkId, parseFloat(s.amount), parseFloat(s.fee)); await addDoc(collection(db, "users", user.uid, rec.collection), rec.data); }
            } else {
-             const singleRec = createVaultRecord({ vault: formData.vault, subWallet: formData.subWallet, asset: formData.asset, exchangeRate: formData.exchangeRate, cryptoPlatform: formData.cryptoPlatform }, linkId, parseFloat(formData.amount));
+             const singleRec = createVaultRecord({ vault: formData.vault, subWallet: formData.subWallet, asset: formData.asset, exchangeRate: formData.exchangeRate, cryptoPlatform: formData.cryptoPlatform }, linkId, parseFloat(formData.amount), parseFloat(formData.fee));
              await addDoc(collection(db, "users", user.uid, singleRec.collection), singleRec.data);
            }
         }
       } else {
         await addDoc(collection(db, "users", user.uid, "incomeLogs"), incomeRecord);
         if (formData.isSplit) {
-          for (let s of formData.splitSources) { const rec = createVaultRecord(s, linkId, parseFloat(s.amount)); await addDoc(collection(db, "users", user.uid, rec.collection), rec.data); }
+          for (let s of formData.splitSources) { const rec = createVaultRecord(s, linkId, parseFloat(s.amount), parseFloat(s.fee)); await addDoc(collection(db, "users", user.uid, rec.collection), rec.data); }
         } else {
-          const singleRec = createVaultRecord({ vault: formData.vault, subWallet: formData.subWallet, asset: formData.asset, exchangeRate: formData.exchangeRate, cryptoPlatform: formData.cryptoPlatform }, linkId, parseFloat(formData.amount));
+          const singleRec = createVaultRecord({ vault: formData.vault, subWallet: formData.subWallet, asset: formData.asset, exchangeRate: formData.exchangeRate, cryptoPlatform: formData.cryptoPlatform }, linkId, parseFloat(formData.amount), parseFloat(formData.fee));
           await addDoc(collection(db, "users", user.uid, singleRec.collection), singleRec.data);
         }
       }
+      addToast(editingId ? 'Income updated successfully!' : 'Income logged & vaults credited!', 'success');
       closeModal();
-    } catch (error) { alert("Error saving."); } finally { setIsSaving(false); }
+    } catch (error) {
+      addToast("System Error: Failed to save income log.", "error");
+    } finally { setIsSaving(false); }
   };
 
   const initiateDelete = (rec) => { setDeleteContext(rec); setPinInput(''); setPinError(''); };
@@ -379,10 +472,11 @@ const IncomeStreams = () => {
 
     try {
       const userDoc = await getDoc(doc(db, "users", user.uid));
-      const storedPin = userDoc.data()?.security?.pinHash || userDoc.data()?.securityPin || userDoc.data()?.pin; 
-      if (storedPin && storedPin.toString() !== await hashPIN(pinInput.trim()) && storedPin.toString() !== pinInput.trim()) {
-        setPinError("Incorrect PIN."); setIsVerifying(false); return;
-      }
+      const storedHash = userDoc.data()?.security?.pinHash || userDoc.data()?.securityPin || userDoc.data()?.pin;
+      const { valid, newHash } = await verifyPIN(pinInput.trim(), storedHash, user.uid);
+      
+      if (!valid) { setPinError("Incorrect PIN."); setIsVerifying(false); return; }
+      if (newHash) { await setDoc(doc(db, "users", user.uid), { security: { pinHash: newHash } }, { merge: true }); }
       
       await deleteDoc(doc(db, "users", user.uid, "incomeLogs", deleteContext.id));
       if (deleteContext.linkedIncomeId) {
@@ -391,7 +485,8 @@ const IncomeStreams = () => {
           snaps.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, v, d.id)));
         }
       }
-      setDeleteContext(null); 
+      setDeleteContext(null);
+      addToast('Income deleted successfully.', 'info');
     } catch (e) { setPinError("System error during deletion."); } finally { setIsVerifying(false); }
   };
 
@@ -400,7 +495,7 @@ const IncomeStreams = () => {
     setFormData({ 
       title: '', category: incomeCategories[0], date: getLocalDateTimeString(), linkedIncomeId: '', isSplit: false,
       vault: 'bank', subWallet: existingBanks[0] || '', cryptoPlatform: existingCryptoPlatforms[0] || '', asset: baseCurrency, 
-      amount: '', exchangeRate: 1, isSynced: false,
+      amount: '', fee: '', exchangeRate: 1, isSynced: false,
       splitSources: [ { ...defaultSplitSource }, { ...defaultSplitSource, vault: 'cash' } ]
     }); 
   };
@@ -413,7 +508,7 @@ const IncomeStreams = () => {
     if (isSplit && rec.splitDetails) {
       mappedSplits = rec.splitDetails.map(s => ({
         vault: s.vault, subWallet: s.subWallet || s.bankName || s.walletName || '',
-        asset: s.asset || baseCurrency, amount: s.amount || '', cryptoPlatform: s.cryptoPlatform || '', exchangeRate: s.exchangeRate || 1
+        asset: s.asset || baseCurrency, amount: s.amount || '', fee: s.fee || '', cryptoPlatform: s.cryptoPlatform || '', exchangeRate: s.exchangeRate || 1
       }));
     }
     const isSyncedEntry = !!(rec.linkedIncomeId && !rec.linkedIncomeId.startsWith('INC_'));
@@ -421,7 +516,7 @@ const IncomeStreams = () => {
     setFormData({ 
       title: rec.title, category: rec.category, date: rec.date || getLocalDateTimeString(), linkedIncomeId: rec.linkedIncomeId || '', 
       isSplit: isSplit, vault: isSplit ? 'bank' : (rec.vault || 'bank'), subWallet: isSplit ? '' : (rec.subWallet || rec.bankName || rec.walletName || ''),
-      asset: isSplit ? baseCurrency : (rec.asset || baseCurrency), amount: isSplit ? '' : (rec.amount || ''), 
+      asset: isSplit ? baseCurrency : (rec.asset || baseCurrency), amount: isSplit ? '' : (rec.amount || ''), fee: isSplit ? '' : (rec.fee || ''),
       exchangeRate: isSplit ? 1 : (rec.exchangeRate || 1), cryptoPlatform: isSplit ? '' : (rec.cryptoPlatform || ''),
       isSynced: isSyncedEntry, splitSources: mappedSplits
     }); 
@@ -445,7 +540,7 @@ const IncomeStreams = () => {
     <div className="w-full h-auto pb-24">
       <div className="pt-20 sm:pt-24 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
-        {/* PREMIUM HEADER & EXPORT */}
+        {/* PREMIUM HEADER */}
         <div className="relative rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 sm:p-8 shadow-2xl border border-slate-700/50 z-20">
           <div className="absolute inset-0 overflow-hidden rounded-[2.5rem] pointer-events-none">
              <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(16,185,129,0.1),transparent_70%)]" />
@@ -468,28 +563,21 @@ const IncomeStreams = () => {
             <div className="grid grid-cols-2 md:flex items-center gap-3 w-full md:w-auto mt-4 md:mt-0">
               <div className="relative w-full md:w-auto z-[100]">
                 <button 
-                  onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                  onClick={() => !isGeneratingReport && setIsExportMenuOpen(!isExportMenuOpen)}
                   onBlur={() => setTimeout(() => setIsExportMenuOpen(false), 200)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 shadow-sm"
+                  disabled={isGeneratingReport}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 shadow-sm disabled:opacity-50"
                 >
-                  <HiOutlineDownload size={16} /> Export
+                  {isGeneratingReport ? <><HiOutlineRefresh className="animate-spin" size={16} /> Generating...</> : <><HiOutlineDownload size={16} /> Export</>}
                 </button>
-                {isExportMenuOpen && (
+                {isExportMenuOpen && !isGeneratingReport && (
                   <div className="absolute top-[110%] left-0 sm:right-0 sm:left-auto w-full md:w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl flex flex-col p-1.5 animate-in fade-in zoom-in-95">
-                    <button onMouseDown={(e) => { e.preventDefault(); handleDownloadReport('pdf'); }} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-200 text-[10px] font-black rounded-lg transition-colors text-left">
-                      <HiOutlineDocumentText className="text-rose-400" size={16}/> PDF Document
-                    </button>
-                    <button onMouseDown={(e) => { e.preventDefault(); handleDownloadReport('excel'); }} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-200 text-[10px] font-black rounded-lg transition-colors text-left">
-                      <HiOutlineTable className="text-emerald-400" size={16}/> Excel (CSV)
-                    </button>
+                    <button onMouseDown={(e) => { e.preventDefault(); handleDownloadReport('pdf'); }} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-200 text-[10px] font-black rounded-lg transition-colors text-left"><HiOutlineDocumentText className="text-rose-400" size={16}/> PDF Document</button>
+                    <button onMouseDown={(e) => { e.preventDefault(); handleDownloadReport('excel'); }} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-200 text-[10px] font-black rounded-lg transition-colors text-left"><HiOutlineTable className="text-emerald-400" size={16}/> Excel (CSV)</button>
                   </div>
                 )}
               </div>
-              
-              <button 
-                onClick={openModal} 
-                className="w-full md:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-5 py-3.5 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-emerald-500/30"
-              >
+              <button onClick={openModal} className="w-full md:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-5 py-3.5 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-emerald-500/30">
                 <HiOutlinePlus size={18} /> Log Income
               </button>
             </div>
@@ -497,12 +585,12 @@ const IncomeStreams = () => {
           
           <div className="relative z-30 grid grid-cols-2 md:grid-cols-3 gap-3 mt-6">
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 overflow-hidden">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1"><HiOutlineBriefcase size={14}/> Total Income Base</p>
-              <p className="text-lg md:text-xl font-black text-white truncate" title={`${currencySymbol}${totalIncomeBase.toLocaleString()}`}>{currencySymbol}{(Number(totalIncomeBase) || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1"><HiOutlineBriefcase size={14}/> Total Net Income Added</p>
+              <p className="text-lg md:text-xl font-black text-white truncate">{currencySymbol}{(Number(totalIncomeBase) || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
             </div>
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 overflow-hidden">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1"><HiOutlineCalendar size={12}/> This Month</p>
-              <p className="text-lg md:text-xl font-black text-emerald-400 truncate" title={`${currencySymbol}${thisMonthIncome.toLocaleString()}`}>{currencySymbol}{(Number(thisMonthIncome) || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1"><HiOutlineCalendar size={12}/> Net This Month</p>
+              <p className="text-lg md:text-xl font-black text-emerald-400 truncate">{currencySymbol}{(Number(thisMonthIncome) || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
             </div>
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 col-span-2 md:col-span-1 overflow-hidden">
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1"><FaChartLine size={12}/> Total Entries</p>
@@ -515,206 +603,190 @@ const IncomeStreams = () => {
         <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 bg-white dark:bg-slate-900 p-3 sm:p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="relative flex-1">
             <HiOutlineSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-            <input 
-              type="text" placeholder="Search by source or asset..."
-              value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-12 pr-4 py-3.5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none focus:border-emerald-500 transition-all placeholder-slate-400 dark:placeholder-slate-500 shadow-sm"
-            />
+            <input type="text" placeholder="Search by source or asset..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-12 pr-4 py-3.5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none focus:border-emerald-500 transition-all placeholder-slate-400 dark:placeholder-slate-500 shadow-sm" />
           </div>
           <div className="flex gap-2">
-            <select 
-              value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
-              className="w-full sm:w-auto px-4 py-3.5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-black text-xs sm:text-sm text-slate-700 dark:text-slate-300 outline-none focus:border-emerald-500 cursor-pointer transition-all shadow-sm appearance-none"
-            >
+            <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className="w-full sm:w-auto px-4 py-3.5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-black text-xs sm:text-sm text-slate-700 dark:text-slate-300 outline-none focus:border-emerald-500 cursor-pointer transition-all shadow-sm appearance-none">
               <option value="all">All Categories</option>
               {incomeCategories.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
         </div>
 
-        {/* RESPONSIVE LEDGER */}
-        <div className="space-y-6 sm:space-y-8">
-          {isLoading ? (
-            <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm">
-              <div className="relative">
-                <div className="absolute inset-0 bg-emerald-500 rounded-full blur-2xl opacity-20 animate-pulse scale-150" />
-                <HiOutlineRefresh className="animate-spin text-5xl text-emerald-500 relative" />
-              </div>
-              <p className="text-xs font-black text-slate-500 uppercase tracking-widest mt-6 animate-pulse">Loading Income Streams...</p>
-            </div>
-          ) : processedIncomes.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm px-4">
-              <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-[2rem] flex items-center justify-center mb-5 shadow-inner">
-                <HiOutlineBriefcase className="text-5xl text-slate-300 dark:text-slate-600" />
-              </div>
-              <p className="text-lg font-black text-slate-700 dark:text-slate-300">No income records found</p>
-              <p className="text-sm font-medium text-slate-500 mt-2 text-center max-w-sm">{searchTerm || filterCategory !== 'all' ? 'Try adjusting your search or filters.' : 'Log your first income to get started tracking your earnings.'}</p>
-              {!searchTerm && filterCategory === 'all' && (
-                <button onClick={openModal} className="mt-6 bg-emerald-600 hover:bg-emerald-700 text-white font-black px-6 py-3 rounded-xl shadow-lg shadow-emerald-500/30 transition-all active:scale-95">Log Income Now</button>
-              )}
-            </div>
-          ) : (
-            processedIncomes.map((month) => (
-              <div key={month.monthName} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[1.5rem] md:rounded-[2rem] overflow-hidden shadow-sm">
-                
-                <div className="px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50">
-                  <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-2.5">
-                    <div className="p-2 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-lg">
-                      <HiOutlineCalendar size={16} />
-                    </div>
+        {/* 🚀 COLLAPSIBLE MONTHS LEDGER */}
+        {isLoading ? (
+          <div className="p-8 text-center text-slate-500 animate-pulse">Loading Ledger...</div>
+        ) : processedIncomes.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm px-4">
+            <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-[2rem] flex items-center justify-center mb-5 shadow-inner"><HiOutlineBriefcase className="text-5xl text-slate-300 dark:text-slate-600" /></div>
+            <p className="text-lg font-black text-slate-700 dark:text-slate-300">No income records found</p>
+            <p className="text-sm font-medium text-slate-500 mt-2 text-center max-w-sm">{searchTerm || filterCategory !== 'all' ? 'Try adjusting your search or filters.' : 'Log your first income to get started tracking your earnings.'}</p>
+            {!searchTerm && filterCategory === 'all' && (
+              <button onClick={openModal} className="mt-6 bg-emerald-600 hover:bg-emerald-700 text-white font-black px-6 py-3 rounded-xl shadow-lg shadow-emerald-500/30 transition-all active:scale-95">Log Income Now</button>
+            )}
+          </div>
+        ) : (
+          processedIncomes.map((month) => {
+            const opening = month.openingBalance || 0;
+            const closing = month.closingBalance || 0;
+            const monthTotal = month.monthTotal || 0;
+            const isOpen = openMonths.has(month.monthKey);
+
+            return (
+              <div key={month.monthKey} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[2rem] overflow-hidden shadow-sm">
+                <button onClick={() => toggleMonth(month.monthKey)} className="w-full px-6 py-5 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors text-left">
+                  <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2.5">
+                    <div className="p-2 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-lg"><HiOutlineCalendar size={18} /></div>
                     {month.monthName}
                   </h2>
-                  <div className="text-right">
-                    <p className="text-[8px] sm:text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Month Total</p>
-                    <p className="text-xs sm:text-sm font-black text-emerald-600 dark:text-emerald-400">+{currencySymbol}{(Number(month.monthTotal) || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right hidden sm:block">
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Opening</p>
+                      <p className="text-sm font-black text-slate-700 dark:text-slate-300">{currencySymbol}{opening.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                    </div>
+                    <HiOutlineChevronDown size={20} className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
                   </div>
-                </div>
+                </button>
 
-                {/* 📱 MOBILE VIEW: CARDS */}
-                <div className="md:hidden flex flex-col divide-y divide-slate-100 dark:divide-slate-800/50">
-                  {month.records.map((rec) => {
-                    const dateObj = new Date(rec.date);
-                    const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                    return (
-                      <div key={rec.id} className={`p-4 ${rec.isSplit ? 'bg-amber-50/30 dark:bg-amber-900/10' : ''}`}>
-                        <div className="flex justify-between items-start mb-2">
-                          <div className="flex-1 min-w-0 pr-2">
-                            <p className="font-black text-slate-900 dark:text-white text-sm truncate">{rec.title}</p>
-                            <span className="inline-block px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[8px] font-black uppercase tracking-wider rounded mt-1 border border-emerald-200 dark:border-emerald-500/20 shadow-sm truncate max-w-full">
-                              {rec.category}
-                            </span>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <p className="text-base font-black text-emerald-600 dark:text-emerald-400 tracking-tight leading-none">
-                              +{currencySymbol}{(Number(rec.finalBaseAmount) || 0).toLocaleString(undefined, {minimumFractionDigits: 0})}
-                            </p>
-                            {rec.asset !== baseCurrency && !rec.isSplit && (
-                              <p className="text-[9px] font-bold text-slate-500 mt-1">{Number(rec.amount || 0).toLocaleString()} {rec.asset}</p>
-                            )}
-                            {rec.isSplit && <p className="text-[9px] font-bold text-slate-500 mt-1">Multiple Assets</p>}
-                          </div>
-                        </div>
+                {isOpen && (
+                  <div className="animate-in fade-in duration-200">
+                    <div className="px-6 py-4 grid grid-cols-2 sm:grid-cols-3 gap-4 bg-white dark:bg-slate-900 border-t border-b border-slate-200 dark:border-slate-800">
+                      <div><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Opening</p><p className="font-black text-slate-700 dark:text-slate-300">{currencySymbol}{opening.toLocaleString(undefined, {minimumFractionDigits: 2})}</p></div>
+                      <div><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Net Income Added</p><p className="font-black text-emerald-600">+{currencySymbol}{monthTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</p></div>
+                      <div className="col-span-2 sm:col-span-1"><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Closing</p><p className="font-black text-emerald-700 dark:text-emerald-400">{currencySymbol}{closing.toLocaleString(undefined, {minimumFractionDigits: 2})}</p></div>
+                    </div>
 
-                        <div className="flex flex-wrap justify-between items-end gap-2 mt-3">
-                          <div className="flex flex-col gap-1.5">
-                            <div className={`flex items-center gap-1.5 w-max px-2 py-1 rounded-md border text-[9px] font-bold shadow-sm ${rec.isSplit ? 'bg-amber-100/50 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/30 text-amber-800 dark:text-amber-400' : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}>
-                              {rec.isSplit ? (
-                                <><FaRandom className="text-amber-600 dark:text-amber-500" /> Split Income</>
-                              ) : (
-                                <>{getVaultIcon(rec.vault)} <span className="capitalize">{rec.vault}</span> {rec.subWallet && <span className="opacity-70 ml-0.5 truncate max-w-[80px]">· {rec.subWallet}</span>}</>
-                              )}
-                            </div>
-                            <p className="text-[9px] font-bold text-slate-400 flex items-center gap-1">
-                              <HiOutlineCalendar size={10}/> {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]} <span className="opacity-50">· {timeStr}</span>
-                            </p>
-                          </div>
-
-                          <div className="flex gap-1">
-                            {rec.linkedIncomeId && !rec.linkedIncomeId.startsWith('INC_') && (
-                              <span className="p-1.5 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 rounded-md border border-amber-300 dark:border-amber-500/30 shadow-sm"><FaLock size={12} /></span>
-                            )}
-                            <button onClick={() => handleEdit(rec)} className="p-1.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-md border border-blue-200 dark:border-blue-500/30 shadow-sm"><HiOutlinePencil size={14} /></button>
-                            <button onClick={() => initiateDelete(rec)} className="p-1.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md border border-rose-200 dark:border-rose-500/30 shadow-sm"><HiOutlineTrash size={14} /></button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* 💻 DESKTOP VIEW: TABLE */}
-                <div className="hidden md:block overflow-x-auto custom-scrollbar">
-                  <table className="w-full text-left min-w-[900px]">
-                    <thead className="bg-white dark:bg-slate-900 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
-                      <tr>
-                        <th className="p-4 pl-6 w-32">Date</th>
-                        <th className="p-4">Source & Category</th>
-                        <th className="p-4">Vault</th>
-                        <th className="p-4 text-right">Native Amount</th>
-                        <th className="p-4 text-right">Base Value</th>
-                        <th className="p-4 pr-6 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
+                    {/* 📱 MOBILE CARDS */}
+                    <div className="md:hidden flex flex-col divide-y divide-slate-100 dark:divide-slate-800/50">
                       {month.records.map((rec) => {
                         const dateObj = new Date(rec.date);
                         const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
                         return (
-                          <tr key={rec.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors group ${rec.isSplit ? 'bg-amber-50/30 dark:bg-amber-900/10' : ''}`}>
-                            <td className="p-4 pl-6 align-top">
-                              <p className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2 mt-1">
-                                {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]}
-                                <span className="opacity-50 mx-1 border-l border-slate-300 dark:border-slate-600 pl-2 text-[10px]">{timeStr}</span>
-                              </p>
-                            </td>
-                            <td className="p-4 align-top">
-                              <p className="font-black text-slate-900 dark:text-white text-sm mt-0.5 max-w-[200px] truncate" title={rec.title}>{rec.title}</p>
-                              <span className="inline-block px-2 py-0.5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[8px] font-black uppercase tracking-wider rounded mt-1.5 border border-emerald-200 dark:border-emerald-500/20 shadow-sm truncate max-w-[180px]">
-                                {rec.category}
-                              </span>
-                            </td>
-                            <td className="p-4 align-top">
-                              <div className={`flex items-center gap-2 mt-1 ${rec.isSplit ? 'bg-amber-100/50 dark:bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-500/30 w-max shadow-sm' : ''}`}>
-                                {rec.isSplit ? (
-                                  <><FaRandom className="text-amber-600 dark:text-amber-500" /> <span className="text-xs font-bold text-amber-800 dark:text-amber-400">Split Income</span></>
-                                ) : (
-                                  <>{getVaultIcon(rec.vault)} <span className="text-xs font-bold text-slate-700 dark:text-slate-300 capitalize">{rec.vault}</span></>
-                                )}
-                                {!rec.isSplit && rec.subWallet && (
-                                  <span className="text-[9px] text-slate-700 dark:text-slate-300 bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded font-bold border border-slate-300 dark:border-slate-700 shadow-sm">
-                                    {rec.subWallet}
-                                  </span>
-                                )}
+                          <div key={rec.id} className={`p-4 ${rec.isSplit ? 'bg-amber-50/30 dark:bg-amber-900/10' : ''}`}>
+                            <div className="flex justify-between items-start mb-2">
+                              <div className="flex-1 min-w-0 pr-2">
+                                <p className="font-black text-slate-900 dark:text-white text-sm break-words">{rec.title}</p>
+                                <span className="inline-block px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[8px] font-black uppercase tracking-wider rounded mt-1 border border-emerald-200 dark:border-emerald-500/20 shadow-sm break-words max-w-full">{rec.category}</span>
                               </div>
-                            </td>
-                            <td className="p-4 text-right align-top">
-                              {rec.isSplit ? (
-                                <p className="font-bold text-slate-800 dark:text-slate-200 text-sm mt-1">Multiple</p>
-                              ) : (
-                                <>
-                                  <p className="font-black text-slate-800 dark:text-slate-200 text-sm mt-1">{(Number(rec.amount) || 0).toLocaleString()} <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold ml-0.5">{rec.asset}</span></p>
-                                  {rec.asset !== baseCurrency && <p className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-widest">Rate: {rec.exchangeRate}</p>}
-                                </>
-                              )}
-                            </td>
-                            <td className="p-4 text-right align-top">
-                              <p className="text-base font-black text-emerald-600 dark:text-emerald-400 tracking-tight mt-0.5">
-                                +{currencySymbol}{(Number(rec.finalBaseAmount) || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
-                              </p>
-                            </td>
-                            <td className="p-4 pr-6 align-top">
-                              <div className="flex items-center justify-end gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity mt-0.5">
-                                {rec.linkedIncomeId && !rec.linkedIncomeId.startsWith('INC_') && (
-                                  <span className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[8px] font-black rounded border border-amber-300 dark:border-amber-500/30 shadow-sm mr-1"><FaLock className="inline mb-0.5 mr-0.5" />SYNCED</span>
-                                )}
-                                <button onClick={() => handleEdit(rec)} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-500/20 rounded-xl transition-all border border-slate-300 dark:border-slate-700 shadow-sm active:scale-95">
-                                  <HiOutlinePencil size={14} />
-                                </button>
-                                <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-200 dark:hover:bg-rose-500/20 rounded-xl transition-all border border-slate-300 dark:border-slate-700 shadow-sm active:scale-95">
-                                  <HiOutlineTrash size={14} />
-                                </button>
+                              <div className="text-right shrink-0">
+                                <p className="text-base font-black text-emerald-600 dark:text-emerald-400 tracking-tight leading-none">+{currencySymbol}{(Number(rec.finalBaseAmount) || 0).toLocaleString(undefined, {minimumFractionDigits: 0})}</p>
+                                {rec.asset !== baseCurrency && !rec.isSplit && (<p className="text-[9px] font-bold text-slate-500 mt-1 break-words">{Number(rec.amount || 0).toLocaleString()} {rec.asset}</p>)}
+                                {rec.isSplit && <p className="text-[9px] font-bold text-slate-500 mt-1">Multiple Assets</p>}
+                                {rec.baseFee > 0 && <p className="text-[9px] font-bold text-rose-500 mt-0.5">Fee: -{currencySymbol}{Number(rec.baseFee).toLocaleString(undefined, {minimumFractionDigits: 2})}</p>}
+                                {!rec.baseFee && rec.fee > 0 && <p className="text-[9px] font-bold text-rose-500 mt-0.5">Fee: -{Number(rec.fee).toLocaleString()} {rec.asset}</p>}
                               </div>
-                            </td>
-                          </tr>
+                            </div>
+
+                            <div className="flex flex-wrap justify-between items-end gap-2 mt-3">
+                              <div className="flex flex-col gap-1.5">
+                                <div className={`flex items-center gap-1.5 w-max px-2 py-1 rounded-md border text-[9px] font-bold shadow-sm ${rec.isSplit ? 'bg-amber-100/50 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/30 text-amber-800 dark:text-amber-400' : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}>
+                                  {rec.isSplit ? (<><FaRandom className="text-amber-600 dark:text-amber-500" /> Split Income</>) : (<>{getVaultIcon(rec.vault)} <span className="capitalize">{rec.vault}</span> {rec.subWallet && <span className="opacity-70 ml-0.5 break-words">· {rec.subWallet}</span>}</>)}
+                                </div>
+                                <p className="text-[9px] font-bold text-slate-400 flex items-center gap-1"><HiOutlineCalendar size={10}/> {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]} <span className="opacity-50">· {timeStr}</span></p>
+                              </div>
+
+                              <div className="flex gap-1">
+                                {rec.linkedIncomeId && !rec.linkedIncomeId.startsWith('INC_') && (<span className="p-1.5 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 rounded-md border border-amber-300 dark:border-amber-500/30 shadow-sm"><FaLock size={12} /></span>)}
+                                <button onClick={() => handleEdit(rec)} className="p-1.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-md border border-blue-200 dark:border-blue-500/30 shadow-sm"><HiOutlinePencil size={14} /></button>
+                                <button onClick={() => initiateDelete(rec)} className="p-1.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md border border-rose-200 dark:border-rose-500/30 shadow-sm"><HiOutlineTrash size={14} /></button>
+                              </div>
+                            </div>
+                          </div>
                         );
                       })}
-                    </tbody>
-                  </table>
-                </div>
+                    </div>
 
-                <div className="px-4 sm:px-6 py-4 sm:py-5 border-t border-slate-200 dark:border-slate-800 flex justify-end bg-slate-50/50 dark:bg-slate-800/30">
-                  <div className="text-right bg-white dark:bg-slate-900 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Closing Flow</p>
-                    <p className="text-base sm:text-lg font-black text-emerald-700 dark:text-emerald-400">
-                      {currencySymbol}{(Number(month.closingBalance) || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                    </p>
+                    {/* 💻 DESKTOP TABLE */}
+                    <div className="hidden md:block overflow-x-auto custom-scrollbar">
+                      <table className="w-full text-left min-w-[900px]">
+                        <thead className="bg-white dark:bg-slate-900 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
+                          <tr>
+                            <th className="p-4 pl-6 w-32">Date</th>
+                            <th className="p-4">Source & Category</th>
+                            <th className="p-4">Vault</th>
+                            <th className="p-4 text-right">Native Amount</th>
+                            <th className="p-4 text-right">Net Base Value</th>
+                            <th className="p-4 pr-6 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
+                          {month.records.map((rec) => {
+                            const dateObj = new Date(rec.date);
+                            const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                            return (
+                              <tr key={rec.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors group ${rec.isSplit ? 'bg-amber-50/30 dark:bg-amber-900/10' : ''}`}>
+                                <td className="p-4 pl-6 align-top">
+                                  <p className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2 mt-1">
+                                    {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]}
+                                    <span className="opacity-50 mx-1 border-l border-slate-300 dark:border-slate-600 pl-2 text-[10px]">{timeStr}</span>
+                                  </p>
+                                </td>
+                                <td className="p-4 align-top">
+                                  <p className="font-black text-slate-900 dark:text-white text-sm mt-0.5 max-w-[200px] truncate" title={rec.title}>{rec.title}</p>
+                                  <span className="inline-block px-2 py-0.5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[8px] font-black uppercase tracking-wider rounded mt-1.5 border border-emerald-200 dark:border-emerald-500/20 shadow-sm truncate max-w-[180px]">{rec.category}</span>
+                                </td>
+                                <td className="p-4 align-top">
+                                  <div className={`flex items-center gap-2 mt-1 ${rec.isSplit ? 'bg-amber-100/50 dark:bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-500/30 w-max shadow-sm' : ''}`}>
+                                    {rec.isSplit ? (
+                                      <><FaRandom className="text-amber-600 dark:text-amber-500" /> <span className="text-xs font-bold text-amber-800 dark:text-amber-400">Split Income</span></>
+                                    ) : (
+                                      <>{getVaultIcon(rec.vault)} <span className="text-xs font-bold text-slate-700 dark:text-slate-300 capitalize">{rec.vault}</span></>
+                                    )}
+                                    {!rec.isSplit && rec.subWallet && (
+                                      <span className="text-[9px] text-slate-700 dark:text-slate-300 bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded font-bold border border-slate-300 dark:border-slate-700 shadow-sm">{rec.subWallet}</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="p-4 text-right align-top">
+                                  {rec.isSplit ? (
+                                    <>
+                                      <p className="font-bold text-slate-800 dark:text-slate-200 text-sm mt-1">Multiple</p>
+                                      {rec.baseFee > 0 && <p className="text-[10px] font-bold text-rose-500 mt-1 uppercase tracking-widest">Fee: -{currencySymbol}{(Number(rec.baseFee) || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</p>}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <p className="font-black text-slate-800 dark:text-slate-200 text-sm mt-1">{(Number(rec.amount) || 0).toLocaleString()} <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold ml-0.5">{rec.asset}</span></p>
+                                      {rec.fee > 0 && <p className="text-[9px] font-bold text-rose-500 mt-1 uppercase tracking-widest">Fee: -{(Number(rec.fee) || 0).toLocaleString()} {rec.asset}</p>}
+                                      {rec.asset !== baseCurrency && <p className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-widest">Rate: {rec.exchangeRate}</p>}
+                                    </>
+                                  )}
+                                </td>
+                                <td className="p-4 text-right align-top">
+                                  <p className="text-base font-black text-emerald-600 dark:text-emerald-400 tracking-tight mt-0.5">
+                                    +{currencySymbol}{(Number(rec.finalBaseAmount) || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                  </p>
+                                </td>
+                                <td className="p-4 pr-6 align-top">
+                                  <div className="flex items-center justify-end gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity mt-0.5">
+                                    {rec.linkedIncomeId && !rec.linkedIncomeId.startsWith('INC_') && (
+                                      <span className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[8px] font-black rounded border border-amber-300 dark:border-amber-500/30 shadow-sm mr-1"><FaLock className="inline mb-0.5 mr-0.5" />SYNCED</span>
+                                    )}
+                                    <button onClick={() => handleEdit(rec)} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-500/20 rounded-xl transition-all border border-slate-300 dark:border-slate-700 shadow-sm active:scale-95"><HiOutlinePencil size={14} /></button>
+                                    <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-200 dark:hover:bg-rose-500/20 rounded-xl transition-all border border-slate-300 dark:border-slate-700 shadow-sm active:scale-95"><HiOutlineTrash size={14} /></button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="px-4 sm:px-6 py-4 sm:py-5 border-t border-slate-200 dark:border-slate-800 flex justify-end bg-slate-50/50 dark:bg-slate-800/30">
+                      <div className="text-right bg-white dark:bg-slate-900 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Closing Flow</p>
+                        <p className="text-base sm:text-lg font-black text-emerald-700 dark:text-emerald-400">
+                          {currencySymbol}{closing.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
-            ))
-          )}
-        </div>
+            );
+          })
+        )}
       </div>
 
       {/* 🚀 ADD/EDIT MODAL */}
@@ -727,9 +799,7 @@ const IncomeStreams = () => {
                 {formData.isSplit ? <FaRandom size={20} /> : <HiOutlineBriefcase size={24} />} 
                 {editingId ? 'Edit Income' : 'Log Income'}
               </h3>
-              <button onClick={closeModal} className="p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors active:scale-90">
-                <HiOutlineX size={20} />
-              </button>
+              <button onClick={closeModal} className="p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors active:scale-90"><HiOutlineX size={20} /></button>
             </div>
             
             <form onSubmit={handleSaveEntry} className="p-4 sm:p-8 space-y-5 sm:space-y-6 flex-1 overflow-y-auto custom-scrollbar">
@@ -778,7 +848,7 @@ const IncomeStreams = () => {
                 </label>
               )}
 
-              {/* SINGLE INCOME VIEW */}
+              {/* 🚀 SINGLE INCOME VIEW */}
               {!formData.isSplit ? (
                 <div className="p-4 sm:p-6 bg-emerald-50/40 dark:bg-slate-800/80 rounded-[1.5rem] sm:rounded-[2rem] border border-emerald-200 dark:border-slate-700 shadow-sm space-y-4 sm:space-y-5 animate-in fade-in zoom-in-95">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
@@ -836,7 +906,7 @@ const IncomeStreams = () => {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5 mt-4 sm:mt-5">
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Asset</label>
                       <div className="relative">
@@ -857,14 +927,25 @@ const IncomeStreams = () => {
                         <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
                       </div>
                     </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Amount Earned ({formData.asset}) *</label>
-                      <input 
-                        disabled={formData.isSynced} type="number" step="any" required value={formData.amount} 
-                        onChange={(e) => setFormData({...formData, amount: e.target.value})} 
-                        placeholder="0.00"
-                        className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-lg text-emerald-600 dark:text-emerald-400 outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-60 shadow-sm placeholder-emerald-300 dark:placeholder-slate-600 transition-colors"
-                      />
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1 flex justify-between"><span>Gross ({formData.asset}) *</span></label>
+                        <input 
+                          disabled={formData.isSynced} type="number" step="any" required value={formData.amount} 
+                          onChange={(e) => setFormData({...formData, amount: e.target.value})} 
+                          placeholder="0.00"
+                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-lg text-emerald-600 dark:text-emerald-400 outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-60 shadow-sm placeholder-emerald-300 dark:placeholder-slate-600 transition-colors"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1 flex justify-between"><span>Fee (Opt)</span></label>
+                        <input 
+                          disabled={formData.isSynced} type="number" step="any" value={formData.fee} 
+                          onChange={(e) => setFormData({...formData, fee: e.target.value})} 
+                          placeholder="0.00"
+                          className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-lg text-rose-500 outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-60 shadow-sm placeholder-rose-300 dark:placeholder-slate-600 transition-colors"
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -892,7 +973,7 @@ const IncomeStreams = () => {
                   )}
                 </div>
               ) : (
-                /* SPLIT INCOME VIEW */
+                /* 🚀 SPLIT INCOME VIEW */
                 <div className="space-y-4 animate-in fade-in zoom-in-95">
                   {formData.splitSources.map((split, index) => (
                     <div key={index} className="p-4 sm:p-6 border-2 border-amber-200 dark:border-amber-700/50 bg-amber-50/50 dark:bg-amber-900/10 rounded-[1.5rem] sm:rounded-[2rem] space-y-4 sm:space-y-5 shadow-sm relative overflow-hidden group">
@@ -929,7 +1010,9 @@ const IncomeStreams = () => {
                             <input type="text" list="crypto-platforms-list" required value={split.cryptoPlatform} onChange={(e) => updateSplit(index, 'cryptoPlatform', e.target.value)} placeholder="e.g. Binance" className="w-full p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl sm:rounded-2xl font-bold text-slate-900 dark:text-white outline-none shadow-sm placeholder-slate-400 transition-colors focus:ring-2 focus:ring-amber-500/50" />
                           </div>
                         )}
+                      </div>
 
+                      <div className="grid grid-cols-2 gap-3 sm:gap-4 relative z-10 mt-3">
                         <div className="space-y-1.5">
                           <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">Asset</label>
                           <div className="relative">
@@ -939,10 +1022,15 @@ const IncomeStreams = () => {
                             <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18} />
                           </div>
                         </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">Amount ({split.asset})</label>
-                          <input type="number" step="any" required value={split.amount} onChange={(e) => updateSplit(index, 'amount', e.target.value)} placeholder="0.00" className="w-full p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl sm:rounded-2xl font-black text-amber-700 dark:text-amber-500 outline-none shadow-sm placeholder-slate-400 transition-colors focus:ring-2 focus:ring-amber-500/50 text-base sm:text-lg" />
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">Gross</label>
+                            <input type="number" step="any" required value={split.amount} onChange={(e) => updateSplit(index, 'amount', e.target.value)} placeholder="0.00" className="w-full p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl sm:rounded-2xl font-black text-amber-700 dark:text-amber-500 outline-none shadow-sm placeholder-amber-300 transition-colors focus:ring-2 focus:ring-amber-500/50 text-sm sm:text-lg" />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">Fee</label>
+                            <input type="number" step="any" value={split.fee} onChange={(e) => updateSplit(index, 'fee', e.target.value)} placeholder="0.00" className="w-full p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl sm:rounded-2xl font-black text-rose-500 outline-none shadow-sm placeholder-rose-300 transition-colors focus:ring-2 focus:ring-rose-500/50 text-sm sm:text-lg" />
+                          </div>
                         </div>
                       </div>
                       
@@ -963,6 +1051,7 @@ const IncomeStreams = () => {
                 </div>
               )}
 
+              {/* SUMMARY SECTION */}
               <div className="p-4 sm:p-5 bg-slate-100 dark:bg-slate-800/80 rounded-[1.5rem] sm:rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-inner mt-2">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-5">
                   <div className="w-full sm:w-1/2">
@@ -976,10 +1065,13 @@ const IncomeStreams = () => {
                   </div>
                   
                   <div className="text-left sm:text-right w-full sm:w-auto sm:border-l border-slate-300 dark:border-slate-700 sm:pl-6">
-                    <p className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Total Income Added</p>
+                    <p className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Total Net Added</p>
                     <p className="text-2xl sm:text-3xl md:text-4xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight mt-1 truncate">
                       +{currencySymbol}{(formData.isSplit ? getSplitTotalBase() : finalBaseAmount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                     </p>
+                    {(!formData.isSplit && parseFloat(formData.fee) > 0) && (
+                      <p className="text-[10px] font-bold text-rose-500 mt-1 uppercase tracking-widest">Fee Deducted: {parseFloat(formData.fee)} {formData.asset}</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1055,5 +1147,11 @@ const IncomeStreams = () => {
     </div>
   );
 };
+
+const IncomeStreams = () => (
+  <ToastProvider>
+    <IncomeStreamsContent />
+  </ToastProvider>
+);
 
 export default IncomeStreams;

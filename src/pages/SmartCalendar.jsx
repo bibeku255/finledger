@@ -19,7 +19,7 @@ import {
 import NepaliDate from 'nepali-date-converter';
 
 // ============================================
-// 🚀 PREMIUM COMPONENTS
+// 🚀 PREMIUM COMPONENTS (unchanged)
 // ============================================
 
 const StatBadge = ({ icon: Icon, label, value, color, bgColor, borderColor }) => (
@@ -34,8 +34,7 @@ const StatBadge = ({ icon: Icon, label, value, color, bgColor, borderColor }) =>
   </div>
 );
 
-const CalendarHeader = ({ currentDate, onPrev, onNext, calendarPref }) => {
-  // 🚀 UPGRADED: Handled ALL 4 Calendars natively
+const CalendarHeader = ({ currentDate, onPrev, onNext, onToday, calendarPref }) => {
   const getFormattedMonthYear = (date) => {
     if (calendarPref === 'bikram_sambat') {
       return new NepaliDate(date).format('MMMM YYYY'); 
@@ -60,7 +59,6 @@ const CalendarHeader = ({ currentDate, onPrev, onNext, calendarPref }) => {
 
   return (
     <div className="flex items-center justify-between mb-5 sm:mb-6">
-      {/* Month navigation */}
       <div className="flex items-center gap-1 sm:gap-2">
         <button 
           onClick={onPrev} 
@@ -78,7 +76,6 @@ const CalendarHeader = ({ currentDate, onPrev, onNext, calendarPref }) => {
         </button>
       </div>
       
-      {/* Month title */}
       <div className="text-center flex-1 px-2">
         <h2 className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 dark:text-white tracking-tight capitalize truncate">
           {getFormattedMonthYear(currentDate)}
@@ -88,16 +85,14 @@ const CalendarHeader = ({ currentDate, onPrev, onNext, calendarPref }) => {
         </p>
       </div>
       
-      {/* Today button */}
       <button 
-        onClick={() => onPrev && onPrev(currentDate)}
+        onClick={onToday}
         className="hidden sm:flex items-center gap-1.5 px-3 py-2 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl font-black text-xs hover:bg-blue-100 dark:hover:bg-blue-500/20 transition-colors"
       >
         <FaCalendarDay size={14} />
         Today
       </button>
       
-      {/* Spacer for balance */}
       <div className="w-[76px] sm:hidden" />
     </div>
   );
@@ -127,12 +122,10 @@ const DayCell = ({ day, isCurrentMonth, isSelected, isToday, events, onSelect, g
         ${isToday && !isSelected ? 'ring-2 ring-blue-400/50 dark:ring-blue-500/30' : ''}
       `}
     >
-      {/* Today indicator */}
       {isToday && !isSelected && (
         <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-blue-500 rounded-full shadow-lg shadow-blue-500/50" />
       )}
       
-      {/* Day number */}
       <span className={`text-xs sm:text-sm md:text-lg font-black leading-none mb-1
         ${isSelected ? 'text-white' : ''}
         ${isToday && !isSelected ? 'text-blue-600 dark:text-blue-400' : ''}
@@ -140,7 +133,6 @@ const DayCell = ({ day, isCurrentMonth, isSelected, isToday, events, onSelect, g
         {getDayLabel(day)}
       </span>
       
-      {/* Event indicators */}
       {(hasIncome || hasExpense || hasBill) && (
         <div className="flex gap-0.5 sm:gap-1 mt-auto pb-1">
           {hasIncome && (
@@ -161,7 +153,6 @@ const DayCell = ({ day, isCurrentMonth, isSelected, isToday, events, onSelect, g
         </div>
       )}
       
-      {/* Quick total on hover (desktop only) */}
       {(totalIncome > 0 || totalExpense > 0) && (
         <div className="absolute -bottom-12 left-1/2 -translate-x-1/2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-[9px] font-black px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none hidden md:block whitespace-nowrap shadow-xl z-30">
           {totalIncome > 0 && <span className="text-emerald-400">+{totalIncome.toLocaleString()}</span>}
@@ -247,7 +238,7 @@ const SmartCalendar = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [events, setEvents] = useState({});
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState('calendar'); // 'calendar' | 'list'
+  const [viewMode, setViewMode] = useState('calendar');
 
   const calendarPref = dbData?.settings?.baseCalendar || 'gregorian';
 
@@ -324,19 +315,77 @@ const SmartCalendar = () => {
     return { income, expense, net: income - expense };
   }, [selectedEvents]);
 
-  // Header formatter
-  const getFormattedMonthYear = (date) => {
-    if (calendarPref === 'bikram_sambat') return new NepaliDate(date).format('MMMM YYYY');
-    if (calendarPref === 'hijri') {
-      return new Intl.DateTimeFormat('en-US-u-ca-islamic', { month: 'long', year: 'numeric' }).format(date);
+  // ============================================
+  // 🧠 MULTI-CALENDAR HELPERS (IMPROVED)
+  // ============================================
+
+  // Get the Gregorian date of the first day of the month (for any calendar) containing the given Gregorian date
+  const getMonthStartAD = (gregorianDate, calendar) => {
+    switch (calendar) {
+      case 'bikram_sambat': {
+        const nd = new NepaliDate(gregorianDate);
+        const bsYear = nd.getYear();
+        const bsMonth = nd.getMonth();
+        const bsFirst = new NepaliDate(bsYear, bsMonth, 1);
+        const ad = bsFirst.getAD();
+        return new Date(ad.year, ad.month, ad.date);
+      }
+      case 'hijri': {
+        let d = new Date(gregorianDate);
+        const targetMonth = new Intl.DateTimeFormat('en-US-u-ca-islamic', { month: 'numeric' }).format(d);
+        while (new Intl.DateTimeFormat('en-US-u-ca-islamic', { month: 'numeric' }).format(d) === targetMonth) {
+          d.setDate(d.getDate() - 1);
+        }
+        return addDays(d, 1);
+      }
+      case 'jalali': {
+        let d = new Date(gregorianDate);
+        const targetMonth = new Intl.DateTimeFormat('en-US-u-ca-persian', { month: 'numeric' }).format(d);
+        while (new Intl.DateTimeFormat('en-US-u-ca-persian', { month: 'numeric' }).format(d) === targetMonth) {
+          d.setDate(d.getDate() - 1);
+        }
+        return addDays(d, 1);
+      }
+      default:
+        return startOfMonth(gregorianDate);
     }
-    if (calendarPref === 'jalali') {
-      return new Intl.DateTimeFormat('en-US-u-ca-persian', { month: 'long', year: 'numeric' }).format(date);
-    }
-    return format(date, 'MMMM yyyy');
   };
 
-  // 🚀 UPGRADED: Handled ALL 4 Calendars natively for Grid Numbering
+  // Shift month in the selected calendar (always returns a date at the 1st of the target month to avoid day‑overflow issues)
+  const shiftCalendarMonth = (gregorianDate, delta, calendar) => {
+    switch (calendar) {
+      case 'bikram_sambat': {
+        const nd = new NepaliDate(gregorianDate);
+        const curMonth = nd.getMonth();
+        const curYear = nd.getYear();
+        let newMonth = curMonth + delta;
+        let newYear = curYear;
+        if (newMonth > 11) { newMonth = 0; newYear++; }
+        else if (newMonth < 0) { newMonth = 11; newYear--; }
+        const bsFirstOfNext = new NepaliDate(newYear, newMonth, 1);
+        const ad = bsFirstOfNext.getAD();
+        return new Date(ad.year, ad.month, ad.date);
+      }
+      case 'hijri':
+      case 'jalali': {
+        let approx = addDays(gregorianDate, delta * 30);
+        return getMonthStartAD(approx, calendar);
+      }
+      default:
+        return delta > 0 ? addMonths(gregorianDate, delta) : subMonths(gregorianDate, -delta);
+    }
+  };
+
+  const nextMonth = () => setCurrentDate(shiftCalendarMonth(currentDate, 1, calendarPref));
+  const prevMonth = () => setCurrentDate(shiftCalendarMonth(currentDate, -1, calendarPref));
+
+  const goToToday = () => {
+    const today = new Date();
+    setCurrentDate(today);
+    setSelectedDate(today);
+  };
+
+  // Day label
   const getDayLabel = (date) => {
     if (calendarPref === 'bikram_sambat') return new NepaliDate(date).getDate();
     if (calendarPref === 'hijri') {
@@ -361,9 +410,11 @@ const SmartCalendar = () => {
     return isSameMonth(day, currentDate);
   };
 
-  // Grid boundaries (Base Gregorian boundary ensures 100% correct cross-mapping)
+  // Grid boundaries
   const getGridBoundaries = () => {
     let monthStartAD, monthEndAD;
+
+    // Determine the first Gregorian day of the selected calendar month containing currentDate
     if (calendarPref === 'bikram_sambat') {
       const currentBS = new NepaliDate(currentDate);
       const bsYear = currentBS.getYear();
@@ -371,16 +422,22 @@ const SmartCalendar = () => {
       const bsStart = new NepaliDate(bsYear, bsMonth, 1);
       const adStart = bsStart.getAD();
       monthStartAD = new Date(adStart.year, adStart.month, adStart.date);
-      
-      let nextBsMonth = bsMonth + 1;
-      let nextBsYear = bsYear;
-      if (nextBsMonth > 11) { nextBsMonth = 0; nextBsYear++; }
-      const bsNextStart = new NepaliDate(nextBsYear, nextBsMonth, 1);
-      const adNextStart = bsNextStart.getAD();
-      monthEndAD = addDays(new Date(adNextStart.year, adNextStart.month, adNextStart.date), -1);
     } else {
-      monthStartAD = startOfMonth(currentDate);
-      monthEndAD = endOfMonth(monthStartAD);
+      monthStartAD = getMonthStartAD(currentDate, calendarPref);
+    }
+
+    // Last day of that calendar month
+    if (calendarPref === 'bikram_sambat') {
+      const nd = new NepaliDate(monthStartAD);
+      let nextMonth = nd.getMonth() + 1;
+      let nextYear = nd.getYear();
+      if (nextMonth > 11) { nextMonth = 0; nextYear++; }
+      const bsNextStart = new NepaliDate(nextYear, nextMonth, 1);
+      const adNext = bsNextStart.getAD();
+      monthEndAD = addDays(new Date(adNext.year, adNext.month, adNext.date), -1);
+    } else {
+      const nextMonthStart = shiftCalendarMonth(monthStartAD, 1, calendarPref);
+      monthEndAD = addDays(nextMonthStart, -1);
     }
 
     return {
@@ -389,15 +446,6 @@ const SmartCalendar = () => {
     };
   };
 
-  const nextMonth = () => setCurrentDate(addMonths(currentDate, 1));
-  const prevMonth = () => setCurrentDate(subMonths(currentDate, 1));
-  const goToToday = () => {
-    setCurrentDate(new Date());
-    setSelectedDate(new Date());
-  };
-  const onDateClick = (day) => setSelectedDate(day);
-
-  // Render calendar days
   const renderDaysHeader = () => {
     const days = [];
     const startDate = startOfWeek(currentDate, { weekStartsOn: 0 });
@@ -449,7 +497,7 @@ const SmartCalendar = () => {
     return <div>{rows}</div>;
   };
 
-  // Upcoming events for list view
+  // Upcoming events
   const upcomingEvents = useMemo(() => {
     const allEvents = [];
     Object.entries(events).forEach(([date, dateEvents]) => {
@@ -463,13 +511,15 @@ const SmartCalendar = () => {
       .slice(0, 20);
   }, [events]);
 
+  const onDateClick = (day) => setSelectedDate(day);
+
   // ============================================
   // RENDER
   // ============================================
   return (
     <div className="min-h-screen pt-16 sm:pt-20 md:pt-24 pb-20 sm:pb-24 max-w-6xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8">
       
-      {/* 🚀 HEADER */}
+      {/* HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5 sm:mb-6 md:mb-8">
         <div className="flex items-center gap-3">
           <div className="p-2.5 sm:p-3.5 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl shadow-xl shadow-blue-500/30 ring-1 ring-white/20">
@@ -485,9 +535,7 @@ const SmartCalendar = () => {
           </div>
         </div>
 
-        {/* Controls */}
         <div className="flex items-center gap-2 self-end sm:self-auto">
-          {/* Loading indicator */}
           {loading && (
             <div className="flex items-center gap-1.5 text-blue-500 bg-blue-500/10 px-3 py-2 rounded-xl font-black text-[10px] sm:text-xs animate-pulse">
               <HiOutlineRefresh className="animate-spin" size={14} />
@@ -495,7 +543,6 @@ const SmartCalendar = () => {
             </div>
           )}
           
-          {/* View toggle */}
           <div className="flex bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
             <button 
               onClick={() => setViewMode('calendar')}
@@ -515,10 +562,9 @@ const SmartCalendar = () => {
         </div>
       </div>
 
-      {/* 🚀 CONTENT */}
+      {/* CONTENT */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 md:gap-6 lg:gap-8 items-start">
         
-        {/* LEFT/CENTER: Calendar Grid */}
         <div className="lg:col-span-2">
           <div className="bg-white dark:bg-slate-900 rounded-[1.5rem] sm:rounded-[2rem] md:rounded-[2.5rem] p-3 sm:p-4 md:p-6 shadow-xl border border-slate-200 dark:border-slate-800">
             {viewMode === 'calendar' ? (
@@ -527,6 +573,7 @@ const SmartCalendar = () => {
                   currentDate={currentDate}
                   onPrev={prevMonth}
                   onNext={nextMonth}
+                  onToday={goToToday}
                   calendarPref={calendarPref}
                 />
                 {renderDaysHeader()}
@@ -557,14 +604,12 @@ const SmartCalendar = () => {
           </div>
         </div>
 
-        {/* RIGHT: Daily Summary Panel */}
+        {/* RIGHT PANEL */}
         <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-[1.5rem] sm:rounded-[2rem] md:rounded-[2.5rem] p-4 sm:p-5 md:p-6 lg:p-8 shadow-2xl border border-slate-700/50 relative overflow-hidden sticky top-24">
-          {/* Background decorations */}
           <div className="absolute top-0 right-0 w-40 h-40 bg-blue-500/5 rounded-full blur-3xl" />
           <div className="absolute bottom-0 left-0 w-32 h-32 bg-purple-500/5 rounded-full blur-3xl" />
           
           <div className="relative z-10">
-            {/* Date header */}
             <div className="mb-5 sm:mb-6">
               <h3 className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-1">
                 <HiOutlineEye className="inline mr-1" size={12} />
@@ -575,7 +620,6 @@ const SmartCalendar = () => {
               </h2>
             </div>
 
-            {/* Stats badges */}
             {selectedEvents.length > 0 && (
               <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-5">
                 <StatBadge 
@@ -607,7 +651,6 @@ const SmartCalendar = () => {
               </div>
             )}
 
-            {/* Events list */}
             {selectedEvents.length === 0 ? (
               <EmptyState date={selectedDate} formatGlobalDate={formatGlobalDate} />
             ) : (
@@ -618,7 +661,6 @@ const SmartCalendar = () => {
               </div>
             )}
             
-            {/* Quick today button */}
             <button 
               onClick={goToToday}
               className="w-full mt-5 py-3 bg-white/5 hover:bg-white/10 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all border border-white/10 flex items-center justify-center gap-2"
@@ -631,7 +673,7 @@ const SmartCalendar = () => {
 
       </div>
       
-      {/* 🚀 MOBILE FAB for Today */}
+      {/* MOBILE FAB */}
       <button
         onClick={goToToday}
         className="lg:hidden fixed bottom-6 right-4 z-50 p-4 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-2xl shadow-2xl shadow-blue-500/40 flex items-center gap-2 font-black text-xs uppercase tracking-wider active:scale-95 transition-all"

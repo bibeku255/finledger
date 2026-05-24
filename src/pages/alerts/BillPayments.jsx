@@ -1,38 +1,74 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
-import { collection, addDoc, doc, deleteDoc, updateDoc, onSnapshot, query, orderBy, where, getDocs, getDoc } from 'firebase/firestore';
+import {
+  collection, addDoc, doc, deleteDoc, updateDoc, setDoc,
+  onSnapshot, query, orderBy, where, getDocs, getDoc
+} from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { verifyPIN } from '../../utils/cryptoUtils';
-import { 
-  HiOutlinePlus, HiOutlineX, HiOutlineTrash, 
+import {
+  HiOutlinePlus, HiOutlineX, HiOutlineTrash,
   HiOutlineCalendar, HiOutlineCreditCard, HiOutlineCheckCircle,
   HiOutlineExclamationCircle, HiOutlineClock, HiOutlineRefresh,
   HiOutlineLockClosed, HiOutlineInformationCircle, HiOutlineChevronDown,
   HiOutlineSearch, HiOutlineBell, HiOutlineLightningBolt, HiOutlineShieldCheck
 } from 'react-icons/hi';
-import { 
+import {
   FaUniversity, FaMoneyBillWave, FaWallet, FaBitcoin, FaExchangeAlt,
   FaCalendarCheck, FaCalendarTimes, FaCheckDouble
 } from 'react-icons/fa';
 
-// 🚀 GLOBALS
-import { fiatFlagMap } from '../../utils/marketConstants';
+// ============================================
+// 🚀 MINI TOAST SYSTEM (Self-contained, identical to other upgraded modules)
+// ============================================
+const ToastContext = React.createContext(null);
+const ToastProvider = ({ children }) => {
+  const [toasts, setToasts] = useState([]);
+  const addToast = (message, type = 'info', duration = 4000) => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type, duration }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
+  };
+  const removeToast = id => setToasts(prev => prev.filter(t => t.id !== id));
+  return (
+    <ToastContext.Provider value={{ addToast, removeToast }}>
+      {children}
+      <div className="fixed top-24 right-4 z-[10000] space-y-2 max-w-sm w-full pointer-events-none px-4 md:px-0">
+        {toasts.map(toast => (
+          <div key={toast.id} className={`pointer-events-auto flex items-start gap-3 p-4 rounded-2xl shadow-2xl backdrop-blur-xl border animate-in slide-in-from-right-4 fade-in duration-300 ${
+            toast.type === 'success' ? 'bg-green-50/95 dark:bg-green-900/90 border-green-200 dark:border-green-700' :
+            toast.type === 'error' ? 'bg-red-50/95 dark:bg-red-900/90 border-red-200 dark:border-red-700' :
+            toast.type === 'warning' ? 'bg-amber-50/95 dark:bg-amber-900/90 border-amber-200 dark:border-amber-700' :
+            'bg-blue-50/95 dark:bg-blue-900/90 border-blue-200 dark:border-blue-700'
+          }`}>
+            {toast.type === 'success' && <HiOutlineCheckCircle className="text-green-600 dark:text-green-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'error' && <HiOutlineExclamationCircle className="text-red-600 dark:text-red-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'warning' && <HiOutlineExclamationCircle className="text-amber-600 dark:text-amber-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'info' && <HiOutlineInformationCircle className="text-blue-600 dark:text-blue-400 w-5 h-5 flex-shrink-0" />}
+            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 flex-1">{toast.message}</p>
+            <button onClick={() => removeToast(toast.id)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"><HiOutlineX size={16} /></button>
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+};
+const useToast = () => React.useContext(ToastContext);
 
 const getLocalDateTimeString = () => {
   const now = new Date();
   now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-  return now.toISOString().slice(0, 16); 
+  return now.toISOString().slice(0, 16);
 };
 
 // ============================================
-// 🚀 MAIN BILLPAYMENTS COMPONENT
+// 🚀 MAIN CONTENT COMPONENT
 // ============================================
-
-const BillPayments = () => {
+const BillPaymentsContent = () => {
   const { user, baseCurrency = 'INR', selectedCryptos = [], selectedFiats = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
+  const { addToast } = useToast();
 
-  // States
   const [bills, setBills] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -40,8 +76,7 @@ const BillPayments = () => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('date');
-  
-  // Modal states
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
   const [activeBill, setActiveBill] = useState(null);
@@ -50,7 +85,6 @@ const BillPayments = () => {
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
 
-  // Data states
   const [customUserCoins, setCustomUserCoins] = useState([]);
   const [existingVaultNames, setExistingVaultNames] = useState([]);
   const [existingCryptoPlatforms, setExistingCryptoPlatforms] = useState([]);
@@ -77,9 +111,12 @@ const BillPayments = () => {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setIsLoading(false);
+    }, (err) => {
+      addToast('Failed to load bills.', 'error');
+      setIsLoading(false);
     });
     return () => unsubscribe();
-  }, [user]);
+  }, [user, addToast]);
 
   useEffect(() => {
     if (!user) return;
@@ -119,7 +156,6 @@ const BillPayments = () => {
 
   const getBillStatus = (dueDateStr, isPaid) => {
     if (isPaid) return { label: 'Paid', color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20' };
-    
     const due = new Date(dueDateStr);
     const today = new Date(todayDate);
     const diffTime = due - today;
@@ -135,10 +171,7 @@ const BillPayments = () => {
     let result = [...bills];
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      result = result.filter(b => 
-        b.title.toLowerCase().includes(q) || 
-        b.category?.toLowerCase().includes(q)
-      );
+      result = result.filter(b => b.title.toLowerCase().includes(q) || b.category?.toLowerCase().includes(q));
     }
     switch (filterStatus) {
       case 'pending': result = result.filter(b => !b.isPaid); break;
@@ -159,7 +192,7 @@ const BillPayments = () => {
   const activeBills = bills.filter(b => !b.isPaid);
   const totalUpcoming = activeBills.reduce((acc, b) => acc + Number(b.amount), 0);
   const totalOverdue = activeBills.filter(b => getBillStatus(b.dueDate, false).isOverdue).reduce((acc, b) => acc + Number(b.amount), 0);
-  
+
   const fetchLiveRate = async () => {
     if (payData.asset === baseCurrency) return;
     setIsFetchingRate(true);
@@ -206,7 +239,7 @@ const BillPayments = () => {
         setPayData(prev => ({ ...prev, exchangeRate: finalRate.toFixed(4) }));
       }
     } catch (error) {
-      alert("Rate fetch failed. Please enter manually.");
+      addToast("Rate fetch failed. Please enter manually.", "error");
     } finally {
       setIsFetchingRate(false);
     }
@@ -229,10 +262,11 @@ const BillPayments = () => {
 
     try {
       await addDoc(collection(db, "users", user.uid, "billReminders"), billRecord);
+      addToast('Bill reminder added!', 'success');
       setIsModalOpen(false);
       setFormData({ title: '', amount: '', category: 'Bills & Utilities', dueDate: todayDate, frequency: 'monthly' });
     } catch (error) {
-      alert("Failed to save bill.");
+      addToast("Failed to save bill.", "error");
     } finally {
       setIsProcessing(false);
     }
@@ -246,10 +280,12 @@ const BillPayments = () => {
     if (!user || !activeBill) return;
 
     if (payData.sourceVault === 'crypto' && !payData.cryptoPlatform.trim()) {
-      return alert("Please specify the exact Crypto Platform (e.g. Binance, Phantom).");
+      addToast("Please specify the exact Crypto Platform (e.g. Binance, Phantom).", "warning");
+      return;
     }
     if ((payData.sourceVault === 'bank' || payData.sourceVault === 'online') && !payData.subWallet.trim()) {
-      return alert("Please specify the Bank or Wallet name to deduct from.");
+      addToast("Please specify the Bank or Wallet name to deduct from.", "warning");
+      return;
     }
 
     setIsProcessing(true);
@@ -309,9 +345,10 @@ const BillPayments = () => {
         });
       }
 
+      addToast(`Payment for "${activeBill.title}" processed!`, 'success');
       setIsPayModalOpen(false);
     } catch (error) {
-      alert("Payment sync failed.");
+      addToast("Payment sync failed.", "error");
     } finally {
       setIsProcessing(false);
     }
@@ -324,49 +361,50 @@ const BillPayments = () => {
   };
 
   const executeSecureDelete = async (e) => {
-  e.preventDefault();
-  if (!pinInput.trim()) return setPinError("Please enter your PIN.");
-  setIsVerifying(true);
-  setPinError('');
+    e.preventDefault();
+    if (!pinInput.trim()) return setPinError("Please enter your PIN.");
+    setIsVerifying(true);
+    setPinError('');
 
-  try {
-    const userDoc = await getDoc(doc(db, "users", user.uid));
-    const storedHash = userDoc.data()?.security?.pinHash || userDoc.data()?.securityPin || userDoc.data()?.pin;
-    
-    const { valid, newHash } = await verifyPIN(pinInput.trim(), storedHash, user.uid);
-    
-    if (!valid) {
-      setPinError("Incorrect PIN. Deletion blocked! 🛑");
+    try {
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      const storedHash = userDoc.data()?.security?.pinHash || userDoc.data()?.securityPin || userDoc.data()?.pin;
+      
+      const { valid, newHash } = await verifyPIN(pinInput.trim(), storedHash, user.uid);
+      
+      if (!valid) {
+        setPinError("Incorrect PIN. Deletion blocked!");
+        setIsVerifying(false);
+        return;
+      }
+      
+      if (newHash) {
+        await setDoc(doc(db, "users", user.uid), { security: { pinHash: newHash } }, { merge: true });
+      }
+
+      await deleteDoc(doc(db, "users", user.uid, "billReminders", deleteContext.id));
+
+      const cleanQueries = [
+         { col: "expenseLogs", field: "billId" },
+         { col: "bankWallet", field: "billId" },
+         { col: "cashWallet", field: "billId" },
+         { col: "onlineWallet", field: "billId" },
+         { col: "cryptoWalletLogs", field: "billId" },
+      ];
+
+      for (let q of cleanQueries) {
+         const snaps = await getDocs(query(collection(db, "users", user.uid, q.col), where(q.field, "==", deleteContext.id)));
+         snaps.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, q.col, d.id)));
+      }
+
+      addToast(`Bill "${deleteContext.title}" deleted.`, 'info');
+      setDeleteContext(null); 
+    } catch (error) {
+      setPinError("System error during deletion.");
+    } finally {
       setIsVerifying(false);
-      return;
     }
-    
-    if (newHash) {
-      await setDoc(doc(db, "users", user.uid), { security: { pinHash: newHash } }, { merge: true });
-    }
-
-    await deleteDoc(doc(db, "users", user.uid, "billReminders", deleteContext.id));
-
-    const cleanQueries = [
-       { col: "expenseLogs", field: "billId" },
-       { col: "bankWallet", field: "billId" },
-       { col: "cashWallet", field: "billId" },
-       { col: "onlineWallet", field: "billId" },
-       { col: "cryptoWalletLogs", field: "billId" },
-    ];
-
-    for (let q of cleanQueries) {
-       const snaps = await getDocs(query(collection(db, "users", user.uid, q.col), where(q.field, "==", deleteContext.id)));
-       snaps.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, q.col, d.id)));
-    }
-
-    setDeleteContext(null); 
-  } catch (error) {
-    setPinError("System error during deletion.");
-  } finally {
-    setIsVerifying(false);
-  }
-};
+  };
 
   const openPayModal = (bill) => {
     setActiveBill(bill);
@@ -381,10 +419,32 @@ const BillPayments = () => {
     setIsPayModalOpen(true);
   };
 
+  // Skeleton grid for loading state
+  const SkeletonGrid = () => (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {[1,2,3,4,5,6].map(i => (
+        <div key={i} className="bg-white dark:bg-slate-900 p-6 rounded-[2rem] border border-slate-200 dark:border-slate-700 shadow-sm animate-pulse">
+          <div className="flex justify-between items-start mb-4">
+            <div className="h-6 w-24 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+            <div className="h-8 w-8 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+          </div>
+          <div className="space-y-3">
+            <div className="h-7 w-40 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+            <div className="h-4 w-20 bg-slate-200 dark:bg-slate-700 rounded" />
+          </div>
+          <div className="mt-6 space-y-3">
+            <div className="h-10 w-28 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+            <div className="h-10 w-full bg-slate-200 dark:bg-slate-700 rounded-xl" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <div className="pt-24 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 max-w-7xl mx-auto px-4 md:px-0">
       
-      {/* 🚀 HEADER */}
+      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-4">
         <div>
           <div className="flex items-center gap-3 mb-2">
@@ -404,7 +464,7 @@ const BillPayments = () => {
         </button>
       </div>
 
-      {/* 📊 SUMMARY CARDS */}
+      {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="p-8 bg-gradient-to-br from-slate-900 to-slate-800 rounded-[2rem] shadow-xl relative overflow-hidden border border-slate-800">
           <div className="absolute right-0 top-0 opacity-10 text-white -mt-4 -mr-4"><HiOutlineCreditCard size={150}/></div>
@@ -426,21 +486,15 @@ const BillPayments = () => {
         </div>
       </div>
 
-      {/* 🧾 BILLS GRID */}
+      {/* Bills Grid or Skeleton or Empty */}
       {isLoading ? (
-         <div className="flex flex-col items-center justify-center py-16">
-           <div className="relative">
-             <div className="absolute inset-0 bg-blue-500 rounded-full blur-xl opacity-30 animate-pulse" />
-             <HiOutlineRefresh className="animate-spin text-4xl text-blue-500 relative" />
-           </div>
-           <p className="text-sm font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest mt-4 animate-pulse">Loading Reminders...</p>
-         </div>
+        <SkeletonGrid />
       ) : bills.length === 0 ? (
-         <div className="p-16 text-center bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm">
-           <HiOutlineCalendar className="mx-auto text-6xl text-slate-300 dark:text-slate-700 mb-4" />
-           <h3 className="text-2xl font-black text-slate-700 dark:text-white">No Bills Added</h3>
-           <p className="text-slate-500 font-semibold mt-2">Add your Netflix, Rent, or Credit Card bills to track them here.</p>
-         </div>
+        <div className="p-16 text-center bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm">
+          <HiOutlineCalendar className="mx-auto text-6xl text-slate-300 dark:text-slate-700 mb-4" />
+          <h3 className="text-2xl font-black text-slate-700 dark:text-white">No Bills Added</h3>
+          <p className="text-slate-500 font-semibold mt-2">Add your Netflix, Rent, or Credit Card bills to track them here.</p>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredBills.map((bill) => {
@@ -487,7 +541,7 @@ const BillPayments = () => {
         </div>
       )}
 
-      {/* 🚀 ADD BILL MODAL */}
+      {/* Add Bill Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[500] bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-300 dark:border-slate-700 max-h-[90vh]">
@@ -561,7 +615,7 @@ const BillPayments = () => {
         </div>
       )}
 
-      {/* 💸 PAY BILL MODAL */}
+      {/* Pay Bill Modal */}
       {isPayModalOpen && activeBill && (
         <div className="fixed inset-0 z-[500] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden border border-slate-300 dark:border-slate-700 max-h-[90vh]">
@@ -626,7 +680,6 @@ const BillPayments = () => {
                   </div>
                 )}
 
-                {/* 🚀 DYNAMIC CRYPTO DATALIST FIX APPLIED HERE */}
                 {payData.sourceVault === 'crypto' && (
                   <div className="space-y-2 animate-in fade-in">
                     <label className="text-[11px] font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-widest ml-1">Platform</label>
@@ -734,7 +787,7 @@ const BillPayments = () => {
         </div>
       )}
 
-      {/* 🔐 SECURE DELETE BILL MODAL */}
+      {/* Delete Confirmation Modal */}
       {deleteContext && (
         <div className="fixed inset-0 z-[600] bg-slate-950/90 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl p-8 border border-slate-300 dark:border-slate-800 relative overflow-hidden flex flex-col max-h-[90vh]">
@@ -746,7 +799,6 @@ const BillPayments = () => {
               </div>
               <h3 className="text-2xl font-black text-slate-900 dark:text-white">Security Check</h3>
               
-              {/* ⚠️ DYNAMIC WARNING FOR PAID VS UNPAID */}
               {deleteContext.lastPaidDate || deleteContext.isPaid ? (
                 <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700/50 rounded-xl shadow-sm">
                   <p className="text-xs font-black text-amber-800 dark:text-amber-400 flex items-start gap-1 text-left">
@@ -792,9 +844,14 @@ const BillPayments = () => {
           </div>
         </div>
       )}
-
     </div>
   );
 };
+
+const BillPayments = () => (
+  <ToastProvider>
+    <BillPaymentsContent />
+  </ToastProvider>
+);
 
 export default BillPayments;

@@ -1,19 +1,18 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+// src/pages/Dashboard.jsx
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { collection, onSnapshot, query, getDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
-
+import { calcVaultBalance } from '../utils/balanceEngine';
+import { useCryptoPrice } from '../context/CryptoPriceContext';
 import { 
   HiOutlineTrendingUp, HiOutlineTrendingDown, HiOutlineLibrary,
-  HiOutlineGlobe, HiOutlinePlusCircle, 
-  HiOutlineRefresh, HiOutlineChartPie, 
+  HiOutlineGlobe, HiOutlineRefresh, HiOutlineChartPie, 
   HiOutlineArrowUp, HiOutlineArrowDown, HiOutlineClock,
   HiOutlineChevronRight, HiOutlinePlus
 } from 'react-icons/hi';
-
-// 🚀 FIXED: Added FaHistory and FaChartPie here to prevent the crash!
 import { 
   FaWallet, FaBolt, FaTrophy, 
   FaPiggyBank, FaSun, FaMoon, FaCloudSun, FaGem, FaChartLine,
@@ -21,7 +20,6 @@ import {
   FaHandHoldingUsd, FaHandHoldingHeart, FaShoppingCart, FaBriefcase,
   FaHistory, FaChartPie 
 } from 'react-icons/fa';
-
 import { fiatFlagMap } from '../utils/marketConstants';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1', '#ec4899', '#14b8a6', '#f97316', '#06b6d4'];
@@ -30,19 +28,6 @@ const GRADIENTS = {
   income: 'from-emerald-500 to-teal-600',
   expense: 'from-rose-500 to-pink-600',
   savings: 'from-blue-600 to-indigo-700'
-};
-
-const fetchWithRetry = async (url, retries = 2) => {
-  for (let i = 0; i <= retries; i++) {
-    try {
-      const res = await fetch(url);
-      if (res.status !== 429) return res;
-      if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
-    } catch (e) {
-      if (i === retries) return null;
-    }
-  }
-  return null; 
 };
 
 const StatCard = ({ title, value, icon: Icon, gradient, trend, trendValue, subtitle, onClick }) => (
@@ -140,7 +125,6 @@ const MarketCard = ({ item, baseCurrency, currencySymbol }) => {
     </div>
   );
 };
-
 const Dashboard = () => {
   const { user, baseCurrency = 'INR', selectedCryptos = [], selectedFiats = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
@@ -151,7 +135,6 @@ const Dashboard = () => {
   const [cashTotal, setCashTotal] = useState(0);
   const [onlineTotal, setOnlineTotal] = useState(0);
   
-  const [oldCryptoHoldings, setOldCryptoHoldings] = useState([]);
   const [cryptoTransactions, setCryptoTransactions] = useState([]); 
   const [customUserCoins, setCustomUserCoins] = useState([]); 
   
@@ -162,15 +145,15 @@ const Dashboard = () => {
   const [khataPayables, setKhataPayables] = useState(0);
 
   const [marketData, setMarketData] = useState([]);
-  const [livePrices, setLivePrices] = useState({});
-  const [fiatRate, setFiatRate] = useState(1);
-  const [isMarketLoading, setIsMarketLoading] = useState(true);
   
   const [greeting, setGreeting] = useState('');
   const [greetingIcon, setGreetingIcon] = useState(null);
 
   const [rawIncomes, setRawIncomes] = useState([]);
   const [rawExpenses, setRawExpenses] = useState([]);
+
+  // ✅ Global Crypto Price Context – सिर्फ एक बार, सीधे कम्पोनेंट में
+  const { livePrices, fiatRate, isLoading: isMarketLoading } = useCryptoPrice();
 
   const hasCrypto = selectedCryptos && selectedCryptos.length > 0;
   const hasForex = selectedFiats && selectedFiats.filter(f => f !== baseCurrency).length > 0;
@@ -193,13 +176,19 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (!user) return;
-    const calcVaultBalance = (snapshot) => snapshot.docs.reduce((acc, doc) => acc + (doc.data().type === 'in' ? Number(doc.data().finalBaseAmount || doc.data().amount || 0) : -Number(doc.data().finalBaseAmount || doc.data().amount || 0)), 0);
+    const unsubBank = onSnapshot(collection(db, "users", user.uid, "bankWallet"), snap => {
+      const txs = snap.docs.map(doc => doc.data());
+      setBankTotal(calcVaultBalance(txs).balance);
+    });
+    const unsubCash = onSnapshot(collection(db, "users", user.uid, "cashWallet"), snap => {
+      const txs = snap.docs.map(doc => doc.data());
+      setCashTotal(calcVaultBalance(txs).balance);
+    });
+    const unsubOnline = onSnapshot(collection(db, "users", user.uid, "onlineWallet"), snap => {
+      const txs = snap.docs.map(doc => doc.data());
+      setOnlineTotal(calcVaultBalance(txs).balance);
+    });
 
-    const unsubBank = onSnapshot(collection(db, "users", user.uid, "bankWallet"), snap => setBankTotal(calcVaultBalance(snap)));
-    const unsubCash = onSnapshot(collection(db, "users", user.uid, "cashWallet"), snap => setCashTotal(calcVaultBalance(snap)));
-    const unsubOnline = onSnapshot(collection(db, "users", user.uid, "onlineWallet"), snap => setOnlineTotal(calcVaultBalance(snap)));
-    
-    const unsubOldCrypto = onSnapshot(collection(db, "users", user.uid, "cryptoWallet"), snap => setOldCryptoHoldings(snap.docs.map(doc => doc.data())));
     const unsubCryptoLogs = onSnapshot(collection(db, "users", user.uid, "cryptoWalletLogs"), snap => setCryptoTransactions(snap.docs.map(doc => doc.data())));
 
     const unsubIncome = onSnapshot(collection(db, "users", user.uid, "incomeLogs"), snap => {
@@ -227,7 +216,15 @@ const Dashboard = () => {
       setKhataReceivables(rec); setKhataPayables(pay);
     });
 
-    return () => { unsubBank(); unsubCash(); unsubOnline(); unsubOldCrypto(); unsubCryptoLogs(); unsubIncome(); unsubExpense(); unsubParties(); };
+    return () => {
+      unsubBank();
+      unsubCash();
+      unsubOnline();
+      unsubCryptoLogs();
+      unsubIncome();
+      unsubExpense();
+      unsubParties();
+    };
   }, [user]);
 
   const fullDatabase = useMemo(() => {
@@ -238,107 +235,51 @@ const Dashboard = () => {
   }, [customUserCoins, selectedCryptos]);
 
   const unifiedCryptoHoldings = useMemo(() => {
-    const vault = {};
-    oldCryptoHoldings.forEach(item => { const sym = (item.symbol || item.coin || '').toUpperCase(); if (!sym) return; if (!vault[sym]) vault[sym] = { total: 0 }; vault[sym].total += Number(item.amount || item.balance || 0); });
-    cryptoTransactions.forEach(t => { const sym = (t.coin || '').toUpperCase(); if (!sym) return; if (!vault[sym]) vault[sym] = { total: 0 }; const qty = parseFloat(t.quantity) || 0; const fee = parseFloat(t.networkFee) || 0; if (t.type === 'in') vault[sym].total += qty; else if (t.type === 'out') vault[sym].total -= qty; else if (t.type === 'transfer') vault[sym].total -= fee; });
-    Object.keys(vault).forEach(sym => { if (vault[sym].total <= 0.00000001) delete vault[sym]; });
-    return vault;
-  }, [oldCryptoHoldings, cryptoTransactions]);
+    const holdings = {};
+    cryptoTransactions.forEach(tx => {
+      const coin = tx.coin?.toUpperCase();
+      if (!coin) return;
+      const qty = parseFloat(tx.quantity) || 0;
+      const fee = parseFloat(tx.fee || tx.networkFee) || 0;
+      const totalQty = parseFloat(tx.totalQuantity) || (qty + fee);
+      if (!holdings[coin]) holdings[coin] = 0;
+      if (tx.type === 'in') holdings[coin] += qty;
+      else if (tx.type === 'out') holdings[coin] -= totalQty;
+      else if (tx.type === 'transfer') holdings[coin] -= fee;
+    });
+    Object.keys(holdings).forEach(coin => {
+      if (holdings[coin] <= 0.00000001) delete holdings[coin];
+    });
+    return holdings;
+  }, [cryptoTransactions]);
 
-  const fetchMarketData = useCallback(async () => {
-    if (!hasCrypto && !hasForex) { setIsMarketLoading(false); return; }
-    setIsMarketLoading(true);
-    let usdToBase = 1; let forexDataRaw = null;
+  // ❌ fetchMarketData और उससे जुड़ा useEffect पूरी तरह हटा दिया गया
 
-    try {
-      const forexRes = await fetchWithRetry('https://api.exchangerate-api.com/v4/latest/USD');
-      if (forexRes && forexRes.ok) { forexDataRaw = await forexRes.json(); usdToBase = parseFloat(forexDataRaw.rates[baseCurrency]) || 1; setFiatRate(usdToBase); }
-    } catch (error) {}
-
-    const watchlistSymbols = selectedCryptos.map(c => typeof c === 'string' ? c : c.symbol).filter(Boolean);
-    const coinsToFetch = Array.from(new Set([...Object.keys(unifiedCryptoHoldings), ...watchlistSymbols, 'USDT']));
-
-    if (coinsToFetch.length > 0) {
-      let cgJson = {}; const normalCoins = []; const contractCoins = [];
-
-      coinsToFetch.forEach(sym => {
-        const dbCoin = fullDatabase.find(c => c.symbol === sym.toUpperCase()) || { symbol: sym.toUpperCase(), id: sym.toLowerCase() };
-        if (dbCoin.fetchMode === 'contract' && dbCoin.contractAddress) contractCoins.push(dbCoin); else normalCoins.push(dbCoin.id || sym.toLowerCase());
-      });
-
-      try {
-        if (normalCoins.length > 0) {
-          const uniqueIds = [...new Set(normalCoins)].join(',');
-          const cgRes = await fetchWithRetry(`https://api.coingecko.com/api/v3/simple/price?ids=${uniqueIds}&vs_currencies=usd&include_24hr_change=true`);
-          if (cgRes && cgRes.ok) cgJson = await cgRes.json();
-        }
-      } catch (error) {}
-
-      let customApiJson = {};
-      await Promise.all(contractCoins.map(async (coin) => {
-        try {
-            const network = coin.network || 'bsc';
-            const gtRes = await fetchWithRetry(`https://api.geckoterminal.com/api/v2/networks/${network}/tokens/${coin.contractAddress}`);
-            if (gtRes && gtRes.ok) {
-                const gtData = await gtRes.json();
-                customApiJson[coin.symbol] = { usd: parseFloat(gtData?.data?.attributes?.price_usd || 0), usd_24h_change: parseFloat(gtData?.data?.attributes?.price_change_percentage?.h24 || 0) };
-            } else {
-                const dexRes = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${coin.contractAddress}`);
-                if (dexRes && dexRes.ok) {
-                    const dexData = await dexRes.json();
-                    if (dexData.pairs?.length > 0) customApiJson[coin.symbol] = { usd: parseFloat(dexData.pairs[0].priceUsd || 0), usd_24h_change: parseFloat(dexData.pairs[0].priceChange?.h24 || 0) };
-                }
-            }
-        } catch(e) {}
-      }));
-
-      const priceMap = {}; let newMarketData = [];
-      await Promise.all(coinsToFetch.map(async (sym) => {
-        const upperSym = sym.toUpperCase();
-        const dbCoin = fullDatabase.find(c => c.symbol === upperSym) || { symbol: upperSym, id: sym.toLowerCase() };
-        const searchId = dbCoin.id || upperSym.toLowerCase();
-        const fallback = dbCoin.fallbackPrice ? parseFloat(dbCoin.fallbackPrice) : 0;
-        let priceUsd = 0; let changePercent = 0;
-
-        if (customApiJson[upperSym] && customApiJson[upperSym].usd > 0) { priceUsd = customApiJson[upperSym].usd; changePercent = customApiJson[upperSym].usd_24h_change; } 
-        else if (cgJson[searchId] && cgJson[searchId].usd > 0) { priceUsd = cgJson[searchId].usd; changePercent = cgJson[searchId].usd_24h_change; } 
-        else if (fallback > 0) { priceUsd = fallback; }
-        
-        priceMap[upperSym] = { priceUSD: priceUsd, change: changePercent };
-        if (watchlistSymbols.includes(upperSym) || (upperSym === 'USDT' && watchlistSymbols.length > 0)) {
-          newMarketData.push({ symbol: upperSym, type: 'crypto', priceUSD: priceUsd, priceBase: priceUsd * usdToBase, change: changePercent, customLogo: dbCoin.logo });
-        }
-      }));
-      setLivePrices(priceMap);
-
-      if (selectedFiats && selectedFiats.length > 0 && forexDataRaw) {
-         selectedFiats.forEach(fiat => {
-           if (fiat !== baseCurrency) { 
-             const rateToUsd = forexDataRaw.rates[fiat];
-             if(rateToUsd) {
-               const priceInUsd = 1 / rateToUsd;
-               const priceInBase = priceInUsd * usdToBase;
-               newMarketData.push({ symbol: fiat, type: 'fiat', priceUSD: priceInUsd, priceBase: priceInBase, change: (Math.random() * 0.4 - 0.2) });
-             }
-           }
-         });
-      }
-      setMarketData(Array.from(new Map(newMarketData.map(item => [item.symbol, item])).values()));
-    }
-    setIsMarketLoading(false);
-  }, [unifiedCryptoHoldings, selectedCryptos, baseCurrency, fullDatabase, selectedFiats, hasCrypto, hasForex]);
-
+  // ✅ बिना API कॉल के marketData बनाएँ (context की कीमतों से)
   useEffect(() => {
-    if (!isLoading && fullDatabase.length > 0 && (hasCrypto || hasForex)) { 
-      fetchMarketData(); const interval = setInterval(fetchMarketData, 60000); return () => clearInterval(interval); 
-    }
-  }, [isLoading, fullDatabase, fetchMarketData, hasCrypto, hasForex]);
+    const watchlistSymbols = selectedCryptos.map(c => typeof c === 'string' ? c.toUpperCase() : c.symbol.toUpperCase());
+    const newMarketData = [];
+    Object.entries(livePrices).forEach(([sym, data]) => {
+      if (watchlistSymbols.includes(sym) || (sym === 'USDT' && watchlistSymbols.length > 0)) {
+        const dbCoin = fullDatabase.find(c => c.symbol === sym) || {};
+        newMarketData.push({
+          symbol: sym,
+          type: 'crypto',
+          priceUSD: data.priceUSD,
+          priceBase: data.priceUSD * fiatRate,
+          change: data.change,
+          customLogo: dbCoin.logo
+        });
+      }
+    });
+    setMarketData(newMarketData);
+  }, [livePrices, fiatRate, selectedCryptos, fullDatabase]);
 
   const cryptoTotal = useMemo(() => {
     if (Object.keys(unifiedCryptoHoldings).length === 0) return 0;
     return Object.entries(unifiedCryptoHoldings).reduce((sum, [coin, data]) => {
       const priceUSD = livePrices[coin.toUpperCase()]?.priceUSD || 0;
-      return sum + (data.total * priceUSD * fiatRate);
+      return sum + (data * priceUSD * fiatRate);
     }, 0);
   }, [unifiedCryptoHoldings, livePrices, fiatRate]);
 

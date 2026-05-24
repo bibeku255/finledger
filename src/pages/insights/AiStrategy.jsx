@@ -1,9 +1,11 @@
+// src/pages/insights/AiStrategy.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { collection, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
+import { calcVaultBalance } from '../../utils/balanceEngine';
+import { useCryptoPrice } from '../../context/CryptoPriceContext';
 import { useNavigate } from 'react-router-dom';
-import { fetchWithRetry } from '../../utils/helpers';
 import {
   HiOutlineLightBulb, HiOutlineShieldCheck, HiOutlineTrendingUp,
   HiOutlineExclamation, HiOutlineChartPie, HiOutlineRefresh,
@@ -122,15 +124,16 @@ const AiStrategy = () => {
   const [onlineBalance, setOnlineBalance] = useState(0);
   const [cryptoBalance, setCryptoBalance] = useState(0);
   const [dataLoaded, setDataLoaded] = useState(false);
+  const [stakedFiatValue, setStakedFiatValue] = useState(0);  // 🆕
 
   const [forceUpdate, setForceUpdate] = useState(0);
 
   const [strategyData, setStrategyData] = useState(null);
-
-  // Custom user coins (for fallback prices)
   const [customUserCoins, setCustomUserCoins] = useState([]);
 
-  // Build full database (selectedCryptos + customUserCoins)
+  // ✅ Global Crypto Price Context
+  const { livePrices, fiatRate } = useCryptoPrice();
+
   const fullDatabase = useMemo(() => {
     const coinMap = new Map();
     selectedCryptos.forEach(c => {
@@ -144,7 +147,6 @@ const AiStrategy = () => {
     return Array.from(coinMap.values());
   }, [customUserCoins, selectedCryptos]);
 
-  // Fetch custom coins from Firestore
   useEffect(() => {
     if (!user) return;
     const fetchCustomCoins = async () => {
@@ -156,172 +158,80 @@ const AiStrategy = () => {
     fetchCustomCoins();
   }, [user]);
 
-  // Real-time data listeners
   useEffect(() => {
     if (!user) return;
 
-    const calcVaultBalance = (snapshot) => {
-      return snapshot.docs.reduce((acc, doc) => {
-        const data = doc.data();
-        let finalAmount = Number(data.finalBaseAmount || data.amount || 0);
-        let feeAmount = data.fee ? (data.feeExchangeRate ? Number(data.fee) * Number(data.feeExchangeRate) : data.exchangeRate ? Number(data.fee) * Number(data.exchangeRate) : Number(data.fee)) : 0;
-        return acc + (data.type === 'in' ? finalAmount : -(finalAmount + feeAmount));
-      }, 0);
-    };
+    // --- Fiat vaults ---
+    const unsubBank = onSnapshot(collection(db, "users", user.uid, "bankWallet"), snap => {
+      const txs = snap.docs.map(doc => doc.data());
+      setBankBalance(calcVaultBalance(txs).balance);
+    });
+    const unsubCash = onSnapshot(collection(db, "users", user.uid, "cashWallet"), snap => {
+      const txs = snap.docs.map(doc => doc.data());
+      setCashBalance(calcVaultBalance(txs).balance);
+    });
+    const unsubOnline = onSnapshot(collection(db, "users", user.uid, "onlineWallet"), snap => {
+      const txs = snap.docs.map(doc => doc.data());
+      setOnlineBalance(calcVaultBalance(txs).balance);
+    });
 
-    // Robust crypto balance calculation (same logic as CryptoWallet)
-    const fetchCryptoFiatValue = async (cryptoSnapshot) => {
-      // 1. Calculate holdings per coin
+    // --- Crypto balance ---
+    const fetchCryptoFiatValue = (cryptoSnapshot) => {
       const holdings = {};
       cryptoSnapshot.docs.forEach(doc => {
         const d = doc.data();
         const coin = d.coin?.toUpperCase();
         if (!coin) return;
         const qty = parseFloat(d.quantity) || 0;
-        const fee = parseFloat(d.networkFee) || 0;
-
-        if (d.type === 'in') {
-          holdings[coin] = (holdings[coin] || 0) + qty;
-        } else if (d.type === 'out') {
-          holdings[coin] = (holdings[coin] || 0) - qty;
-        } else if (d.type === 'transfer') {
-          // transfer reduces total holdings by network fee
-          holdings[coin] = (holdings[coin] || 0) - fee;
-        }
+        const fee = parseFloat(d.fee || d.networkFee) || 0;
+        const totalQty = parseFloat(d.totalQuantity) || (qty + fee);
+        if (d.type === 'in') holdings[coin] = (holdings[coin] || 0) + qty;
+        else if (d.type === 'out') holdings[coin] = (holdings[coin] || 0) - totalQty;
+        else if (d.type === 'transfer') holdings[coin] = (holdings[coin] || 0) - fee;
       });
-
-      // 2. Base currency rate
-      let usdToBase = 1;
-      try {
-        const forexRes = await fetchWithRetry('https://api.exchangerate-api.com/v4/latest/USD');
-        if (forexRes && forexRes.ok) {
-          usdToBase = parseFloat((await forexRes.json()).rates[baseCurrency]) || 1;
-        }
-      } catch (e) {}
-
-      const coinsToFetch = Object.keys(holdings);
-      if (coinsToFetch.length === 0) {
-        setCryptoBalance(0);
-        return;
-      }
-
-      // 3. Separate normal coins and contract coins
-      const normalCoins = [];
-      const contractCoins = [];
-      coinsToFetch.forEach(sym => {
-        const upperSym = sym.toUpperCase();
-        const dbCoin = fullDatabase.find(c => c.symbol.toUpperCase() === upperSym);
-        if (dbCoin?.fetchMode === 'contract' && dbCoin.contractAddress) {
-          contractCoins.push({ symbol: upperSym, ...dbCoin });
-        } else {
-          const id = dbCoin?.id || sym.toLowerCase();
-          normalCoins.push({ id, symbol: upperSym });
-        }
-      });
-
-      // 4. Fetch CoinGecko prices for normal coins
-      let cgPrices = {};
-      try {
-        if (normalCoins.length > 0) {
-          const uniqueIds = [...new Set(normalCoins.map(c => c.id))].join(',');
-          const cgRes = await fetchWithRetry(`https://api.coingecko.com/api/v3/simple/price?ids=${uniqueIds}&vs_currencies=usd`);
-          if (cgRes && cgRes.ok) {
-            cgPrices = await cgRes.json();
-          }
-        }
-      } catch (e) {}
-
-      // 5. Fetch prices for contract coins (DexScreener / GeckoTerminal)
-      let contractPrices = {};
-      for (const coin of contractCoins) {
-        let priceUsd = 0;
-        try {
-          const dexRes = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${coin.contractAddress}`);
-          if (dexRes && dexRes.ok) {
-            const dexData = await dexRes.json();
-            if (dexData.pairs?.length > 0) {
-              priceUsd = parseFloat(dexData.pairs[0].priceUsd);
-            }
-          }
-          if (!priceUsd && coin.network) {
-            const gtRes = await fetchWithRetry(`https://api.geckoterminal.com/api/v2/networks/${coin.network}/tokens/${coin.contractAddress}`);
-            if (gtRes && gtRes.ok) {
-              const gtData = await gtRes.json();
-              priceUsd = parseFloat(gtData.data?.attributes?.price_usd) || 0;
-            }
-          }
-        } catch (e) {}
-        contractPrices[coin.symbol] = priceUsd;
-      }
-
-      // 6. Build final price map with fallbacks
-      const priceMap = {};
-      for (const sym of coinsToFetch) {
-        const upperSym = sym.toUpperCase();
-        const dbCoin = fullDatabase.find(c => c.symbol.toUpperCase() === upperSym) || {};
-        const normalId = dbCoin.id || sym.toLowerCase();
-        let priceUsd = 0;
-
-        if (dbCoin.fetchMode === 'contract') {
-          priceUsd = contractPrices[upperSym] || 0;
-        } else {
-          // CoinGecko
-          if (cgPrices[normalId]?.usd) {
-            priceUsd = parseFloat(cgPrices[normalId].usd);
-          }
-        }
-
-        // Binance fallback
-        if (!priceUsd) {
-          try {
-            if (['USDT', 'USDC', 'DAI', 'BUSD'].includes(upperSym)) {
-              priceUsd = 1.00;
-            } else {
-              const bRes = await fetchWithRetry(`https://api.binance.com/api/v3/ticker/price?symbol=${upperSym}USDT`);
-              if (bRes && bRes.ok) {
-                const bData = await bRes.json();
-                priceUsd = parseFloat(bData.price);
-              }
-            }
-          } catch (e) {}
-        }
-
-        // Fallback to user's custom fallbackPrice
-        if (!priceUsd && dbCoin.fallbackPrice) {
-          priceUsd = parseFloat(dbCoin.fallbackPrice);
-        }
-
-        priceMap[upperSym] = priceUsd;
-      }
-
-      // 7. Calculate total fiat value
       let totalValue = 0;
-      for (const sym of coinsToFetch) {
-        const qty = holdings[sym] || 0;
-        const priceUsd = priceMap[sym] || 0;
-        if (qty > 0 && priceUsd > 0) {
-          totalValue += qty * priceUsd * usdToBase;
-        }
+      for (const [coin, qty] of Object.entries(holdings)) {
+        if (qty <= 0) continue;
+        const priceUSD = livePrices[coin]?.priceUSD || 0;
+        if (priceUSD > 0) totalValue += qty * priceUSD * fiatRate;
       }
       setCryptoBalance(totalValue);
     };
 
-    const unsubs = [
-      onSnapshot(collection(db, "users", user.uid, "bankWallet"), snap => setBankBalance(calcVaultBalance(snap))),
-      onSnapshot(collection(db, "users", user.uid, "cashWallet"), snap => setCashBalance(calcVaultBalance(snap))),
-      onSnapshot(collection(db, "users", user.uid, "onlineWallet"), snap => setOnlineBalance(calcVaultBalance(snap))),
-      onSnapshot(collection(db, "users", user.uid, "cryptoWalletLogs"), snap => fetchCryptoFiatValue(snap))
-    ];
+    const unsubCrypto = onSnapshot(collection(db, "users", user.uid, "cryptoWalletLogs"), snap => fetchCryptoFiatValue(snap));
+
+    // 🆕 --- Staking TVL ---
+    const unsubStaking = onSnapshot(collection(db, "users", user.uid, "stakingLogs"), (snap) => {
+      let tvl = 0;
+      snap.docs.forEach(doc => {
+        const d = doc.data();
+        const coin = d.coin;
+        const principal = parseFloat(d.principalAmount) || 0;
+        const priceUSD = livePrices[coin?.toUpperCase()]?.priceUSD || 0;
+        tvl += principal * priceUSD * fiatRate;
+
+        if (d.earningType === 'pool') {
+          const coin2 = d.poolCoin2;
+          const principal2 = parseFloat(d.poolPrincipal2) || 0;
+          const price2USD = livePrices[coin2?.toUpperCase()]?.priceUSD || 0;
+          tvl += principal2 * price2USD * fiatRate;
+        }
+      });
+      setStakedFiatValue(tvl);
+    });
 
     const timeout = setTimeout(() => setDataLoaded(true), 1200);
 
     return () => {
-      unsubs.forEach(unsub => unsub());
+      unsubBank();
+      unsubCash();
+      unsubOnline();
+      unsubCrypto();
+      unsubStaking();
       clearTimeout(timeout);
     };
-  }, [user, baseCurrency, fullDatabase]); // fullDatabase dependency ensures re-run when custom coins load
+  }, [user, baseCurrency, fullDatabase, livePrices, fiatRate]);
 
-  // Progress animation
   useEffect(() => {
     if (!isAnalyzing) return;
     const interval = setInterval(() => {
@@ -333,9 +243,8 @@ const AiStrategy = () => {
     return () => clearInterval(interval);
   }, [isAnalyzing]);
 
-  // Main analysis effect
   useEffect(() => {
-    const hasData = bankBalance !== 0 || cashBalance !== 0 || cryptoBalance !== 0 || onlineBalance !== 0;
+    const hasData = bankBalance !== 0 || cashBalance !== 0 || cryptoBalance !== 0 || onlineBalance !== 0 || stakedFiatValue !== 0;
     if (!dataLoaded) return;
 
     const timer = setTimeout(() => {
@@ -346,6 +255,7 @@ const AiStrategy = () => {
       }
 
       const totalFiat = bankBalance + cashBalance + onlineBalance;
+      const nonStakedCrypto = Math.max(0, cryptoBalance - stakedFiatValue);
       const totalPortfolio = totalFiat + cryptoBalance;
 
       if (totalPortfolio <= 0) {
@@ -355,8 +265,8 @@ const AiStrategy = () => {
       }
 
       let fiatPct = Math.round((totalFiat / totalPortfolio) * 100);
-      let cryptoPct = Math.round((cryptoBalance / totalPortfolio) * 100);
-      let yieldPct = Math.max(0, 100 - fiatPct - cryptoPct);
+      let cryptoPct = Math.round((nonStakedCrypto / totalPortfolio) * 100);
+      let yieldPct = Math.round((stakedFiatValue / totalPortfolio) * 100);
 
       let risk = 'Safe';
       let score = 85;
@@ -370,40 +280,40 @@ const AiStrategy = () => {
       const plan = [];
 
       if (fiatPct > 70) {
-        plan.push({ id: 1, type: 'opportunity', icon: <HiOutlineTrendingUp className="text-emerald-500" size={24} />, title: "Idle Cash Alert", desc: `${currencySymbol}${totalFiat.toLocaleString(undefined, { maximumFractionDigits: 0 })} in fiat vaults. Inflation at ~5-7% erodes value. Shift 20-30% to stablecoins or high-yield deposits.`, actionText: "Rebalance Capital", link: "/dashboard/accounts/capital-shifting" });
+        plan.push({ id: 1, type: 'opportunity', title: "Idle Cash Alert", desc: `${currencySymbol}${totalFiat.toLocaleString(undefined, { maximumFractionDigits: 0 })} in fiat vaults. Inflation at ~5-7% erodes value. Shift 20-30% to stablecoins or high-yield deposits.`, actionText: "Rebalance Capital", link: "/dashboard/accounts/capital-shifting" });
       } else if (fiatPct < 20 && totalFiat <= 5000) {
-        plan.push({ id: 1, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" size={24} />, title: "Low Emergency Fund", desc: "Emergency fund below recommended 3-6 months expenses. Prioritize building cash reserves before aggressive investing.", actionText: "Add Emergency Fund", link: "/dashboard/accounts/bank" });
+        plan.push({ id: 1, type: 'risk', title: "Low Emergency Fund", desc: "Emergency fund below recommended 3-6 months expenses. Prioritize building cash reserves before aggressive investing.", actionText: "Add Emergency Fund", link: "/dashboard/accounts/bank" });
       } else {
-        plan.push({ id: 1, type: 'health', icon: <HiOutlineShieldCheck className="text-blue-500" size={24} />, title: "Healthy Cash Position", desc: `Fiat reserves at ${fiatPct}% — strong safety net for emergencies while maintaining investment exposure.`, actionText: "View Bank Vault", link: "/dashboard/accounts/bank" });
+        plan.push({ id: 1, type: 'health', title: "Healthy Cash Position", desc: `Fiat reserves at ${fiatPct}% — strong safety net for emergencies while maintaining investment exposure.`, actionText: "View Bank Vault", link: "/dashboard/accounts/bank" });
       }
 
       if (cryptoPct > 50) {
-        plan.push({ id: 2, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" size={24} />, title: "Overexposed to Crypto", desc: `${cryptoPct}% in volatile assets. Consider profit-booking 15-25% into stablecoins or fiat to reduce drawdown risk.`, actionText: "Book Profits", link: "/dashboard/crypto/hold-and-swap" });
+        plan.push({ id: 2, type: 'risk', title: "Overexposed to Crypto", desc: `${cryptoPct}% in volatile assets. Consider profit-booking 15-25% into stablecoins or fiat to reduce drawdown risk.`, actionText: "Book Profits", link: "/dashboard/crypto/hold-and-swap" });
       } else if (cryptoPct > 0 && cryptoPct <= 35) {
-        plan.push({ id: 2, type: 'growth', icon: <FaLeaf className="text-purple-500" size={24} />, title: "Optimize Crypto Holdings", desc: "Balanced exposure. Explore staking (4-12% APY) or DeFi yield opportunities on idle tokens for passive income.", actionText: "Explore Yield Options", link: "/dashboard/crypto/staking-yield" });
+        plan.push({ id: 2, type: 'growth', title: "Optimize Crypto Holdings", desc: "Balanced exposure. Explore staking (4-12% APY) or DeFi yield opportunities on idle tokens for passive income.", actionText: "Explore Yield Options", link: "/dashboard/crypto/staking-yield" });
       } else if (cryptoPct === 0) {
-        plan.push({ id: 2, type: 'opportunity', icon: <FaChartLine className="text-emerald-500" size={24} />, title: "Zero Crypto Exposure", desc: "2-5% in BTC/ETH hedges against fiat inflation & currency devaluation. Start small with dollar-cost averaging.", actionText: "Start Crypto Journey", link: "/dashboard/crypto/hold-and-swap" });
+        plan.push({ id: 2, type: 'opportunity', title: "Zero Crypto Exposure", desc: "2-5% in BTC/ETH hedges against fiat inflation & currency devaluation. Start small with dollar-cost averaging.", actionText: "Start Crypto Journey", link: "/dashboard/crypto/hold-and-swap" });
       } else {
-        plan.push({ id: 2, type: 'health', icon: <HiOutlineScale className="text-blue-500" size={24} />, title: "Balanced Crypto Exposure", desc: `${cryptoPct}% allocation is within optimal range for growth-oriented portfolios. Monitor quarterly.`, actionText: "Track Portfolio", link: "/dashboard/crypto/hold-and-swap" });
+        plan.push({ id: 2, type: 'health', title: "Balanced Crypto Exposure", desc: `${cryptoPct}% allocation is within optimal range for growth-oriented portfolios. Monitor quarterly.`, actionText: "Track Portfolio", link: "/dashboard/crypto/hold-and-swap" });
       }
 
-      plan.push({ id: 3, type: 'health', icon: <HiOutlineChartPie className="text-indigo-500" size={24} />, title: "Portfolio Health Check", desc: `Total tracked: ${currencySymbol}${totalPortfolio.toLocaleString(undefined, { maximumFractionDigits: 0 })}. Score: ${score}/100. ${score >= 80 ? 'Great job!' : score >= 60 ? 'Room for improvement.' : 'Needs immediate attention.'}`, actionText: "Full Audit Report", link: "/dashboard/accounts/history" });
+      plan.push({ id: 3, type: 'health', title: "Portfolio Health Check", desc: `Total tracked: ${currencySymbol}${totalPortfolio.toLocaleString(undefined, { maximumFractionDigits: 0 })}. Score: ${score}/100. ${score >= 80 ? 'Great job!' : score >= 60 ? 'Room for improvement.' : 'Needs immediate attention.'}`, actionText: "Full Audit Report", link: "/dashboard/accounts/history" });
 
       setStrategyData({
         optimizationScore: score, riskLevel: risk, allocations: { fiat: fiatPct, crypto: cryptoPct, yield: yieldPct },
-        totalPortfolio, totalFiat, cryptoBalance, actionPlan: plan
+        totalPortfolio, totalFiat, cryptoBalance, stakedFiatValue, nonStakedCrypto, actionPlan: plan
       });
 
       setIsAnalyzing(false);
     }, 2000);
 
     return () => clearTimeout(timer);
-  }, [bankBalance, cashBalance, cryptoBalance, onlineBalance, currencySymbol, dataLoaded, forceUpdate]);
+  }, [bankBalance, cashBalance, cryptoBalance, onlineBalance, stakedFiatValue, currencySymbol, dataLoaded, forceUpdate]);
 
   const generateEmptyStrategy = () => ({
     optimizationScore: 0, riskLevel: 'N/A', allocations: { fiat: 0, crypto: 0, yield: 0 },
-    totalPortfolio: 0, totalFiat: 0, cryptoBalance: 0,
-    actionPlan: [{ id: 1, type: 'risk', icon: <HiOutlineExclamation className="text-rose-500" size={24} />, title: "No Financial Data Found", desc: `J.A.R.V.I.S requires transaction data to analyze. Add your first deposit to Bank, Cash, or Crypto vaults to unlock personalized AI insights and portfolio optimization strategies.`, actionText: "Add First Deposit", link: "/dashboard/accounts/bank" }]
+    totalPortfolio: 0, totalFiat: 0, cryptoBalance: 0, stakedFiatValue: 0, nonStakedCrypto: 0,
+    actionPlan: [{ id: 1, type: 'risk', title: "No Financial Data Found", desc: `J.A.R.V.I.S requires transaction data to analyze. Add your first deposit to Bank, Cash, or Crypto vaults to unlock personalized AI insights and portfolio optimization strategies.`, actionText: "Add First Deposit", link: "/dashboard/accounts/bank" }]
   });
 
   const reAnalyze = () => {
@@ -506,8 +416,8 @@ const AiStrategy = () => {
           </div>
           <div className="space-y-6 sm:space-y-8 relative z-10">
             <ProgressBar label="Fiat & Cash Reserves" icon={FaWallet} value={strategyData?.allocations?.fiat || 0} color="bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]" bgColor="bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20" amount={strategyData?.totalFiat ? `${currencySymbol}${strategyData.totalFiat.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : undefined} />
-            <ProgressBar label="Digital Assets (Crypto)" icon={FaChartLine} value={strategyData?.allocations?.crypto || 0} color="bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.5)]" bgColor="bg-orange-50 dark:bg-orange-500/10 border border-orange-100 dark:border-orange-500/20" amount={strategyData?.cryptoBalance ? `${currencySymbol}${strategyData.cryptoBalance.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : undefined} />
-            <ProgressBar label="Yield/Staking (Estimated)" icon={FaLeaf} value={strategyData?.allocations?.yield || 0} color="bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" bgColor="bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20" />
+            <ProgressBar label="Digital Assets (Crypto)" icon={FaChartLine} value={strategyData?.allocations?.crypto || 0} color="bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.5)]" bgColor="bg-orange-50 dark:bg-orange-500/10 border border-orange-100 dark:border-orange-500/20" amount={strategyData?.nonStakedCrypto ? `${currencySymbol}${strategyData.nonStakedCrypto.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : undefined} />
+            <ProgressBar label="Yield/Staking (Earning)" icon={FaLeaf} value={strategyData?.allocations?.yield || 0} color="bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" bgColor="bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20" amount={strategyData?.stakedFiatValue ? `${currencySymbol}${strategyData.stakedFiatValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : undefined} />
           </div>
           <div className="mt-8 p-4 sm:p-5 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/10 dark:to-cyan-900/10 rounded-2xl border border-blue-200 dark:border-blue-500/20 relative z-10 shadow-sm">
             <p className="text-[10px] sm:text-xs font-bold text-blue-700 dark:text-blue-400 flex items-start gap-2.5">

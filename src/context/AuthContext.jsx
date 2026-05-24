@@ -195,6 +195,7 @@ export const AuthProvider = ({ children }) => {
   const avatar = dbData?.photoURL || user?.photoURL || localStorage.getItem(AVATAR_CACHE_KEY) || null;
   const displayName = dbData?.displayName || dbData?.name || user?.displayName || localStorage.getItem(NAME_CACHE_KEY) || user?.email?.split("@")[0] || "User";
 
+  // 🗓️ Global Date Formatter
   const formatGlobalDate = (rawDate, formatType = 'full') => {
     if (!rawDate) return '';
     const dateObj = new Date(rawDate);
@@ -222,6 +223,41 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // 🗓️ Calendar-Aware Month Key Generator
+  const getCalendarMonthKey = (rawDate) => {
+    if (!rawDate) return 'unknown';
+    const dateObj = new Date(rawDate);
+    const pref = dbData?.settings?.baseCalendar || 'gregorian';
+    try {
+      if (pref === 'bikram_sambat') {
+        const nd = new NepaliDate(dateObj);
+        return `bs-${nd.getYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}`;
+      }
+      if (pref === 'hijri') {
+        const parts = new Intl.DateTimeFormat('en-US-u-ca-islamic', {
+          year: 'numeric', month: '2-digit'
+        }).formatToParts(dateObj);
+        const y = parts.find(p => p.type === 'year')?.value;
+        const m = parts.find(p => p.type === 'month')?.value;
+        return `hijri-${y}-${m}`;
+      }
+      if (pref === 'jalali') {
+        const parts = new Intl.DateTimeFormat('en-US-u-ca-persian', {
+          year: 'numeric', month: '2-digit'
+        }).formatToParts(dateObj);
+        const y = parts.find(p => p.type === 'year')?.value;
+        const m = parts.find(p => p.type === 'month')?.value;
+        return `jalali-${y}-${m}`;
+      }
+      // Default Gregorian
+      const y = dateObj.getFullYear();
+      const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+      return `greg-${y}-${m}`;
+    } catch (error) {
+      return `greg-${dateObj.getFullYear()}-${String(dateObj.getMonth()+1).padStart(2,'0')}`;
+    }
+  };
+
   const value = {
     user, dbData, loading, avatar, displayName,
     baseCurrency, updateBaseCurrency,          
@@ -232,7 +268,8 @@ export const AuthProvider = ({ children }) => {
     loginWithGoogle: () => socialLogin("google"),
     loginWithGithub: () => socialLogin("github"),
     resetPassword: resetPasswordEmail, refreshUser,
-    formatGlobalDate
+    formatGlobalDate,
+    getCalendarMonthKey   // ✨ Naya function
   };
 
   return (

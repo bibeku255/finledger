@@ -1,71 +1,40 @@
+// src/pages/accounts/OnlineWallet.jsx
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import {
-  collection,
-  addDoc,
-  doc,
-  setDoc,
-  deleteDoc,
-  onSnapshot,
-  query,
-  orderBy,
-  getDoc,
+  collection, addDoc, doc, setDoc, deleteDoc,
+  onSnapshot, query, orderBy, getDoc,
 } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
-
+import { calcVaultBalance } from '../../utils/balanceEngine';
 import {
-  HiOutlinePlus,
-  HiOutlineX,
-  HiOutlineTrash,
-  HiOutlinePencil,
-  HiOutlineLibrary,
-  HiOutlineSearch,
-  HiOutlineRefresh,
-  HiOutlineLockClosed,
-  HiOutlineExclamationCircle,
-  HiOutlineTrendingUp,
-  HiOutlineTrendingDown,
-  HiOutlineDownload,
-  HiOutlineDocumentText,
-  HiOutlineTable,
-  HiOutlineChevronRight,
-  HiOutlineCalendar,
-  HiOutlineShieldCheck,
-  HiOutlineGlobe,
-  HiOutlineCheckCircle,
-  HiOutlineInformationCircle,
+  HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
+  HiOutlineLibrary, HiOutlineSearch, HiOutlineRefresh,
+  HiOutlineExclamationCircle, HiOutlineTrendingUp, HiOutlineTrendingDown,
+  HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable,
+  HiOutlineCalendar, HiOutlineShieldCheck, HiOutlineGlobe,
+  HiOutlineCheckCircle, HiOutlineInformationCircle, HiOutlineChevronDown,
+  HiOutlineArrowDown, HiOutlineArrowUp, HiCheck,
 } from 'react-icons/hi';
 import {
-  FaGlobe,
-  FaWallet,
-  FaShieldAlt,
-  FaExchangeAlt,
-  FaArrowDown,
-  FaArrowUp,
-  FaPiggyBank,
-  FaChartLine,
+  FaGlobe, FaWallet, FaShieldAlt, FaArrowDown, FaArrowUp,
 } from 'react-icons/fa';
 import { verifyPIN } from '../../utils/cryptoUtils';
 import { fiatFlagMap } from '../../utils/marketConstants';
 
 // ============================================
-// 🚀 MINI TOAST SYSTEM (Self-contained)
+// 🚀 MINI TOAST SYSTEM
 // ============================================
 const ToastContext = React.createContext(null);
-
 const ToastProvider = ({ children }) => {
   const [toasts, setToasts] = useState([]);
   const addToast = (message, type = 'info', duration = 4000) => {
     const id = Date.now() + Math.random();
     setToasts(prev => [...prev, { id, message, type, duration }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, duration);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
   };
   const removeToast = id => setToasts(prev => prev.filter(t => t.id !== id));
-
   return (
     <ToastContext.Provider value={{ addToast, removeToast }}>
       {children}
@@ -83,39 +52,19 @@ const ToastProvider = ({ children }) => {
                 : 'bg-blue-50/95 dark:bg-blue-900/90 border-blue-200 dark:border-blue-700'
             }`}
           >
-            {toast.type === 'success' && (
-              <HiOutlineCheckCircle className="text-green-600 dark:text-green-400 w-5 h-5 flex-shrink-0" />
-            )}
-            {toast.type === 'error' && (
-              <HiOutlineExclamationCircle className="text-red-600 dark:text-red-400 w-5 h-5 flex-shrink-0" />
-            )}
-            {toast.type === 'warning' && (
-              <HiOutlineExclamationCircle className="text-amber-600 dark:text-amber-400 w-5 h-5 flex-shrink-0" />
-            )}
-            {toast.type === 'info' && (
-              <HiOutlineInformationCircle className="text-blue-600 dark:text-blue-400 w-5 h-5 flex-shrink-0" />
-            )}
-            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 flex-1">
-              {toast.message}
-            </p>
-            <button
-              onClick={() => removeToast(toast.id)}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-            >
-              <HiOutlineX size={16} />
-            </button>
+            {toast.type === 'success' && <HiOutlineCheckCircle className="text-green-600 dark:text-green-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'error' && <HiOutlineExclamationCircle className="text-red-600 dark:text-red-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'warning' && <HiOutlineExclamationCircle className="text-amber-600 dark:text-amber-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'info' && <HiOutlineInformationCircle className="text-blue-600 dark:text-blue-400 w-5 h-5 flex-shrink-0" />}
+            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 flex-1">{toast.message}</p>
+            <button onClick={() => removeToast(toast.id)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"><HiOutlineX size={16} /></button>
           </div>
         ))}
       </div>
     </ToastContext.Provider>
   );
 };
-
-const useToast = () => {
-  const context = React.useContext(ToastContext);
-  if (!context) throw new Error('useToast must be used within ToastProvider');
-  return context;
-};
+const useToast = () => React.useContext(ToastContext);
 
 // ============================================
 // 🧩 HELPER
@@ -159,7 +108,7 @@ const TickerBar = ({ tickerData, currencySymbol }) => {
           {[...tickerData, ...tickerData, ...tickerData].map((item, idx) => (
             <div key={idx} className="flex items-center gap-2.5 font-bold text-sm cursor-default group shrink-0">
               <img src={`https://flagcdn.com/w40/${fiatFlagMap[item.symbol] || 'un'}.png`} alt={item.symbol} className="w-4 h-4 sm:w-5 sm:h-5 rounded-full object-cover shadow-sm group-hover:scale-110 transition-transform" />
-              <span className="text-slate-800 dark:text-slate-300 font-black text-xs sm:text-sm">{item.symbol}</span>
+              <span className="text-slate-700 dark:text-slate-300 font-black text-xs sm:text-sm">{item.symbol}</span>
               <span className="text-slate-900 dark:text-white font-black text-xs sm:text-sm">
                 {currencySymbol}{Number(item.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
               </span>
@@ -198,13 +147,22 @@ const WalletBadge = ({ wallet, currency, amount }) => (
 // 🚀 MAIN CONTENT COMPONENT
 // ============================================
 const OnlineWalletContent = () => {
-  const { user, baseCurrency = 'INR', selectedFiats = [], formatGlobalDate } = useAuth();
+  const { user, baseCurrency = 'INR', selectedFiats = [], formatGlobalDate, getCalendarMonthKey } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
   const { addToast } = useToast();
 
-  const availableCurrencies = useMemo(() => {
-    return Array.from(new Set([baseCurrency, ...selectedFiats]));
-  }, [baseCurrency, selectedFiats]);
+  const availableCurrencies = useMemo(() => Array.from(new Set([baseCurrency, ...selectedFiats])), [baseCurrency, selectedFiats]);
+
+  const getCurrentMonthKey = () => getCalendarMonthKey(new Date().toISOString());
+  const [openMonths, setOpenMonths] = useState(new Set([getCurrentMonthKey()]));
+  const toggleMonth = (monthKey) => {
+    setOpenMonths(prev => {
+      const next = new Set(prev);
+      if (next.has(monthKey)) next.delete(monthKey);
+      else next.add(monthKey);
+      return next;
+    });
+  };
 
   const [transactions, setTransactions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -213,7 +171,6 @@ const OnlineWalletContent = () => {
   const [filterType, setFilterType] = useState('all');
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
-
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [isFetchingRate, setIsFetchingRate] = useState(false);
@@ -223,13 +180,14 @@ const OnlineWalletContent = () => {
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
 
+  // Form setup
   const [formData, setFormData] = useState({
     title: '', walletName: '', referenceNo: '', isP2P: false,
     foreignAmount: '', currency: baseCurrency, exchangeRate: 1, fee: '',
     date: getLocalDateTimeString(), isSynced: false,
   });
 
-  // Fetch live ticker data
+  // =========== DATA FETCHING ===========
   useEffect(() => {
     const displayFiats = selectedFiats.filter(f => f !== baseCurrency);
     if (displayFiats.length === 0) { setTickerData([]); return; }
@@ -243,54 +201,77 @@ const OnlineWalletContent = () => {
             return rate ? { symbol: fiat, price: (1 / rate).toFixed(4), change: (Math.random() * 0.8 - 0.4).toFixed(2) } : null;
           }).filter(Boolean);
         setTickerData(formattedFiat);
-      } catch (error) { console.error('Ticker fetch failed:', error); }
+      } catch (error) {}
     };
     fetchTickerData();
     const interval = setInterval(fetchTickerData, 60000);
     return () => clearInterval(interval);
   }, [baseCurrency, selectedFiats]);
 
-  // Fetch transactions
   useEffect(() => {
     if (!user) return;
-    const walletRef = collection(db, 'users', user.uid, 'onlineWallet');
-    const q = query(walletRef, orderBy('timestamp', 'desc'));
-    const unsubscribe = onSnapshot(q, snapshot => {
+    const q = query(collection(db, 'users', user.uid, 'onlineWallet'), orderBy('timestamp', 'desc'));
+    const unsubscribe = onSnapshot(q,
+      snapshot => {
         setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         setIsLoading(false);
       },
       error => {
-        addToast('Failed to load e-wallet transactions. Please refresh.', 'error');
+        addToast('Failed to load e-wallet transactions.', 'error');
         setIsLoading(false);
       }
     );
     return () => unsubscribe();
   }, [user, addToast]);
 
-  const existingWallets = useMemo(() => {
-    const wallets = new Set(transactions.map(t => t.walletName).filter(w => w && w.trim() !== ''));
-    return Array.from(wallets);
-  }, [transactions]);
+  const existingWallets = useMemo(() => Array.from(new Set(transactions.map(t => t.walletName).filter(w => w && w.trim() !== ''))), [transactions]);
+  const uniqueCurrenciesCount = useMemo(() => new Set(transactions.map(t => t.currency || baseCurrency)).size, [transactions, baseCurrency]);
 
-  const uniqueCurrenciesCount = useMemo(() => {
-    const currencies = new Set(transactions.map(t => t.currency || baseCurrency));
-    return currencies.size;
-  }, [transactions, baseCurrency]);
+  // Unified global metrics engine
+  const { balance: totalBalance, totalFees } = useMemo(() => calcVaultBalance(transactions), [transactions]);
 
+  // Sub‑wallet balances
   const subWalletBalances = useMemo(() => {
     const balances = {};
     transactions.forEach(t => {
       const curr = t.currency || baseCurrency;
-      const originalWalletName = t.walletName?.trim() ? t.walletName.trim() : 'Main Wallet';
-      const key = `${originalWalletName.toUpperCase()}_${curr.toUpperCase()}`;
-      if (!balances[key]) balances[key] = { wallet: originalWalletName, currency: curr, value: 0 };
-      const amt = Number(t.foreignAmount || t.amount || 0);
-      if (t.type === 'in') balances[key].value += amt;
-      else balances[key].value -= amt;
+      const wallet = t.walletName?.trim() ? t.walletName.trim() : 'Main Wallet';
+      const key = `${wallet.toUpperCase()}_${curr.toUpperCase()}`;
+      if (!balances[key]) balances[key] = { wallet, currency: curr, value: 0 };
+
+      const grossForeign = Number(t.foreignAmount !== undefined ? t.foreignAmount : (t.amount !== undefined ? t.amount : t.finalBaseAmount || 0));
+      const foreignFee = Number(t.foreignFee !== undefined ? t.foreignFee : (t.currency !== baseCurrency ? t.fee / (t.exchangeRate || 1) : t.fee || 0));
+      const rawType = (t.type || '').toLowerCase();
+      
+      if (rawType === 'out' || rawType === 'expense') {
+        const feeType = (t.feeType || 'inclusive').toLowerCase();
+        const deduct = feeType === 'exclusive' ? grossForeign + foreignFee : grossForeign;
+        balances[key].value -= deduct;
+      } else {
+        balances[key].value += (grossForeign - foreignFee);
+      }
     });
     return Object.values(balances).filter(b => Math.abs(b.value) > 0.01).sort((a, b) => b.value - a.value);
   }, [transactions, baseCurrency]);
 
+  const { totalInflows, totalOutflows } = useMemo(() => {
+    let ins = 0;
+    let outs = 0;
+    transactions.forEach(t => {
+      const amt = Number(t.finalBaseAmount || 0);
+      const rawType = (t.type || '').toLowerCase();
+      if (rawType === 'out' || rawType === 'expense') {
+        const feeType = (t.feeType || 'inclusive').toLowerCase();
+        const deduct = feeType === 'exclusive' ? amt + Number(t.fee || 0) : amt;
+        outs += deduct;
+      } else {
+        ins += amt;
+      }
+    });
+    return { totalInflows: ins, totalOutflows: outs };
+  }, [transactions]);
+
+  // Processed two-way routing ledger
   const processedLedger = useMemo(() => {
     const sorted = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
     let runningBalance = 0;
@@ -298,37 +279,42 @@ const OnlineWalletContent = () => {
     sorted.forEach(t => {
       const dateObj = new Date(t.date || new Date());
       const monthName = formatGlobalDate ? formatGlobalDate(dateObj, 'monthYear') : dateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
-      const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
-      if (!grouped[monthKey]) grouped[monthKey] = { monthName, openingBalance: runningBalance, records: [], closingBalance: 0 };
-      let finalAmount = Number(t.finalBaseAmount || t.amount || 0);
-      let feeAmount = 0;
-      if (t.fee && t.feeExchangeRate) feeAmount = Number(t.fee) * Number(t.feeExchangeRate);
-      else if (t.fee && t.exchangeRate) feeAmount = Number(t.fee) * Number(t.exchangeRate);
-      else if (t.fee) feeAmount = Number(t.fee);
-      let netChange = t.type === 'in' ? finalAmount : -(finalAmount + feeAmount);
+      const monthKey = getCalendarMonthKey(t.date);
+      if (!grouped[monthKey]) grouped[monthKey] = { monthName, monthKey, openingBalance: runningBalance, records: [], closingBalance: 0, totalFeesInMonth: 0 };
+
+      const finalAmount = Number(t.finalBaseAmount || 0);
+      const feeAmount = Number(t.fee || 0);
+      const rawType = (t.type || '').toLowerCase();
+      
+      // Support backward compatibility for foreign fee parsing
+      const foreignFeeDisplay = Number(t.foreignFee !== undefined ? t.foreignFee : (t.currency !== baseCurrency ? t.fee / (t.exchangeRate || 1) : t.fee || 0));
+      
+      let netChange = 0;
+      if (rawType === 'out' || rawType === 'expense') {
+        const feeType = (t.feeType || 'inclusive').toLowerCase();
+        netChange = feeType === 'exclusive' ? -(finalAmount + feeAmount) : -finalAmount;
+      } else {
+        netChange = finalAmount;
+      }
+
       runningBalance += netChange;
-      grouped[monthKey].records.push({ ...t, netChange, finalAmount, feeAmount });
+      grouped[monthKey].records.push({ ...t, netChange, finalAmount, foreignFeeDisplay, feeAmount });
+      grouped[monthKey].totalFeesInMonth += feeAmount;
       grouped[monthKey].closingBalance = runningBalance;
     });
+
     return Object.keys(grouped).sort().reverse().map(key => {
       const monthData = grouped[key];
       const filteredRecords = monthData.records.filter(r => {
         const titleMatch = r.title ? r.title.toLowerCase().includes(searchTerm.toLowerCase()) : false;
         const walletMatch = r.walletName ? r.walletName.toLowerCase().includes(searchTerm.toLowerCase()) : false;
         const refMatch = r.referenceNo ? r.referenceNo.toLowerCase().includes(searchTerm.toLowerCase()) : false;
-        const typeMatch = filterType === 'all' || r.type === filterType || (filterType === 'p2p' && r.isP2P);
+        const typeMatch = filterType === 'all' || r.type === filterType || (filterType === 'out' && (r.type === 'out' || r.type === 'expense')) || (filterType === 'p2p' && r.isP2P);
         return (titleMatch || walletMatch || refMatch) && typeMatch;
       }).reverse();
       return { ...monthData, records: filteredRecords };
     }).filter(m => m.records.length > 0 || searchTerm === '');
-  }, [transactions, searchTerm, filterType, formatGlobalDate]);
-
-  const totalBalance = processedLedger.length > 0 && searchTerm === '' && filterType === 'all'
-    ? processedLedger[0].closingBalance
-    : transactions.reduce((acc, t) => acc + (t.type === 'in' ? Number(t.finalBaseAmount || t.amount || 0) : -(Number(t.finalBaseAmount || t.amount || 0) + Number(t.fee || 0) * (t.exchangeRate || 1))), 0);
-
-  const totalInflows = useMemo(() => transactions.filter(t => t.type === 'in').reduce((acc, t) => acc + (Number(t.finalBaseAmount) || 0), 0), [transactions]);
-  const totalOutflows = useMemo(() => transactions.filter(t => t.type === 'out').reduce((acc, t) => acc + (Number(t.finalBaseAmount) || 0), 0), [transactions]);
+  }, [transactions, searchTerm, filterType, formatGlobalDate, getCalendarMonthKey, baseCurrency]);
 
   const handleDownloadReport = async format => {
     setIsExportMenuOpen(false);
@@ -338,9 +324,11 @@ const OnlineWalletContent = () => {
     const reportData = filteredRecords.map(rec => {
       const cleanNote = (rec.title || 'N/A').replace(/(\r\n|\n|\r)/gm, ' ');
       const rawDate = rec.date ? rec.date.split('T')[0] : 'N/A';
+      const isOut = rec.type === 'out' || rec.type === 'expense';
+      const grossBase = (Number(rec.foreignAmount) || 0) * (Number(rec.exchangeRate) || 1);
       return {
         date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rawDate,
-        type: rec.type === 'in' ? 'Deposit (+)' : 'Withdrawal (-)',
+        type: isOut ? 'Withdrawal/Shift (-)' : 'Deposit (+)',
         platform: rec.walletName || 'Main Wallet',
         fiatFlow: `${Number(rec.foreignAmount || 0).toLocaleString()} ${rec.currency || baseCurrency}`,
         fee: Number(rec.feeAmount || 0),
@@ -354,7 +342,7 @@ const OnlineWalletContent = () => {
       { header: `Net Value (${currencySymbol})`, key: 'netImpact', isNumeric: true }, { header: 'Details', key: 'notes' },
     ];
     const fileName = 'Online_Wallet_Ledger';
-    const reportTitle = `Digital Fiat Wallet Ledger${searchTerm || filterType !== 'all' ? ' (Filtered)' : ''}`;
+    const reportTitle = `Digital Fiat Wallet Two-Way Audit Ledger`;
     if (format === 'pdf') { await downloadPDFReport(reportData, columns, fileName, reportTitle, { onSuccess: () => addToast('PDF report downloaded!', 'success'), onError: msg => addToast(`PDF Error: ${msg}`, 'error') }); }
     else { await downloadExcelReport(reportData, columns, fileName, reportTitle, { onSuccess: () => addToast('Excel report downloaded!', 'success'), onError: msg => addToast(`Excel Error: ${msg}`, 'error') }); }
     setIsGeneratingReport(false);
@@ -373,80 +361,80 @@ const OnlineWalletContent = () => {
     finally { setIsFetchingRate(false); }
   };
 
-  const grossDeposit = parseFloat(formData.foreignAmount) || 0;
-  const nativeFee = parseFloat(formData.fee) || 0;
-  const netNativeAmount = grossDeposit - nativeFee;
-  const exchangeRate = formData.currency !== baseCurrency ? parseFloat(formData.exchangeRate) || 1 : 1;
-  const calculatedFinalAmount = netNativeAmount * exchangeRate;
+  const isForeign = formData.currency !== baseCurrency;
+  const grossAmountNative = parseFloat(formData.foreignAmount) || 0;
+  const feeNative = parseFloat(formData.fee) || 0;
+  const exchangeRate = isForeign ? (parseFloat(formData.exchangeRate) || 1) : 1;
+  const calculatedFinalAmount = (grossAmountNative - feeNative) * exchangeRate;
 
   const handleSaveEntry = async e => {
-    e.preventDefault();
-    if (!user) { addToast('Please login first.', 'error'); return; }
-    if (!formData.walletName.trim()) { addToast('Please provide a Wallet Name (e.g. PayPal)', 'warning'); return; }
-    setIsSaving(true);
-    try {
-      const recordData = {
-        title: formData.title,
-        walletName: formData.walletName.trim(),
-        walletCategory: 'Fiat E-Wallet',
-        referenceNo: formData.referenceNo || '',
-        isP2P: formData.isP2P || false,
-        date: formData.date,
-        currency: formData.currency,
-        foreignAmount: grossDeposit,
-        fee: nativeFee,
-        netForeignAmount: netNativeAmount,
-        exchangeRate: exchangeRate,
-        finalBaseAmount: calculatedFinalAmount,
-      };
+  e.preventDefault();
+  if (!user) { addToast('Please login first.', 'error'); return; }
+  if (!formData.walletName.trim()) { addToast('Please provide a Wallet Name (e.g. PayPal)', 'warning'); return; }
+  setIsSaving(true);
+  try {
+    const inputForeign = parseFloat(formData.foreignAmount) || 0;
+    const inputFee = parseFloat(formData.fee) || 0;
+    const inputExRate = isForeign ? (parseFloat(formData.exchangeRate) || 1) : 1;
 
-      if (editingId) {
-        if (formData.isSynced) {
-          await setDoc(doc(db, 'users', user.uid, 'onlineWallet', editingId), { walletName: formData.walletName.trim() }, { merge: true });
-        } else {
-          await setDoc(doc(db, 'users', user.uid, 'onlineWallet', editingId), recordData, { merge: true });
-        }
+    const freshGrossBase = inputForeign * inputExRate;
+    const freshFeeBase = inputFee * inputExRate;
+    const freshFinalBase = freshGrossBase - freshFeeBase;
+
+    const recordData = {
+      title: formData.title,
+      walletName: formData.walletName.trim(),
+      walletCategory: 'Fiat E-Wallet',
+      referenceNo: formData.referenceNo || '',
+      isP2P: formData.isP2P || false,
+      type: 'in',
+      date: formData.date,
+      timestamp: editingId ? transactions.find(t => t.id === editingId)?.timestamp : new Date(formData.date).getTime(),
+      currency: formData.currency,
+      foreignAmount: inputForeign,
+      foreignFee: inputFee,
+      fee: freshFeeBase,
+      exchangeRate: inputExRate,
+      finalBaseAmount: freshFinalBase,
+      vaultId: 'online_' + formData.walletName.trim().toUpperCase(),  // ✅ ADD THIS
+    };
+
+    if (editingId) {
+      if (formData.isSynced) {
+        await setDoc(doc(db, 'users', user.uid, 'onlineWallet', editingId), {
+          walletName: formData.walletName.trim(),
+          vaultId: 'online_' + formData.walletName.trim().toUpperCase(),  // ✅ ADD THIS
+        }, { merge: true });
       } else {
-        await addDoc(collection(db, 'users', user.uid, 'onlineWallet'), { ...recordData, type: 'in', timestamp: new Date(formData.date).getTime() });
+        await setDoc(doc(db, 'users', user.uid, 'onlineWallet', editingId), recordData, { merge: true });
       }
-      addToast(editingId ? 'Record updated successfully!' : 'E-deposit logged successfully!', 'success');
-      closeModal();
-    } catch (error) {
-      addToast('System Error: Failed to save record.', 'error');
-    } finally {
-      setIsSaving(false);
+    } else {
+      await addDoc(collection(db, 'users', user.uid, 'onlineWallet'), recordData);
     }
-  };
+    addToast(editingId ? 'Deposit updated!' : 'E-Deposit logged!', 'success');
+    closeModal();
+  } catch (error) { addToast('Failed to save record.', 'error'); }
+  finally { setIsSaving(false); }
+};
 
   const handleEdit = rec => {
     const isSyncedEntry = !!(rec.linkedExpenseId || rec.linkedIncomeId || rec.shiftId || rec.linkedPartyId);
     setFormData({
-      title: rec.title || '',
-      walletName: rec.walletName || '',
-      referenceNo: rec.referenceNo || '',
-      isP2P: rec.isP2P || false,
-      foreignAmount: rec.foreignAmount || rec.finalBaseAmount || '',
-      currency: rec.currency || baseCurrency,
-      exchangeRate: rec.exchangeRate || 1,
-      fee: rec.fee || '',
-      date: rec.date || getLocalDateTimeString(),
-      isSynced: isSyncedEntry,
+      title: rec.title || '', walletName: rec.walletName || '', referenceNo: rec.referenceNo || '', isP2P: rec.isP2P || false,
+      foreignAmount: rec.foreignAmount || rec.amount || '', currency: rec.currency || baseCurrency,
+      exchangeRate: rec.exchangeRate || 1, fee: rec.foreignFee !== undefined ? rec.foreignFee : rec.fee || '',
+      date: rec.date || getLocalDateTimeString(), isSynced: isSyncedEntry,
     });
     setEditingId(rec.id);
     setIsModalOpen(true);
   };
 
-  const initiateDelete = rec => {
-    setDeleteContext(rec);
-    setPinInput('');
-    setPinError('');
-  };
+  const initiateDelete = rec => { setDeleteContext(rec); setPinInput(''); setPinError(''); };
 
   const executeSecureDelete = async e => {
     e.preventDefault();
     if (!pinInput.trim()) return setPinError('Please enter your Security PIN.');
-    setIsVerifying(true);
-    setPinError('');
+    setIsVerifying(true); setPinError('');
     try {
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       const storedHash = userDoc.data()?.security?.pinHash || userDoc.data()?.securityPin || userDoc.data()?.pin;
@@ -469,7 +457,6 @@ const OnlineWalletContent = () => {
     });
     setIsModalOpen(true);
   };
-
   const closeModal = () => { setIsModalOpen(false); setEditingId(null); };
 
   const LedgerSkeleton = () => (
@@ -501,47 +488,54 @@ const OnlineWalletContent = () => {
         <style>{`@keyframes scrollTicker { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } } .animate-ticker-scroll { display: inline-flex; white-space: nowrap; animation: scrollTicker 45s linear infinite; } .animate-ticker-scroll:hover { animation-play-state: paused; }`}</style>
 
         {/* Premium Header */}
-        <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 sm:p-8 lg:p-10 shadow-2xl border border-slate-700/50">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(99,102,241,0.1),transparent_70%)]" />
-          <div className="absolute right-0 top-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-indigo-700 via-purple-700 to-indigo-800 p-6 sm:p-8 lg:p-10 shadow-2xl border border-purple-400/30">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(99,102,241,0.15),transparent_70%)]" />
+          <div className="absolute right-0 top-0 w-64 h-64 bg-purple-400/20 rounded-full blur-3xl pointer-events-none" />
           <div className="relative z-10 flex flex-col lg:flex-row lg:items-end justify-between gap-6">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[1.5rem] sm:rounded-[2rem] flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0">
-                <HiOutlineGlobe size={28} className="text-white" />
+                <FaWallet size={28} className="text-white" />
               </div>
               <div>
-                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight">Digital Fiat</h1>
-                <p className="text-xs sm:text-sm font-medium text-slate-400 mt-1">PayPal, Payoneer, Skrill, and E-Wallets</p>
+                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight">Digital Vault</h1>
+                <p className="text-xs sm:text-sm font-medium text-purple-100 mt-1">Manage e‑wallet assets and routing ledger logs</p>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="relative">
-                <button onClick={() => !isGeneratingReport && setIsExportMenuOpen(!isExportMenuOpen)} onBlur={() => setTimeout(() => setIsExportMenuOpen(false), 200)} disabled={isGeneratingReport} className="flex items-center gap-2 px-5 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-2xl font-black text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 active:scale-95 shadow-sm disabled:opacity-50">
+            <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+              <div className="relative flex-1 lg:flex-none">
+                <button onClick={() => !isGeneratingReport && setIsExportMenuOpen(!isExportMenuOpen)} onBlur={() => setTimeout(() => setIsExportMenuOpen(false), 200)} disabled={isGeneratingReport} className="w-full flex items-center justify-center gap-2 px-5 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-2xl font-black text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 active:scale-95 shadow-sm disabled:opacity-50">
                   {isGeneratingReport ? <><HiOutlineRefresh className="animate-spin" size={18} /> Generating...</> : <><HiOutlineDownload size={18} /> Export</>}
                 </button>
                 {isExportMenuOpen && !isGeneratingReport && (
-                  <div className="absolute top-[110%] right-0 w-48 bg-slate-800 border border-slate-700 rounded-2xl shadow-xl flex flex-col p-1.5 z-50 animate-in fade-in zoom-in-95">
+                  <div className="absolute top-[110%] right-0 w-full lg:w-48 bg-slate-800 border border-slate-700 rounded-2xl shadow-xl flex flex-col p-1.5 z-50 animate-in fade-in zoom-in-95">
                     <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2.5 px-4 py-3 hover:bg-slate-700 text-slate-200 text-[11px] font-black rounded-xl transition-colors"><HiOutlineDocumentText className="text-rose-400" size={18} /> PDF Document</button>
                     <button onClick={() => handleDownloadReport('excel')} className="flex items-center gap-2.5 px-4 py-3 hover:bg-slate-700 text-slate-200 text-[11px] font-black rounded-xl transition-colors"><HiOutlineTable className="text-emerald-400" size={18} /> Excel (CSV)</button>
                   </div>
                 )}
               </div>
-              <button onClick={openModal} className="flex-1 lg:flex-none flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white px-6 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-indigo-500/30 whitespace-nowrap">
-                <HiOutlinePlus size={18} /> Log E-Deposit
+              <button onClick={openModal} className="flex-1 lg:flex-none flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white px-6 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-indigo-500/30">
+                <HiOutlinePlus size={18} /> Log Deposit
               </button>
             </div>
           </div>
-          <div className="relative z-10 grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mt-8 pt-6 border-t border-white/10">
-            <div className="bg-white/5 backdrop-blur-md rounded-2xl p-4 border border-white/5 col-span-2 lg:col-span-1">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1"><HiOutlineShieldCheck size={14} /> Total Online Balance</p>
-              <p className="text-xl sm:text-2xl font-black text-white truncate" title={`${currencySymbol}${totalBalance.toLocaleString()}`}>{currencySymbol}{totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+
+          <div className="relative z-10 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mt-8 pt-6 border-t border-white/10">
+            <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10 col-span-2 lg:col-span-1">
+              <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5 mb-1"><HiOutlineShieldCheck size={14} /> Total Net Balance</p>
+              <p className="text-xl sm:text-2xl font-black text-white truncate">
+                {currencySymbol}{totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
             </div>
-            <div className="bg-white/5 backdrop-blur-md rounded-2xl p-4 border border-white/5">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1"><FaGlobe size={12} /> Currencies</p>
+            <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10">
+              <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5 mb-1"><HiOutlineExclamationCircle size={14} /> Total Fees Paid</p>
+              <p className="text-xl sm:text-2xl font-black text-rose-300 truncate">-{currencySymbol}{totalFees.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+            </div>
+            <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10">
+              <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5 mb-1"><FaGlobe size={12} /> Currencies</p>
               <p className="text-xl sm:text-2xl font-black text-white">{uniqueCurrenciesCount}</p>
             </div>
-            <div className="bg-white/5 backdrop-blur-md rounded-2xl p-4 border border-white/5">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1"><HiOutlineLibrary size={14} /> Transactions</p>
+            <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10">
+              <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5 mb-1"><HiOutlineLibrary size={14} /> Entries</p>
               <p className="text-xl sm:text-2xl font-black text-white">{transactions.length}</p>
             </div>
           </div>
@@ -549,10 +543,9 @@ const OnlineWalletContent = () => {
 
         <TickerBar tickerData={tickerData} currencySymbol={currencySymbol} />
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
-          <StatCard title="Total Balance" value={`${currencySymbol}${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`} icon={FaPiggyBank} color="from-purple-600 to-indigo-600" trend={2.5} />
-          <StatCard title="Total Deposits" value={`${currencySymbol}${totalInflows.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} icon={HiOutlineTrendingUp} color="from-emerald-500 to-teal-600" />
-          <StatCard title="Total Withdrawals" value={`${currencySymbol}${totalOutflows.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} icon={HiOutlineTrendingDown} color="from-rose-500 to-pink-600" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+          <StatCard title="Total Deposits" value={`${currencySymbol}${totalInflows.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} icon={FaArrowDown} color="from-emerald-500 to-teal-600" subtitle="Gross money added" />
+          <StatCard title="Total Withdrawn" value={`${currencySymbol}${totalOutflows.toLocaleString(undefined, { minimumFractionDigits: 0 })}`} icon={HiOutlineArrowUp} color="from-rose-500 to-pink-600" subtitle="Includes Shifts & Expenses" />
           <StatCard title="Active Wallets" value={existingWallets.length} icon={FaWallet} color="from-blue-500 to-indigo-600" subtitle="Connected platforms" />
         </div>
 
@@ -575,216 +568,239 @@ const OnlineWalletContent = () => {
               <option value="all">All Records</option>
               <option value="p2p">⚠️ P2P Only</option>
               <option value="in">Deposits (+)</option>
-              <option value="out">Withdrawals (-)</option>
+              <option value="out">Withdrawals/Shifts (-)</option>
             </select>
           </div>
         </div>
 
-        {/* Ledger Section with Mobile Cards & Desktop Table */}
-        {isLoading ? (
-          <LedgerSkeleton />
-        ) : processedLedger.length === 0 ? (
+        {/* 🚀 LEDGER LOGS TABLE */}
+        {isLoading ? <LedgerSkeleton /> : processedLedger.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm px-4 text-center animate-in zoom-in-95 duration-300">
-            <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-[2rem] flex items-center justify-center mb-5"><HiOutlineGlobe className="text-5xl text-slate-300 dark:text-slate-600" /></div>
-            <h3 className="text-xl font-black text-slate-700 dark:text-slate-300 mb-2">No Digital Fiat Found</h3>
-            <p className="text-sm font-medium text-slate-500 mt-2 text-center max-w-sm">Log your PayPal, Payoneer, or Local E-Wallet deposits here.</p>
+            <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-[2rem] flex items-center justify-center mb-5"><FaWallet className="text-5xl text-slate-300 dark:text-slate-600" /></div>
+            <h3 className="text-xl font-black text-slate-700 dark:text-slate-300 mb-2">No Digital Fiat Records Found</h3>
+            <p className="text-sm font-medium text-slate-500 mt-2 text-center max-w-sm">Log or check your PayPal, Airtm, or ZebPay records here.</p>
             {!searchTerm && filterType === 'all' && (<button onClick={openModal} className="mt-6 bg-purple-600 hover:bg-purple-700 text-white font-black px-6 py-3 rounded-xl shadow-lg shadow-purple-500/30 transition-all active:scale-95">Log E-Deposit Now</button>)}
           </div>
         ) : (
-          processedLedger.map(month => (
-            <div key={month.monthName} className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-[2rem] overflow-hidden shadow-sm">
-              <div className="px-5 sm:px-6 py-4 sm:py-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50">
-                <h2 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-2.5 truncate">
-                  <div className="p-1.5 sm:p-2 bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 rounded-lg shrink-0"><HiOutlineCalendar size={18} className="sm:w-5 sm:h-5" /></div>
-                  <span className="truncate">{month.monthName}</span>
-                </h2>
-                <div className="text-right shrink-0 ml-2">
-                  <p className="text-[8px] sm:text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Opening Balance</p>
-                  <p className="text-xs sm:text-sm font-black text-slate-700 dark:text-slate-300 whitespace-nowrap">{currencySymbol}{(month.openingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-                </div>
-              </div>
+          processedLedger.map(month => {
+            const opening = month.openingBalance || 0;
+            const closing = month.closingBalance || 0;
+            
+            const totalIn = month.records.filter(r => r.type !== 'out' && r.type !== 'expense').reduce((s, r) => s + (r.finalBaseAmount || 0), 0);
+            const totalOut = month.records.filter(r => r.type === 'out' || r.type === 'expense').reduce((s, r) => {
+                const feeType = (r.feeType || 'inclusive').toLowerCase();
+                const amt = Number(r.finalBaseAmount || 0);
+                const fee = Number(r.fee || 0);
+                return s + (feeType === 'exclusive' ? amt + fee : amt);
+            }, 0);
 
-              {/* MOBILE CARDS (NO TEXT CLIPPING) */}
-              <div className="md:hidden flex flex-col divide-y divide-slate-100 dark:divide-slate-800/50">
-                {month.records.map(rec => {
-                  const dateObj = new Date(rec.date);
-                  const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                  return (
-                    <div key={rec.id} className={`p-4 sm:p-5 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors flex flex-col gap-3 group ${rec.isP2P ? 'bg-amber-50/30 dark:bg-amber-900/10' : ''}`}>
-                      <div className="flex justify-between items-start gap-2 w-full">
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${rec.type === 'in' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400'}`}>
-                            {rec.type === 'in' ? <FaArrowDown size={16} /> : <FaArrowUp size={16} />}
-                          </div>
-                          <div className="flex flex-col min-w-0 flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h3 className="font-black text-sm sm:text-base text-slate-800 dark:text-white break-words" title={rec.title}>{rec.title}</h3>
-                              {rec.isP2P && (<span className="px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[8px] font-black uppercase tracking-widest flex items-center gap-1 border border-amber-200 dark:border-amber-500/30 shrink-0"><FaShieldAlt size={8} /> P2P</span>)}
-                            </div>
-                            <p className="text-[10px] sm:text-xs font-bold text-slate-500 dark:text-slate-400 mt-1 break-words flex flex-wrap items-center gap-x-1.5">
-                              <FaWallet className="shrink-0" />
-                              <span className="text-slate-700 dark:text-slate-300 font-black">{rec.walletName || 'Main Wallet'}</span>
-                            </p>
-                          </div>
-                        </div>
-                        <div className="text-right shrink-0 ml-2">
-                          <p className={`text-base sm:text-lg font-black tracking-tight whitespace-nowrap ${rec.netChange >= 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                            {rec.netChange >= 0 ? '+' : '-'}{currencySymbol}{Math.abs(rec.netChange).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                          </p>
-                          <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest whitespace-nowrap">Net Change</p>
-                        </div>
-                      </div>
+            const isOpen = openMonths.has(month.monthKey);
 
-                      <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 flex flex-row justify-between items-center border border-slate-200 dark:border-slate-800/50 mt-1 gap-2">
-                        <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
-                          <div className="min-w-0">
-                            <p className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Amount</p>
-                            <p className="font-black text-slate-800 dark:text-slate-200 text-xs sm:text-sm break-words">
-                              {rec.currency && rec.currency !== baseCurrency
-                                ? `${(rec.foreignAmount || 0).toLocaleString()} ${rec.currency}`
-                                : `${currencySymbol}${(rec.foreignAmount || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`
-                              }
-                            </p>
-                            {rec.currency && rec.currency !== baseCurrency && (
-                              <p className="text-[8px] sm:text-[9px] font-bold text-slate-400 break-words">≈ {currencySymbol}{rec.finalAmount?.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
-                            )}
-                          </div>
-                          {rec.feeAmount > 0 && (
-                            <div className="border-l border-slate-300 dark:border-slate-700 pl-2 sm:pl-4 shrink-0">
-                              <p className="text-[9px] sm:text-[10px] font-black text-rose-500 uppercase tracking-widest mb-0.5">Fee</p>
-                              <p className="font-black text-rose-600 dark:text-rose-400 text-xs sm:text-sm">-{currencySymbol}{rec.feeAmount.toLocaleString()}</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex items-end justify-between mt-1">
-                        <div className="flex flex-col gap-1.5 flex-1 min-w-0">
-                          <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/50 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 w-fit shrink-0">
-                            <HiOutlineCalendar size={12} className="text-slate-500 shrink-0" /> 
-                            <span className="whitespace-nowrap">{formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]}</span> 
-                            <span className="opacity-50 ml-1 whitespace-nowrap">{timeStr}</span>
-                          </p>
-                          {rec.referenceNo && (
-                            <span className="text-[9px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded w-fit uppercase tracking-widest border border-slate-200 dark:border-slate-700 break-words max-w-full">Ref: {rec.referenceNo}</span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-2">
-                          {(rec.linkedExpenseId || rec.linkedIncomeId || rec.linkedPartyId) && (
-                            <span className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[8px] font-black rounded border border-amber-200 dark:border-amber-500/30">SYNCED</span>
-                          )}
-                          <button onClick={() => handleEdit(rec)} className="p-2 sm:p-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg sm:rounded-xl hover:bg-blue-100 dark:hover:bg-blue-500/20 transition-colors border border-blue-200 dark:border-blue-500/30 active:scale-95 shadow-sm"><HiOutlinePencil size={14} className="sm:w-[16px] sm:h-[16px]"/></button>
-                          <button onClick={() => initiateDelete(rec)} className="p-2 sm:p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-lg sm:rounded-xl hover:bg-rose-100 dark:hover:bg-rose-500/20 transition-colors border border-rose-200 dark:border-rose-500/30 active:scale-95 shadow-sm"><HiOutlineTrash size={14} className="sm:w-[16px] sm:h-[16px]"/></button>
-                        </div>
-                      </div>
+            return (
+              <div key={month.monthKey} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[2rem] overflow-hidden shadow-sm mb-4">
+                <button onClick={() => toggleMonth(month.monthKey)} className="w-full px-6 py-5 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors text-left">
+                  <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2.5">
+                    <div className="p-2 bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 rounded-lg">
+                      <HiOutlineCalendar size={18} />
                     </div>
-                  );
-                })}
-              </div>
+                    {month.monthName}
+                  </h2>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right hidden sm:block">
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Closing Balance</p>
+                      <p className="text-sm font-black text-indigo-700 dark:text-indigo-400">{currencySymbol}{closing.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    </div>
+                    <HiOutlineChevronDown size={20} className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
+                  </div>
+                </button>
 
-              {/* DESKTOP TABLE (unchanged) */}
-              <div className="hidden md:block overflow-x-auto custom-scrollbar">
-                <table className="w-full text-left border-collapse min-w-[850px]">
-                  <thead className="bg-slate-100/50 dark:bg-slate-800/30 text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                    <tr>
-                      <th className="p-4 pl-6 w-12 text-center">Type</th>
-                      <th className="p-4">Platform & Details</th>
-                      <th className="p-4 text-right">Fiat Flow</th>
-                      <th className="p-4 text-right">Base Equivalent</th>
-                      <th className="p-4 pr-6 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                    {month.records.map(rec => {
-                      const dateObj = new Date(rec.date);
-                      const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                      return (
-                        <tr key={rec.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors group ${rec.isP2P ? 'bg-amber-50/40 dark:bg-amber-900/10' : ''}`}>
-                          <td className="p-4 pl-6 text-center align-top">
-                            <div className={`w-10 h-10 mx-auto rounded-xl flex items-center justify-center text-lg shrink-0 ${rec.type === 'in' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400'}`}>
-                              {rec.type === 'in' ? <FaArrowDown /> : <FaArrowUp />}
-                            </div>
-                          </td>
-                          <td className="p-4 align-top">
-                            <div className="flex items-start gap-4">
-                              <div className={`w-10 h-10 mt-0.5 rounded-2xl flex items-center justify-center text-xl shadow-sm shrink-0 ${rec.isP2P ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400' : 'bg-purple-100 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400'}`}>
-                                {rec.isP2P ? <FaShieldAlt /> : <FaWallet />}
-                              </div>
-                              <div>
-                                <p className="font-black text-slate-900 dark:text-white text-sm mb-0.5 flex items-center gap-2">
-                                  {rec.walletName || 'Main Wallet'}
-                                  {rec.isP2P && (<span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-400 text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><FaShieldAlt size={8} /> P2P</span>)}
-                                </p>
-                                <p className="text-[11px] font-bold text-slate-600 dark:text-slate-400 mt-0.5">{rec.title}</p>
-                                <div className="flex items-center gap-2 mt-1.5">
-                                  <p className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                                    {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]}
-                                    <span className="opacity-60 border-l border-slate-300 dark:border-slate-600 pl-1 ml-1">{timeStr}</span>
+                {isOpen && (
+                  <div className="animate-in fade-in duration-200">
+                    <div className="px-6 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4 bg-white dark:bg-slate-900 border-t border-b border-slate-200 dark:border-slate-800">
+                      <div><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Opening</p><p className="font-black text-slate-700 dark:text-slate-300">{currencySymbol}{opening.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
+                      <div><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Deposits (+)</p><p className="font-black text-emerald-600">+{currencySymbol}{totalIn.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
+                      <div><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Withdrawals (-)</p><p className="font-black text-rose-600">-{currencySymbol}{totalOut.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
+                      <div><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Closing</p><p className="font-black text-indigo-700 dark:text-indigo-400">{currencySymbol}{closing.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
+                    </div>
+
+                    <div className="md:hidden flex flex-col divide-y divide-slate-100 dark:divide-slate-800/50">
+                      {month.records.map(rec => {
+                        const dateObj = new Date(rec.date);
+                        const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        const isOut = rec.type === 'out' || rec.type === 'expense';
+                        const netChangeText = isOut ? `-${currencySymbol}${Math.abs(rec.netChange).toLocaleString(undefined, {minimumFractionDigits: 2})}` : `+${currencySymbol}${rec.netChange.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+                        return (
+                          <div key={rec.id} className={`p-4 sm:p-5 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors flex flex-col gap-3 group ${rec.isP2P ? 'bg-amber-50/30 dark:bg-amber-900/10' : ''}`}>
+                            <div className="flex justify-between items-start gap-2 w-full">
+                              <div className="flex items-center gap-3 flex-1 min-w-0">
+                                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${isOut ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400' : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-400'}`}>
+                                  {isOut ? <HiOutlineArrowUp size={16} /> : <HiOutlineArrowDown size={16} />}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h3 className="font-black text-sm sm:text-base text-slate-800 dark:text-white break-words" title={rec.title}>{rec.title}</h3>
+                                    {rec.isP2P && (<span className="px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[8px] font-black uppercase tracking-widest flex items-center gap-1 border border-amber-200 dark:border-amber-500/30 shrink-0"><FaShieldAlt size={8} /> P2P</span>)}
+                                  </div>
+                                  <p className="text-[10px] sm:text-xs font-bold text-slate-500 dark:text-slate-400 mt-1 break-words flex items-center gap-x-1.5">
+                                    <FaWallet className="shrink-0" />
+                                    <span className="text-slate-700 dark:text-slate-300 font-black">{rec.walletName || 'Main Wallet'}</span>
                                   </p>
-                                  {rec.referenceNo && (<span className="text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded truncate max-w-[120px]">Ref: {rec.referenceNo}</span>)}
                                 </div>
                               </div>
+                              <div className="text-right shrink-0 ml-2">
+                                <p className={`text-base sm:text-lg font-black ${isOut ? 'text-rose-600 dark:text-rose-400' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                                  {netChangeText}
+                                </p>
+                                <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest whitespace-nowrap">{isOut ? 'Withdrawal' : 'Net Deposit'}</p>
+                              </div>
                             </div>
-                          </td>
-                          <td className="p-4 text-right align-top">
-                            {rec.currency && rec.currency !== baseCurrency ? (
-                              <div className="flex flex-col items-end">
-                                <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1 flex items-center gap-1">
-                                  <img src={`https://flagcdn.com/w20/${fiatFlagMap[rec.currency] || 'un'}.png`} alt="" className="w-3 h-3 rounded-full object-cover" />{rec.currency}
-                                </span>
-                                {rec.fee > 0 && rec.type === 'in' ? (
-                                  <>
-                                    <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400">Gross: {Number(rec.foreignAmount).toLocaleString()}</p>
-                                    <p className="text-[10px] font-bold text-rose-500">Fee: -{Number(rec.fee).toLocaleString()}</p>
-                                    <p className="text-sm font-black text-slate-800 dark:text-white border-t border-slate-200 dark:border-slate-700 mt-1 pt-1">Net: {(Number(rec.netForeignAmount) || Number(rec.foreignAmount)).toLocaleString()}</p>
-                                  </>
-                                ) : (
-                                  <p className="font-bold text-slate-800 dark:text-slate-200">{(Number(rec.foreignAmount) || 0).toLocaleString()}</p>
+                            <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 flex flex-row justify-between items-center border border-slate-200 dark:border-slate-800/50 mt-1 gap-2">
+                              <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
+                                <div className="min-w-0">
+                                  <p className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Original Gross</p>
+                                  <p className="font-black text-slate-800 dark:text-slate-200 text-xs sm:text-sm break-words">
+                                    {rec.currency && rec.currency !== baseCurrency
+                                      ? `${(rec.foreignAmount || 0).toLocaleString()} ${rec.currency}`
+                                      : `${currencySymbol}${(rec.foreignAmount || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`
+                                    }
+                                  </p>
+                                  {rec.currency && rec.currency !== baseCurrency && (
+                                    <p className="text-[8px] sm:text-[9px] font-bold text-slate-400 break-words">≈ {currencySymbol}{((rec.foreignAmount || 0) * (rec.exchangeRate || 1)).toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                                  )}
+                                </div>
+                                {rec.foreignFeeDisplay > 0 && (
+                                  <div className="border-l border-slate-300 dark:border-slate-700 pl-2 sm:pl-4 shrink-0">
+                                    <p className="text-[9px] sm:text-[10px] font-black text-rose-500 uppercase tracking-widest mb-0.5">Fee</p>
+                                    <p className="font-black text-rose-600 dark:text-rose-400 text-xs sm:text-sm">-{rec.foreignFeeDisplay.toLocaleString()} {rec.currency || baseCurrency}</p>
+                                  </div>
                                 )}
                               </div>
-                            ) : (
-                              <span className="px-2 py-1 rounded-md bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 text-[10px] font-bold uppercase tracking-widest flex items-center justify-end gap-1">
-                                <img src={`https://flagcdn.com/w20/${fiatFlagMap[baseCurrency] || 'un'}.png`} alt="" className="w-3 h-3 rounded-full object-cover" /> Base Asset
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-4 text-right align-top">
-                            <p className={`text-base font-black tracking-tight mt-0.5 ${rec.netChange >= 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                              {rec.netChange >= 0 ? '+' : '-'}{currencySymbol}{(Math.abs(Number(rec.netChange) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                            </p>
-                            {rec.currency !== baseCurrency && (<p className="text-[9px] font-bold text-slate-500 dark:text-slate-400 mt-1 tracking-wider uppercase">Rate: {Number(rec.exchangeRate) || 1}</p>)}
-                          </td>
-                          <td className="p-4 pr-6 align-top">
-                            <div className="flex items-center justify-end gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                              {(rec.linkedExpenseId || rec.linkedIncomeId || rec.linkedPartyId) && (<span className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[8px] font-black rounded border border-amber-200 dark:border-amber-500/30">SYNCED</span>)}
-                              <button onClick={() => handleEdit(rec)} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-xl transition-all shadow-sm border border-slate-300 dark:border-slate-700 active:scale-95"><HiOutlinePencil size={16} /></button>
-                              <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-xl transition-all shadow-sm border border-slate-300 dark:border-slate-700 active:scale-95"><HiOutlineTrash size={16} /></button>
                             </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                            <div className="flex items-end justify-between mt-1">
+                              <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+                                <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/50 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 w-fit shrink-0">
+                                  <HiOutlineCalendar size={12} className="text-slate-500 shrink-0" /> 
+                                  <span className="whitespace-nowrap">{formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]}</span> 
+                                  <span className="opacity-50 ml-1 whitespace-nowrap">{timeStr}</span>
+                                </p>
+                                {rec.referenceNo && (
+                                  <span className="text-[9px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded w-fit uppercase tracking-widest border border-slate-200 dark:border-slate-700 break-words max-w-full">Ref: {rec.referenceNo}</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-2">
+                                {(rec.linkedExpenseId || rec.linkedIncomeId || rec.linkedPartyId) && (
+                                  <span className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[8px] font-black rounded border border-amber-200 dark:border-amber-500/30">SYNCED</span>
+                                )}
+                                <button onClick={() => handleEdit(rec)} className="p-2 sm:p-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-lg sm:rounded-xl hover:bg-blue-100 dark:hover:bg-blue-500/20 transition-colors border border-blue-200 dark:border-blue-500/30 active:scale-95 shadow-sm"><HiOutlinePencil size={14} /></button>
+                                <button onClick={() => initiateDelete(rec)} className="p-2 sm:p-2.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-lg sm:rounded-xl hover:bg-rose-100 dark:hover:bg-rose-500/20 transition-colors border border-rose-200 dark:border-rose-500/30 active:scale-95 shadow-sm"><HiOutlineTrash size={14} /></button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
 
-              <div className="px-5 sm:px-6 py-4 sm:py-5 border-t border-slate-200 dark:border-slate-800 flex justify-end bg-slate-50/50 dark:bg-slate-800/30">
-                <div className="text-right bg-white dark:bg-slate-900 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm shrink-0">
-                  <p className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Closing Balance</p>
-                  <p className="text-base sm:text-lg font-black text-indigo-700 dark:text-indigo-400 whitespace-nowrap">{currencySymbol}{(month.closingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                </div>
+                    <div className="hidden md:block overflow-x-auto custom-scrollbar">
+                      <table className="w-full text-left border-collapse min-w-[850px]">
+                        <thead className="bg-slate-100/50 dark:bg-slate-800/30 text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
+                          <tr>
+                            <th className="p-4 pl-6 w-12 text-center">Type</th>
+                            <th className="p-4">Platform & Details</th>
+                            <th className="p-4 text-right">Gross Amount</th>
+                            <th className="p-4 text-right">Net Impact</th>
+                            <th className="p-4 text-right">Fee</th>
+                            <th className="p-4 pr-6 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                          {month.records.map(rec => {
+                            const dateObj = new Date(rec.date);
+                            const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            const isOut = rec.type === 'out' || rec.type === 'expense';
+                            const netChangeText = isOut ? `-${currencySymbol}${Math.abs(rec.netChange).toLocaleString(undefined, {minimumFractionDigits: 2})}` : `+${currencySymbol}${rec.netChange.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+                            return (
+                              <tr key={rec.id} className={`hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors group ${rec.isP2P ? 'bg-amber-50/40 dark:bg-amber-900/10' : ''}`}>
+                                <td className="p-4 pl-6 text-center align-top">
+                                  <div className={`w-10 h-10 mx-auto rounded-xl flex items-center justify-center text-lg shrink-0 ${isOut ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400' : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-400'}`}>
+                                    {isOut ? <HiOutlineArrowUp /> : <HiOutlineArrowDown />}
+                                  </div>
+                                </td>
+                                <td className="p-4 align-top">
+                                  <div className="flex items-start gap-4">
+                                    <div className={`w-10 h-10 mt-0.5 rounded-2xl flex items-center justify-center text-xl shadow-sm shrink-0 ${rec.isP2P ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400' : 'bg-purple-100 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400'}`}>
+                                      {rec.isP2P ? <FaShieldAlt /> : <FaWallet />}
+                                    </div>
+                                    <div>
+                                      <p className="font-black text-slate-900 dark:text-white text-sm mb-0.5 flex items-center gap-2">
+                                        {rec.walletName || 'Main Wallet'}
+                                        {rec.isP2P && (<span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-400 text-[8px] font-black uppercase tracking-widest flex items-center gap-1"><FaShieldAlt size={8} /> P2P</span>)}
+                                      </p>
+                                      <p className="text-[11px] font-bold text-slate-600 dark:text-slate-400 mt-0.5">{rec.title}</p>
+                                      <div className="flex items-center gap-2 mt-1.5">
+                                        <p className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                                          {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]}
+                                          <span className="opacity-60 border-l border-slate-300 dark:border-slate-600 pl-1 ml-1">{timeStr}</span>
+                                        </p>
+                                        {rec.referenceNo && (<span className="text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded truncate max-w-[120px]">Ref: {rec.referenceNo}</span>)}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="p-4 text-right align-top">
+                                  <p className="font-black text-slate-800 dark:text-slate-200">
+                                    {rec.currency && rec.currency !== baseCurrency 
+                                      ? `${(rec.foreignAmount || 0).toLocaleString()} ${rec.currency}`
+                                      : `${currencySymbol}${(rec.foreignAmount || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`
+                                    }
+                                  </p>
+                                  {rec.currency && rec.currency !== baseCurrency && (
+                                    <p className="text-[10px] font-bold text-slate-500 mt-1">≈ {currencySymbol}{((rec.foreignAmount || 0) * (rec.exchangeRate || 1)).toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                                  )}
+                                </td>
+                                <td className="p-4 text-right align-top">
+                                  <p className={`text-base font-black tracking-tight mt-0.5 ${isOut ? 'text-rose-600 dark:text-rose-400' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                                    {netChangeText}
+                                  </p>
+                                </td>
+                                <td className="p-4 text-right align-top">
+                                  {rec.foreignFeeDisplay > 0 ? <span className="text-xs font-bold text-rose-500">-{rec.foreignFeeDisplay.toLocaleString()} {rec.currency || baseCurrency}</span> : <span className="text-xs text-slate-400">-</span>}
+                                </td>
+                                <td className="p-4 pr-6 align-top">
+                                  <div className="flex items-center justify-end gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                                    {(rec.linkedExpenseId || rec.linkedIncomeId || rec.linkedPartyId) && (<span className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[8px] font-black rounded border border-amber-200 dark:border-amber-500/30">SYNCED</span>)}
+                                    <button onClick={() => handleEdit(rec)} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-xl transition-all shadow-sm border border-slate-300 dark:border-slate-700 active:scale-95"><HiOutlinePencil size={16} /></button>
+                                    <button onClick={() => initiateDelete(rec)} className="p-2.5 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-xl transition-all shadow-sm border border-slate-300 dark:border-slate-700 active:scale-95"><HiOutlineTrash size={16} /></button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="px-5 sm:px-6 py-4 sm:py-5 border-t border-slate-200 dark:border-slate-800 flex justify-end bg-slate-50/50 dark:bg-slate-800/30">
+                      <div className="text-right bg-white dark:bg-slate-900 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm shrink-0">
+                        <p className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Closing Balance</p>
+                        <p className="text-base sm:text-lg font-black text-indigo-700 dark:text-indigo-400 whitespace-nowrap">{currencySymbol}{closing.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
-      {/* ADD/EDIT MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90dvh] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-300 dark:border-slate-700">
-            <div className="px-6 sm:px-8 py-5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white flex justify-between items-center shrink-0">
-              <h3 className="text-xl font-black flex items-center gap-2"><FaWallet size={20} /> {editingId ? 'Edit E-Wallet Record' : 'Log E-Deposit'}</h3>
+            <div className="px-6 sm:px-8 py-5 text-white flex justify-between items-center shrink-0 bg-gradient-to-r from-indigo-600 to-purple-600">
+              <h3 className="text-lg sm:text-xl font-black flex items-center gap-2">
+                <HiOutlineArrowDown size={20} /> 
+                {editingId ? 'Edit Deposit' : 'Log E-Deposit'}
+              </h3>
               <button type="button" onClick={closeModal} className="p-2 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors active:scale-90"><HiOutlineX size={20} /></button>
             </div>
             <form onSubmit={handleSaveEntry} className="p-6 sm:p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar pb-2">
@@ -807,27 +823,25 @@ const OnlineWalletContent = () => {
                 </div>
               </div>
 
-              {!formData.isSynced && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">Fiat Currency</label>
-                    <select value={formData.currency} onChange={e => setFormData({ ...formData, currency: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : '' })} className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-purple-500/50 transition-colors cursor-pointer disabled:opacity-60 shadow-sm">
-                      {availableCurrencies.map(c => (<option key={c} value={c}>{c} {c === baseCurrency ? '(Base)' : ''}</option>))}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">Deposit Amount *</label>
-                    <input type="number" step="any" required value={formData.foreignAmount} onChange={e => setFormData({ ...formData, foreignAmount: e.target.value })} placeholder="0.00" className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-lg text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-purple-500/50 transition-colors placeholder-slate-400 shadow-sm" />
-                  </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">Fiat Currency</label>
+                  <select disabled={formData.isSynced} value={formData.currency} onChange={e => setFormData({ ...formData, currency: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : '' })} className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-purple-500/50 transition-colors cursor-pointer disabled:opacity-60 shadow-sm">
+                    {availableCurrencies.map(c => (<option key={c} value={c}>{c} {c === baseCurrency ? '(Base)' : ''}</option>))}
+                  </select>
                 </div>
-              )}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">Deposit Amount *</label>
+                  <input disabled={formData.isSynced} type="number" step="any" required value={formData.foreignAmount} onChange={e => setFormData({ ...formData, foreignAmount: e.target.value })} placeholder="0.00" className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-lg text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-purple-500/50 transition-colors placeholder-slate-400 disabled:opacity-60 shadow-sm" />
+                </div>
+              </div>
 
               {!formData.isSynced && (
-                <label className={`flex items-start gap-4 p-5 rounded-2xl border-2 cursor-pointer transition-colors duration-300 shadow-sm ${formData.isP2P ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-400 dark:border-amber-500/50' : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-purple-400'}`}>
+                <label className="flex items-start gap-4 p-5 rounded-2xl border-2 cursor-pointer transition-colors duration-300 shadow-sm bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-purple-400 text-slate-800 dark:text-slate-200">
                   <div className="relative flex items-center justify-center mt-0.5">
                     <input type="checkbox" checked={formData.isP2P} onChange={e => setFormData({ ...formData, isP2P: e.target.checked })} className="sr-only" />
                     <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${formData.isP2P ? 'bg-amber-500 border-amber-500' : 'bg-white dark:bg-slate-900 border-slate-400 dark:border-slate-500'}`}>
-                      {formData.isP2P && <HiOutlineShieldCheck size={14} className="text-white" />}
+                      {formData.isP2P && <HiCheck size={14} className="text-white" />}
                     </div>
                   </div>
                   <div>
@@ -865,16 +879,13 @@ const OnlineWalletContent = () => {
                 </div>
               )}
 
+              {/* SUMMARY */}
               <div className="p-4 sm:p-5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-inner">
-                <div className="flex justify-between items-end">
-                  <div className="space-y-1.5">
-                    <span className="block text-xs font-bold text-slate-600 dark:text-slate-400">Gross: {netNativeAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} {formData.currency}</span>
-                    <span className="block text-[10px] font-black text-rose-600 dark:text-rose-400">Fees: -{nativeFee.toLocaleString(undefined, { maximumFractionDigits: 2 })} {formData.currency}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="block text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Base Value</span>
-                    <span className="text-xl sm:text-2xl font-black tracking-tight text-indigo-600 dark:text-indigo-400">{currencySymbol}{calculatedFinalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                  </div>
+                <div className="flex justify-between text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-400"><span>Gross Deposit:</span><span className="font-black">{grossAmountNative.toLocaleString(undefined, { minimumFractionDigits: 2 })} {formData.currency}</span></div>
+                {feeNative > 0 && <div className="flex justify-between text-xs sm:text-sm font-bold text-rose-500 mt-2"><span>Platform Fee:</span><span className="font-black">-{feeNative.toLocaleString(undefined, { minimumFractionDigits: 2 })} {formData.currency}</span></div>}
+                <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-300 dark:border-slate-600">
+                  <span className="text-sm font-black text-slate-800 dark:text-slate-200 uppercase tracking-widest">Net Credit (in {baseCurrency}):</span>
+                  <span className="text-xl font-black text-indigo-600 dark:text-indigo-400">{currencySymbol}{calculatedFinalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
               </div>
 
@@ -884,9 +895,9 @@ const OnlineWalletContent = () => {
               </div>
 
               <div className="sticky bottom-0 pt-2 pb-1 bg-white dark:bg-slate-900 z-10">
-                <button type="submit" disabled={isSaving} className={`w-full p-4 sm:p-5 rounded-[2rem] font-black text-sm uppercase tracking-widest text-white transition-all shadow-xl flex items-center justify-center gap-2 shrink-0 ${isSaving ? 'opacity-70 cursor-not-allowed' : 'active:scale-95'} ${formData.isP2P ? 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-amber-500/30' : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 shadow-indigo-500/30'}`}>
-                  {isSaving ? <HiOutlineRefresh className="animate-spin text-2xl" /> : <FaWallet size={16} />}
-                  {isSaving ? 'Processing...' : editingId ? 'Update Ledger' : 'Secure E-Deposit'}
+                <button type="submit" disabled={isSaving} className="w-full p-4 sm:p-5 rounded-[2rem] font-black text-sm uppercase tracking-widest text-white transition-all shadow-xl flex items-center justify-center gap-2 shrink-0 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 shadow-indigo-500/30 active:scale-95 disabled:opacity-70">
+                  {isSaving ? <HiOutlineRefresh className="animate-spin text-2xl" /> : <HiOutlineArrowDown size={16} />}
+                  {isSaving ? 'Processing...' : editingId ? 'Update Deposit' : 'Secure E-Deposit'}
                 </button>
               </div>
             </form>
@@ -905,7 +916,7 @@ const OnlineWalletContent = () => {
               </div>
             </div>
             <form onSubmit={executeSecureDelete} className="p-6 sm:p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
-              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-500/30 rounded-2xl shadow-sm">
+              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-500/30 rounded-2xl shadow-sm">
                 <p className="text-xs font-bold text-amber-800 dark:text-amber-300 leading-relaxed">You are deleting <span className="font-black">"{deleteContext.title}"</span> worth <span className="font-black"> {currencySymbol}{deleteContext.finalBaseAmount?.toLocaleString()}</span></p>
                 {(deleteContext.linkedIncomeId || deleteContext.linkedExpenseId || deleteContext.linkedPartyId) && (
                   <p className="text-[10px] text-rose-600 dark:text-rose-400 mt-2 font-bold flex items-center gap-1.5 bg-rose-50 dark:bg-rose-900/20 p-2 rounded-lg border border-rose-200 dark:border-rose-800/50"><HiOutlineExclamationCircle size={14} className="shrink-0" /> Auto-synced entry. Deletion may cause ledger mismatch. Best practice is to delete from the source.</p>
@@ -918,7 +929,9 @@ const OnlineWalletContent = () => {
               </div>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setDeleteContext(null)} className="flex-1 p-4 rounded-xl font-black text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 transition-colors shadow-sm active:scale-95 uppercase tracking-widest">Cancel</button>
-                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-xl font-black text-sm bg-gradient-to-r from-rose-600 to-pink-600 text-white hover:from-rose-700 hover:to-pink-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30 active:scale-95 uppercase tracking-widest">{isVerifying ? <HiOutlineRefresh className="animate-spin" size={18} /> : <HiOutlineTrash size={18} />} Confirm</button>
+                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-xl font-black text-white bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30 active:scale-95 uppercase tracking-widest">
+                  {isVerifying ? <HiOutlineRefresh className="animate-spin" size={18} /> : <HiOutlineTrash size={18} />} Confirm
+                </button>
               </div>
             </form>
           </div>

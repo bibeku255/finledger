@@ -1,3 +1,4 @@
+// src/utils/reportUtils.js
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -12,9 +13,10 @@ const sanitizeCellForCSV = (val) => {
 
 const sanitizeCellForPDF = (val) => {
   if (val === null || val === undefined) return '';
+  // Fallback to plain alphabet symbols to prevent PDF character corruption
   return String(val)
-    .replace(/₹/g, 'Rs. ')
-    .replace(/रू/g, 'Rs. ')
+    .replace(/₹/g, 'INR ')
+    .replace(/रू/g, 'NPR ')
     .replace(/\$/g, 'USD ');
 };
 
@@ -48,8 +50,8 @@ export const downloadExcelReport = async (
   try {
     validateInput(data, columns, fileName);
 
-    // 1. Headers
-    const headers = columns.map(col => `"${sanitizeCellForCSV(col.header)}"`).join(',');
+    // 1. Headers (Using safe title names)
+    const headers = columns.map(col => `"${sanitizeCellForCSV(col.header).replace(/[₹रू$]/g, '')}"`).join(',');
 
     // 2. Rows & dynamic totals
     let totals = new Array(columns.length).fill("");
@@ -102,7 +104,7 @@ export const downloadExcelReport = async (
   } catch (error) {
     console.error("Excel Generation Error:", error);
     if (onError) onError(error.message);
-    else throw error; // re-throw agar koi listener nahi
+    else throw error; 
   }
 };
 
@@ -119,7 +121,7 @@ export const downloadPDFReport = async (
   try {
     validateInput(data, columns, fileName);
 
-    const doc = new jsPDF();
+    const doc = new jsPDF('landscape'); // Setting to landscape for better table fitting
 
     // Header
     doc.setFontSize(18);
@@ -132,7 +134,9 @@ export const downloadPDFReport = async (
     doc.setTextColor(100);
     doc.text(`Generated on: ${new Date().toLocaleString()} | Finledger Smart Engine`, 14, 25);
 
-    const head = [columns.map(col => col.header)];
+    // Sanitize Headers (Remove unsupported symbols from column titles)
+    const head = [columns.map(col => sanitizeCellForPDF(col.header))];
+    
     let totals = new Array(columns.length).fill("");
     totals[0] = "TOTAL";
 
@@ -151,8 +155,8 @@ export const downloadPDFReport = async (
       })
     );
 
-    // Format totals for final row with currency symbol (use first row's symbol)
-    const firstRowSymbol = body.length > 0 ? (String(body[0][0]).includes('Rs.') ? 'Rs. ' : String(body[0][0]).includes('USD') ? 'USD ' : '') : '';
+    // Format totals for final row 
+    const firstRowSymbol = body.length > 0 ? (String(body[0][0]).includes('INR') ? 'INR ' : String(body[0][0]).includes('NPR') ? 'NPR ' : String(body[0][0]).includes('USD') ? 'USD ' : '') : '';
     totals = totals.map((t, i) => {
       if (typeof t === 'number') {
         return `${firstRowSymbol}${t.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -166,15 +170,23 @@ export const downloadPDFReport = async (
       body: body,
       startY: 32,
       theme: 'grid',
-      styles: { fontSize: 8, cellPadding: 3, textColor: [51, 65, 85] },
+      styles: { fontSize: 8, cellPadding: 3, textColor: [51, 65, 85], overflow: 'linebreak' },
       headStyles: { fillColor: [37, 99, 235], textColor: [255, 255, 255], fontStyle: 'bold' },
       alternateRowStyles: { fillColor: [248, 250, 252] },
-      willDrawCell: function (data) {
+      columnStyles: {
+        0: { cellWidth: 20 }, // Date
+        1: { cellWidth: 25 }, // Type
+        2: { cellWidth: 25 }, // Vault
+        8: { cellWidth: 'auto' }, // Notes (let it take remaining space)
+      },
+      didParseCell: function (data) {
         if (data.section === 'body') {
           const colKey = String(columns[data.column.index].key).toLowerCase();
-          if (colKey.includes('amount') || colKey.includes('fee') || colKey.includes('balance') || colKey.includes('net')) {
+          
+          if (colKey.includes('amount') || colKey.includes('fee') || colKey.includes('balance') || colKey.includes('net') || colKey.includes('gross')) {
             data.cell.styles.halign = 'right';
           }
+          
           if (data.row.index === body.length - 1) {
             data.cell.styles.fontStyle = 'bold';
             data.cell.styles.fillColor = [241, 245, 249];

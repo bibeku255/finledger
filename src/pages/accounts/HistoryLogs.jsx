@@ -1,34 +1,67 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { collection, onSnapshot, query, orderBy, deleteDoc, doc, getDocs, where, getDoc, updateDoc } from 'firebase/firestore';
+import {
+  collection, onSnapshot, query, orderBy, where,
+  deleteDoc, doc, getDoc, updateDoc, setDoc, getDocs
+} from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
-
-import { 
-  HiOutlineSearch, HiOutlineRefresh, 
-  HiOutlineClock, HiOutlineTrendingUp, HiOutlineTrendingDown, 
+import { verifyPIN } from '../../utils/cryptoUtils';
+import {
+  HiOutlineSearch, HiOutlineRefresh,
+  HiOutlineClock, HiOutlineTrendingUp, HiOutlineTrendingDown,
   HiOutlineSwitchHorizontal, HiOutlineDocumentSearch, HiOutlineTrash,
   HiOutlineLockClosed, HiOutlineExclamationCircle, HiOutlineArrowDown, HiOutlineArrowUp,
   HiOutlineDownload, HiOutlineDocumentText, HiOutlineTable,
   HiOutlineCalendar, HiOutlineShieldCheck, HiOutlineFilter,
-  HiOutlineCash
+  HiOutlineCash, HiOutlineCheckCircle, HiOutlineInformationCircle,
+  HiOutlineX, HiOutlineChevronDown, HiOutlinePencil
 } from 'react-icons/hi';
-
-// 🚀 FIXED: Added FaChartLine which was missing and causing the crash!
-import { 
-  FaExchangeAlt, FaBuilding, FaWallet, FaRandom, FaBitcoin, 
-  FaUniversity, FaUserFriends, FaMoneyBillWave, FaGem, FaHistory, FaChartLine 
+import {
+  FaExchangeAlt, FaBuilding, FaWallet, FaRandom, FaBitcoin,
+  FaUniversity, FaUserFriends, FaMoneyBillWave, FaGem, FaHistory, FaChartLine, FaCreditCard
 } from 'react-icons/fa';
 
-const hashPIN = async (pinCode) => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(pinCode);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+// ============================================
+// 🚀 MINI TOAST SYSTEM (Self-contained, same as ExpenseTracker)
+// ============================================
+const ToastContext = React.createContext(null);
+const ToastProvider = ({ children }) => {
+  const [toasts, setToasts] = useState([]);
+  const addToast = (message, type = 'info', duration = 4000) => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type, duration }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
+  };
+  const removeToast = id => setToasts(prev => prev.filter(t => t.id !== id));
+  return (
+    <ToastContext.Provider value={{ addToast, removeToast }}>
+      {children}
+      <div className="fixed top-24 right-4 z-[10000] space-y-2 max-w-sm w-full pointer-events-none px-4 md:px-0">
+        {toasts.map(toast => (
+          <div key={toast.id} className={`pointer-events-auto flex items-start gap-3 p-4 rounded-2xl shadow-2xl backdrop-blur-xl border animate-in slide-in-from-right-4 fade-in duration-300 ${
+            toast.type === 'success' ? 'bg-green-50/95 dark:bg-green-900/90 border-green-200 dark:border-green-700' :
+            toast.type === 'error' ? 'bg-red-50/95 dark:bg-red-900/90 border-red-200 dark:border-red-700' :
+            toast.type === 'warning' ? 'bg-amber-50/95 dark:bg-amber-900/90 border-amber-200 dark:border-amber-700' :
+            'bg-blue-50/95 dark:bg-blue-900/90 border-blue-200 dark:border-blue-700'
+          }`}>
+            {toast.type === 'success' && <HiOutlineCheckCircle className="text-green-600 dark:text-green-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'error' && <HiOutlineExclamationCircle className="text-red-600 dark:text-red-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'warning' && <HiOutlineExclamationCircle className="text-amber-600 dark:text-amber-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'info' && <HiOutlineInformationCircle className="text-blue-600 dark:text-blue-400 w-5 h-5 flex-shrink-0" />}
+            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 flex-1">{toast.message}</p>
+            <button onClick={() => removeToast(toast.id)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"><HiOutlineX size={16} /></button>
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
 };
+const useToast = () => React.useContext(ToastContext);
 
-// Premium Activity Badge
+// ============================================
+// 🧩 HELPER COMPONENTS
+// ============================================
 const ActivityBadge = ({ type }) => {
   const config = {
     income: { bg: 'bg-emerald-500/10', text: 'text-emerald-500 dark:text-emerald-400', border: 'border-emerald-200 dark:border-emerald-500/30', label: 'INCOME' },
@@ -43,43 +76,66 @@ const ActivityBadge = ({ type }) => {
   );
 };
 
-const HistoryLogs = () => {
-  const { user, baseCurrency = 'INR', formatGlobalDate } = useAuth();
+// ============================================
+// 🚀 MAIN CONTENT COMPONENT
+// ============================================
+const HistoryLogsContent = () => {
+  const { user, baseCurrency = 'INR', formatGlobalDate, getCalendarMonthKey } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
+  const { addToast } = useToast();
 
   const [incomes, setIncomes] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState('all'); 
-  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false); // 🚀 Export Dropdown State
-  const [deleteContext, setDeleteContext] = useState(null); 
+  const [filterType, setFilterType] = useState('all');
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const [deleteContext, setDeleteContext] = useState(null);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
 
+  // 🗓️ Collapsible months state
+  const getCurrentMonthKey = () => {
+    const now = new Date();
+    return getCalendarMonthKey ? getCalendarMonthKey(now.toISOString()) : `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  };
+  const [openMonths, setOpenMonths] = useState(new Set([getCurrentMonthKey()]));
+  const toggleMonth = (monthKey) => {
+    setOpenMonths(prev => {
+      const next = new Set(prev);
+      next.has(monthKey) ? next.delete(monthKey) : next.add(monthKey);
+      return next;
+    });
+  };
+
+  // Firestore listeners
   useEffect(() => {
     if (!user) return;
     let incomesLoaded = false, expensesLoaded = false, shiftsLoaded = false;
     const checkLoading = () => { if (incomesLoaded && expensesLoaded && shiftsLoaded) setIsLoading(false); };
 
-    const unsubIncome = onSnapshot(query(collection(db, "users", user.uid, "incomeLogs"), orderBy("timestamp", "desc")), snap => {
-      setIncomes(snap.docs.map(doc => ({ id: doc.id, logType: 'income', ...doc.data() })));
-      incomesLoaded = true; checkLoading();
-    });
-    const unsubExpense = onSnapshot(query(collection(db, "users", user.uid, "expenseLogs"), orderBy("timestamp", "desc")), snap => {
-      setExpenses(snap.docs.map(doc => ({ id: doc.id, logType: 'expense', ...doc.data() })));
-      expensesLoaded = true; checkLoading();
-    });
-    const unsubShift = onSnapshot(query(collection(db, "users", user.uid, "capitalShifts"), orderBy("timestamp", "desc")), snap => {
-      setShifts(snap.docs.map(doc => ({ id: doc.id, logType: 'shift', ...doc.data() })));
-      shiftsLoaded = true; checkLoading();
-    });
+    const unsubIncome = onSnapshot(
+      query(collection(db, "users", user.uid, "incomeLogs"), orderBy("timestamp", "desc")),
+      snap => { setIncomes(snap.docs.map(d => ({ id: d.id, logType: 'income', ...d.data() }))); incomesLoaded = true; checkLoading(); },
+      err => { addToast('Failed to load incomes.', 'error'); incomesLoaded = true; checkLoading(); }
+    );
+    const unsubExpense = onSnapshot(
+      query(collection(db, "users", user.uid, "expenseLogs"), orderBy("timestamp", "desc")),
+      snap => { setExpenses(snap.docs.map(d => ({ id: d.id, logType: 'expense', ...d.data() }))); expensesLoaded = true; checkLoading(); },
+      err => { addToast('Failed to load expenses.', 'error'); expensesLoaded = true; checkLoading(); }
+    );
+    const unsubShift = onSnapshot(
+      query(collection(db, "users", user.uid, "capitalShifts"), orderBy("timestamp", "desc")),
+      snap => { setShifts(snap.docs.map(d => ({ id: d.id, logType: 'shift', ...d.data() }))); shiftsLoaded = true; checkLoading(); },
+      err => { addToast('Failed to load shifts.', 'error'); shiftsLoaded = true; checkLoading(); }
+    );
 
     return () => { unsubIncome(); unsubExpense(); unsubShift(); };
-  }, [user]);
+  }, [user, addToast]);
 
+  // Merge + filter + group by calendar month
   const processedLogs = useMemo(() => {
     const allRecords = [...incomes, ...expenses, ...shifts];
     const filtered = allRecords.filter(rec => {
@@ -89,27 +145,48 @@ const HistoryLogs = () => {
       return matchSearch && matchType;
     });
 
-    const sorted = filtered.sort((a, b) => b.timestamp - a.timestamp);
+    const sorted = filtered.sort((a, b) => new Date(a.date) - new Date(b.date));
+    let runningBalance = 0;
     const grouped = {};
-    
     sorted.forEach(t => {
       const dateObj = new Date(t.date || new Date());
-      const monthName = formatGlobalDate ? formatGlobalDate(dateObj, 'monthYear') : dateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
-      const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
-
-      if (!grouped[monthKey]) grouped[monthKey] = { monthName, records: [], monthInflow: 0, monthOutflow: 0 };
-      if (t.logType === 'income') grouped[monthKey].monthInflow += Number(t.finalBaseAmount || 0);
-      if (t.logType === 'expense') grouped[monthKey].monthOutflow += Number(t.finalBaseAmount || 0);
+      const monthKey = getCalendarMonthKey ? getCalendarMonthKey(t.date) : `${dateObj.getFullYear()}-${String(dateObj.getMonth()+1).padStart(2,'0')}`;
+      if (!grouped[monthKey]) grouped[monthKey] = {
+        monthKey,
+        monthName: formatGlobalDate ? formatGlobalDate(dateObj, 'monthYear') : dateObj.toLocaleString('default', { month: 'long', year: 'numeric' }),
+        records: [],
+        openingBalance: runningBalance,
+        monthInflow: 0,
+        monthOutflow: 0,
+        closingBalance: 0
+      };
+      const baseAmt = Number(t.finalBaseAmount) || 0;
+      if (t.logType === 'income') {
+        grouped[monthKey].monthInflow += baseAmt;
+        runningBalance += baseAmt;
+      } else if (t.logType === 'expense') {
+        grouped[monthKey].monthOutflow += baseAmt;
+        runningBalance -= baseAmt;
+      }
+      // shift doesn't affect balance (internal transfer)
       grouped[monthKey].records.push(t);
     });
-
-    return Object.keys(grouped).sort().reverse().map(key => grouped[key]);
-  }, [incomes, expenses, shifts, searchTerm, filterType, formatGlobalDate]);
+    // reverse months for display (newest first)
+    return Object.keys(grouped)
+      .sort((a, b) => (grouped[b].records[0]?.timestamp || 0) - (grouped[a].records[0]?.timestamp || 0))
+      .map(key => {
+        const month = grouped[key];
+        month.closingBalance = month.openingBalance + month.monthInflow - month.monthOutflow;
+        month.records = month.records.reverse(); // newest first within month
+        return month;
+      });
+  }, [incomes, expenses, shifts, searchTerm, filterType, formatGlobalDate, getCalendarMonthKey]);
 
   const lifetimeInflow = incomes.reduce((acc, curr) => acc + Number(curr.finalBaseAmount || 0), 0);
   const lifetimeOutflow = expenses.reduce((acc, curr) => acc + Number(curr.finalBaseAmount || 0), 0);
   const totalTransactions = incomes.length + expenses.length + shifts.length;
 
+  // Type styles for icons
   const getTypeStyles = (type) => {
     switch(type) {
       case 'income': return { bg: 'bg-emerald-50 text-emerald-500 dark:bg-emerald-500/10 dark:text-emerald-400', border: 'border-emerald-200 dark:border-emerald-500/30', icon: <HiOutlineArrowDown size={18} /> };
@@ -119,32 +196,35 @@ const HistoryLogs = () => {
     }
   };
 
+  // Vault icon helper
   const getVaultIcon = (v) => {
     if (!v) return <FaWallet />;
-    if (v.toLowerCase() === 'bank') return <FaUniversity className="text-blue-500" />;
-    if (v.toLowerCase() === 'cash') return <FaMoneyBillWave className="text-emerald-500" />;
-    if (v.toLowerCase() === 'crypto') return <FaBitcoin className="text-orange-500" />;
-    if (v.toLowerCase() === 'online') return <FaWallet className="text-purple-500" />;
-    return <FaWallet />;
+    const vl = v.toLowerCase();
+    if (vl === 'bank') return <FaUniversity className="text-blue-500" />;
+    if (vl === 'cash') return <FaMoneyBillWave className="text-emerald-500" />;
+    if (vl === 'crypto') return <FaBitcoin className="text-orange-500" />;
+    if (vl === 'online') return <FaWallet className="text-purple-500" />;
+    return <FaCreditCard className="text-slate-500" />;
   };
 
-  // 🚀 FIXED: Smart Math Export Engine (Calculates Totals in Excel/PDF automatically)
-  const handleDownloadReport = (format) => {
+  // Export handler
+  const handleDownloadReport = async (format) => {
     setIsExportMenuOpen(false);
-
     const allRecords = [...incomes, ...expenses, ...shifts];
     const filteredForReport = allRecords.filter(rec => {
       const searchTarget = rec.title || (rec.fromVault ? `Shift ${rec.fromVault} to ${rec.toVault}` : '');
       const matchSearch = searchTarget.toLowerCase().includes(searchTerm.toLowerCase());
       const matchType = filterType === 'all' || rec.logType === filterType;
       return matchSearch && matchType;
-    }).sort((a, b) => b.timestamp - a.timestamp); 
+    }).sort((a, b) => b.timestamp - a.timestamp);
 
-    if (filteredForReport.length === 0) return alert("No records found to download.");
+    if (filteredForReport.length === 0) {
+      addToast("No records found to download based on filters.", "warning");
+      return;
+    }
 
     const reportData = filteredForReport.map(rec => {
       const rawDate = rec.date ? rec.date.split('T')[0] : 'N/A';
-
       if (rec.logType === 'income') {
         return {
           date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rawDate,
@@ -152,7 +232,7 @@ const HistoryLogs = () => {
           details: `${rec.title} (${rec.category})`.replace(/(\r\n|\n|\r)/gm, " "),
           vault: `${rec.vault}${rec.subWallet ? ` - ${rec.subWallet}` : ''}`,
           nativeAmount: `+${Number(rec.amount || 0).toLocaleString()} ${rec.asset}`,
-          inflowBase: Number(rec.finalBaseAmount || 0),   
+          inflowBase: Number(rec.finalBaseAmount || 0),
           outflowBase: 0,
         };
       } else if (rec.logType === 'expense') {
@@ -163,28 +243,27 @@ const HistoryLogs = () => {
           vault: rec.isSplit ? 'Split Payment' : `${rec.vault}${rec.subWallet ? ` - ${rec.subWallet}` : ''}`,
           nativeAmount: rec.isSplit ? 'Multi-Asset' : `-${Number(rec.totalPaidFromVault || rec.amount || 0).toLocaleString()} ${rec.asset}`,
           inflowBase: 0,
-          outflowBase: Number(rec.finalBaseAmount || 0),  
+          outflowBase: Number(rec.finalBaseAmount || 0),
         };
-      } else {
-        const grossBase = (Number(rec.grossAmount) || 0) * (Number(rec.fromExchangeRate) || 1);
+      } else { // shift
         return {
           date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rawDate,
           type: 'SHIFT (Internal)',
           details: (rec.routingPlatform || 'Direct Transfer').replace(/(\r\n|\n|\r)/gm, " "),
           vault: `${rec.fromVault} ➔ ${rec.toVault}`,
           nativeAmount: `${Number(rec.grossAmount || 0).toLocaleString()} ${rec.fromAsset}`,
-          inflowBase: 0, 
-          outflowBase: 0 
+          inflowBase: 0,
+          outflowBase: 0
         };
       }
     });
 
     const columns = [
-      { header: 'Date', key: 'date' }, 
-      { header: 'Activity Type', key: 'type' }, 
+      { header: 'Date', key: 'date' },
+      { header: 'Activity Type', key: 'type' },
       { header: 'Details / Description', key: 'details' },
-      { header: 'Vault Involved', key: 'vault' }, 
-      { header: 'Native Amount', key: 'nativeAmount' }, 
+      { header: 'Vault Involved', key: 'vault' },
+      { header: 'Native Amount', key: 'nativeAmount' },
       { header: `Total Inflow (${currencySymbol})`, key: 'inflowBase', isNumeric: true },
       { header: `Total Outflow (${currencySymbol})`, key: 'outflowBase', isNumeric: true }
     ];
@@ -193,8 +272,21 @@ const HistoryLogs = () => {
     const filterTitle = filterType !== 'all' ? ` (${filterType.toUpperCase()})` : '';
     const reportTitle = `Master Ledger Timeline${filterTitle}`;
 
-    if (format === 'pdf') downloadPDFReport(reportData, columns, fileName, reportTitle);
-    else downloadExcelReport(reportData, columns, fileName, reportTitle);
+    try {
+      if (format === 'pdf') {
+        await downloadPDFReport(reportData, columns, fileName, reportTitle, {
+          onSuccess: () => addToast('PDF report downloaded!', 'success'),
+          onError: (msg) => addToast(`PDF Error: ${msg}`, 'error')
+        });
+      } else {
+        await downloadExcelReport(reportData, columns, fileName, reportTitle, {
+          onSuccess: () => addToast('Excel report downloaded!', 'success'),
+          onError: (msg) => addToast(`Excel Error: ${msg}`, 'error')
+        });
+      }
+    } catch (e) {
+      addToast('Failed to generate report.', 'error');
+    }
   };
 
   const initiateDelete = (rec) => { setDeleteContext(rec); setPinInput(''); setPinError(''); };
@@ -206,77 +298,81 @@ const HistoryLogs = () => {
 
     try {
       const userDoc = await getDoc(doc(db, "users", user.uid));
-      const userData = userDoc.data();
-      const hashedInput = await hashPIN(pinInput.trim());
-      const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin; 
+      const storedHash = userDoc.data()?.security?.pinHash || userDoc.data()?.securityPin || userDoc.data()?.pin;
+      const { valid, newHash } = await verifyPIN(pinInput.trim(), storedHash, user.uid);
 
-      if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) {
+      if (!valid) {
         setPinError("Incorrect PIN. Deletion blocked!");
         setIsVerifying(false); return;
       }
 
+      if (newHash) {
+        await setDoc(doc(db, "users", user.uid), { security: { pinHash: newHash } }, { merge: true });
+      }
+
       const rec = deleteContext;
-      const allVaults = ['cashWallet', 'bankWallet', 'onlineWallet', 'cryptoWalletLogs', 'expenseLogs', 'incomeLogs']; 
+      const vaultCollections = ['cashWallet', 'bankWallet', 'onlineWallet', 'cryptoWalletLogs', 'expenseLogs', 'incomeLogs'];
 
       if (rec.logType === 'income') {
         await deleteDoc(doc(db, "users", user.uid, "incomeLogs", rec.id));
         if (rec.linkedIncomeId) {
-          for (const v of allVaults) {
+          for (const v of vaultCollections) {
             const q = query(collection(db, "users", user.uid, v), where("linkedIncomeId", "==", rec.linkedIncomeId));
             const snap = await getDocs(q);
             snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, v, d.id)));
           }
+          // reverse party ledgers
           const partiesSnap = await getDocs(collection(db, "users", user.uid, "parties"));
           for (const pDoc of partiesSnap.docs) {
-             const lQuery = query(collection(db, "users", user.uid, "parties", pDoc.id, "ledger"), where("linkId", "==", rec.linkedIncomeId));
-             const lSnap = await getDocs(lQuery);
-             lSnap.forEach(async (ld) => {
-                 const lData = ld.data();
-                 const currentPartySnap = await getDoc(doc(db, "users", user.uid, "parties", pDoc.id));
-                 if (currentPartySnap.exists()) {
-                     const newBal = currentPartySnap.data().netBalance - lData.baseAmount;
-                     await updateDoc(doc(db, "users", user.uid, "parties", pDoc.id), { netBalance: newBal, status: newBal === 0 ? 'settled' : 'active' });
-                 }
-                 await deleteDoc(doc(db, "users", user.uid, "parties", pDoc.id, "ledger", ld.id));
-             });
+            const lQuery = query(collection(db, "users", user.uid, "parties", pDoc.id, "ledger"), where("linkId", "==", rec.linkedIncomeId));
+            const lSnap = await getDocs(lQuery);
+            lSnap.forEach(async (ld) => {
+              const lData = ld.data();
+              const currentPartySnap = await getDoc(doc(db, "users", user.uid, "parties", pDoc.id));
+              if (currentPartySnap.exists()) {
+                const newBal = currentPartySnap.data().netBalance - lData.baseAmount;
+                await updateDoc(doc(db, "users", user.uid, "parties", pDoc.id), { netBalance: newBal, status: newBal === 0 ? 'settled' : 'active' });
+              }
+              await deleteDoc(doc(db, "users", user.uid, "parties", pDoc.id, "ledger", ld.id));
+            });
           }
         }
       } else if (rec.logType === 'expense') {
         await deleteDoc(doc(db, "users", user.uid, "expenseLogs", rec.id));
         if (rec.linkedExpenseId) {
-          for (const v of allVaults) {
+          for (const v of vaultCollections) {
             const q = query(collection(db, "users", user.uid, v), where("linkedExpenseId", "==", rec.linkedExpenseId));
             const snap = await getDocs(q);
             snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, v, d.id)));
           }
-          
           const partiesSnap = await getDocs(collection(db, "users", user.uid, "parties"));
           for (const pDoc of partiesSnap.docs) {
-             const lQuery = query(collection(db, "users", user.uid, "parties", pDoc.id, "ledger"), where("linkId", "==", rec.linkedExpenseId));
-             const lSnap = await getDocs(lQuery);
-             lSnap.forEach(async (ld) => {
-                 const lData = ld.data();
-                 const currentPartySnap = await getDoc(doc(db, "users", user.uid, "parties", pDoc.id));
-                 if (currentPartySnap.exists()) {
-                     const newBal = currentPartySnap.data().netBalance - lData.baseAmount;
-                     await updateDoc(doc(db, "users", user.uid, "parties", pDoc.id), { netBalance: newBal, status: newBal === 0 ? 'settled' : 'active' });
-                 }
-                 await deleteDoc(doc(db, "users", user.uid, "parties", pDoc.id, "ledger", ld.id));
-             });
+            const lQuery = query(collection(db, "users", user.uid, "parties", pDoc.id, "ledger"), where("linkId", "==", rec.linkedExpenseId));
+            const lSnap = await getDocs(lQuery);
+            lSnap.forEach(async (ld) => {
+              const lData = ld.data();
+              const currentPartySnap = await getDoc(doc(db, "users", user.uid, "parties", pDoc.id));
+              if (currentPartySnap.exists()) {
+                const newBal = currentPartySnap.data().netBalance - lData.baseAmount;
+                await updateDoc(doc(db, "users", user.uid, "parties", pDoc.id), { netBalance: newBal, status: newBal === 0 ? 'settled' : 'active' });
+              }
+              await deleteDoc(doc(db, "users", user.uid, "parties", pDoc.id, "ledger", ld.id));
+            });
           }
         }
       } else if (rec.logType === 'shift') {
         await deleteDoc(doc(db, "users", user.uid, "capitalShifts", rec.id));
         if (rec.shiftId) {
-          for (const v of allVaults) {
-            const qShift = query(collection(db, "users", user.uid, v), where("shiftId", "==", rec.shiftId));
-            const snapShift = await getDocs(qShift);
-            snapShift.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, v, d.id)));
+          for (const v of vaultCollections) {
+            const q = query(collection(db, "users", user.uid, v), where("shiftId", "==", rec.shiftId));
+            const snap = await getDocs(q);
+            snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, v, d.id)));
           }
         }
       }
 
-      setDeleteContext(null); 
+      setDeleteContext(null);
+      addToast(`${rec.logType.charAt(0).toUpperCase() + rec.logType.slice(1)} record deleted.`, 'info');
     } catch (error) {
       setPinError("System error during verification.");
     } finally {
@@ -284,86 +380,111 @@ const HistoryLogs = () => {
     }
   };
 
+  // Skeleton component for loading
+  const Skeleton = () => (
+    <div className="space-y-6">
+      {[1,2].map(i => (
+        <div key={i} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[2rem] overflow-hidden shadow-sm animate-pulse">
+          <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50">
+            <div className="h-5 w-32 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+            <div className="h-4 w-20 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+          </div>
+          <div className="p-6 space-y-4">
+            {[1,2,3].map(j => (
+              <div key={j} className="flex items-center gap-6">
+                <div className="h-10 w-10 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 w-40 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+                  <div className="h-3 w-24 bg-slate-200 dark:bg-slate-700 rounded" />
+                </div>
+                <div className="h-6 w-20 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+                <div className="h-6 w-16 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <div className="w-full h-auto pb-24">
-      <div className="pt-8 md:pt-12 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 md:px-6">
+      <div className="pt-20 sm:pt-24 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
-        {/* 🚀 FIXED: Premium Header (Mobile UI/Z-Index Safe for Export Dropdown) */}
-        <div className="relative rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50 z-20">
-          
+        {/* Header with Export */}
+        <div className="relative rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 sm:p-8 lg:p-10 shadow-2xl border border-slate-700/50 z-20">
           <div className="absolute inset-0 overflow-hidden rounded-[2.5rem] pointer-events-none">
              <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(100,116,139,0.1),transparent_70%)]" />
-             <div className="absolute right-0 top-0 w-64 h-64 bg-slate-500/10 rounded-full blur-3xl" />
+             <div className="absolute right-0 top-0 w-64 h-64 bg-slate-500/5 rounded-full blur-3xl" />
           </div>
-          
+
           <div className="relative z-50 flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
               <div className="flex items-center gap-3 mb-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-slate-600 to-slate-700 rounded-2xl flex items-center justify-center shadow-lg">
+                <div className="w-12 h-12 bg-gradient-to-br from-slate-600 to-slate-700 rounded-2xl flex items-center justify-center shadow-lg shrink-0">
                   <FaHistory size={24} className="text-white" />
                 </div>
-                <div>
-                  <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">Master Audit Trail</h1>
-                  <p className="text-sm font-medium text-slate-400">Complete timeline of all financial activities</p>
+                <div className="min-w-0">
+                  <h1 className="text-2xl md:text-3xl lg:text-4xl font-black text-white tracking-tight truncate">Master Audit Trail</h1>
+                  <p className="text-sm font-medium text-slate-400 truncate">Complete timeline of all financial activities</p>
                 </div>
               </div>
             </div>
-            
-            <div className="flex items-center gap-3 w-full md:w-auto">
-              {/* Export Dropdown */}
-              <div className="relative w-full md:w-auto">
-                <button 
+
+            <div className="grid grid-cols-2 md:flex items-center gap-3 w-full md:w-auto mt-4 md:mt-0">
+              <div className="relative w-full md:w-auto z-[100]">
+                <button
                   onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
                   onBlur={() => setTimeout(() => setIsExportMenuOpen(false), 200)}
-                  className="w-full flex items-center justify-center gap-2 px-5 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 shadow-sm"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 active:scale-95 shadow-sm"
                 >
-                  <HiOutlineDownload size={16} /> Export Timeline
+                  <HiOutlineDownload size={16} /> Export
                 </button>
                 {isExportMenuOpen && (
-                  <div className="absolute top-[110%] right-0 w-full md:w-48 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl flex flex-col p-1.5 z-[100] animate-in fade-in zoom-in-95">
-                    <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2.5 px-4 py-3 hover:bg-slate-700 text-slate-200 text-[11px] font-black rounded-lg transition-colors">
-                      <HiOutlineDocumentText className="text-rose-400" size={18}/> PDF Document
+                  <div className="absolute top-[110%] right-0 w-full md:w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl flex flex-col p-1.5 animate-in fade-in zoom-in-95 z-50">
+                    <button onMouseDown={(e) => { e.preventDefault(); handleDownloadReport('pdf'); }} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg transition-colors text-left">
+                      <HiOutlineDocumentText className="text-rose-400" size={16}/> PDF Document
                     </button>
-                    <button onClick={() => handleDownloadReport('excel')} className="flex items-center gap-2.5 px-4 py-3 hover:bg-slate-700 text-slate-200 text-[11px] font-black rounded-lg transition-colors">
-                      <HiOutlineTable className="text-emerald-400" size={18}/> Excel (CSV)
+                    <button onMouseDown={(e) => { e.preventDefault(); handleDownloadReport('excel'); }} className="flex items-center gap-2 px-3 py-2.5 hover:bg-slate-700 text-slate-300 text-[10px] font-black rounded-lg transition-colors text-left">
+                      <HiOutlineTable className="text-emerald-400" size={16}/> Excel (CSV)
                     </button>
                   </div>
                 )}
               </div>
             </div>
           </div>
-          
+
           {/* Stats Row */}
-          <div className="relative z-30 grid grid-cols-2 md:grid-cols-3 gap-3 mt-6">
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 overflow-hidden">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total Inflow</p>
-              <p className="text-lg md:text-xl font-black text-emerald-400 truncate" title={`${currencySymbol}${lifetimeInflow.toLocaleString()}`}>{currencySymbol}{lifetimeInflow.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+          <div className="relative z-30 grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 mt-6">
+            <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/10 overflow-hidden">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1"><HiOutlineTrendingUp size={14}/> Total Inflow</p>
+              <p className="text-xl sm:text-2xl font-black text-emerald-400 truncate" title={`${currencySymbol}${lifetimeInflow.toLocaleString()}`}>{currencySymbol}{lifetimeInflow.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
             </div>
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 overflow-hidden">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total Outflow</p>
-              <p className="text-lg md:text-xl font-black text-rose-400 truncate" title={`${currencySymbol}${lifetimeOutflow.toLocaleString()}`}>{currencySymbol}{lifetimeOutflow.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+            <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/10 overflow-hidden">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1"><HiOutlineTrendingDown size={14}/> Total Outflow</p>
+              <p className="text-xl sm:text-2xl font-black text-rose-400 truncate" title={`${currencySymbol}${lifetimeOutflow.toLocaleString()}`}>{currencySymbol}{lifetimeOutflow.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
             </div>
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 col-span-2 md:col-span-1 overflow-hidden">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><FaChartLine size={12}/> Total Activities</p>
-              <p className="text-lg md:text-xl font-black text-white truncate">{totalTransactions}</p>
+            <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/10 col-span-2 md:col-span-1 overflow-hidden">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1"><FaChartLine size={12}/> Total Activities</p>
+              <p className="text-xl sm:text-2xl font-black text-white truncate">{totalTransactions}</p>
             </div>
           </div>
         </div>
 
         {/* Search & Filter */}
-        <div className="flex flex-col md:flex-row gap-4 bg-white dark:bg-slate-900 p-4 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 bg-white dark:bg-slate-900 p-3 sm:p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="relative flex-1">
             <HiOutlineSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-            <input 
+            <input
               type="text" placeholder="Search transactions, payees, or vaults..."
               value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:border-slate-500 transition-all shadow-sm placeholder-slate-400 dark:placeholder-slate-500"
+              className="w-full pl-12 pr-4 py-3.5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-slate-900 dark:text-white outline-none focus:border-slate-500 transition-all placeholder-slate-400 dark:placeholder-slate-500 shadow-sm"
             />
           </div>
           <div className="flex gap-2">
-            <select 
+            <select
               value={filterType} onChange={(e) => setFilterType(e.target.value)}
-              className="w-full md:w-auto px-4 py-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:border-slate-500 cursor-pointer transition-all shadow-sm"
+              className="w-full sm:w-auto px-4 py-3.5 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl font-black text-xs sm:text-sm text-slate-700 dark:text-slate-300 outline-none focus:border-slate-500 cursor-pointer transition-all shadow-sm appearance-none"
             >
               <option value="all">All Activities</option>
               <option value="income">Incomes Only</option>
@@ -373,234 +494,301 @@ const HistoryLogs = () => {
           </div>
         </div>
 
-        {/* Timeline Ledger */}
-        <div className="space-y-6">
-          {isLoading ? (
-            <div className="flex flex-col items-center justify-center py-16">
-              <div className="relative">
-                <div className="absolute inset-0 bg-slate-500 rounded-full blur-xl opacity-30 animate-pulse" />
-                <HiOutlineRefresh className="animate-spin text-4xl text-slate-500 relative" />
-              </div>
-              <p className="text-sm font-black text-slate-400 uppercase tracking-widest mt-4 animate-pulse">Compiling Master Ledger...</p>
+        {/* 🚀 COLLAPSIBLE MONTHS LEDGER */}
+        {isLoading ? (
+          <Skeleton />
+        ) : processedLogs.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm px-4">
+            <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-[2rem] flex items-center justify-center mb-5 shadow-inner">
+              <HiOutlineDocumentSearch className="text-5xl text-slate-300 dark:text-slate-600" />
             </div>
-          ) : processedLogs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 bg-white dark:bg-slate-900 rounded-3xl border border-slate-300 dark:border-slate-800 shadow-sm">
-              <div className="w-20 h-20 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center mb-4">
-                <HiOutlineDocumentSearch className="text-4xl text-slate-400" />
-              </div>
-              <p className="text-sm font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">No history found</p>
-              <p className="text-xs text-slate-500 mt-1">Your financial timeline will appear here</p>
-            </div>
-          ) : (
-            processedLogs.map((month, mIdx) => (
-              <div key={mIdx} className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm">
-                
-                {/* Month Header */}
-                <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:justify-between items-start md:items-center bg-slate-50/80 dark:bg-slate-800/50 gap-4 md:gap-0">
-                  <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+            <p className="text-lg font-black text-slate-700 dark:text-slate-300">No history records found</p>
+            <p className="text-sm font-medium text-slate-500 mt-2 text-center max-w-sm">{searchTerm || filterType !== 'all' ? 'Adjust your search filters.' : 'Your financial timeline will appear here.'}</p>
+          </div>
+        ) : (
+          processedLogs.map((month) => {
+            const isOpen = openMonths.has(month.monthKey);
+            const opening = month.openingBalance || 0;
+            const closing = month.closingBalance || 0;
+            const inflow = month.monthInflow || 0;
+            const outflow = month.monthOutflow || 0;
+
+            return (
+              <div key={month.monthKey} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[2rem] overflow-hidden shadow-sm">
+                {/* Month Header Toggle */}
+                <button
+                  onClick={() => toggleMonth(month.monthKey)}
+                  className="w-full px-6 py-5 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors text-left"
+                >
+                  <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2.5">
                     <div className="p-2 bg-slate-200 dark:bg-slate-500/20 text-slate-600 dark:text-slate-400 rounded-lg">
                       <HiOutlineCalendar size={18} />
                     </div>
                     {month.monthName}
                   </h2>
-                  <div className="flex gap-6 w-full md:w-auto justify-between md:justify-end text-right bg-white dark:bg-slate-900 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                    <div>
-                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Inflow</p>
-                      <p className="text-sm font-black text-emerald-600 dark:text-emerald-400">+{currencySymbol}{month.monthInflow.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right hidden sm:block">
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Opening</p>
+                      <p className="text-sm font-black text-slate-700 dark:text-slate-300">{currencySymbol}{opening.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
                     </div>
-                    <div className="border-l border-slate-200 dark:border-slate-700 pl-6">
-                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Outflow</p>
-                      <p className="text-sm font-black text-rose-600 dark:text-rose-400">-{currencySymbol}{month.monthOutflow.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
-                    </div>
+                    <HiOutlineChevronDown size={20} className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
                   </div>
-                </div>
+                </button>
 
-                {/* Transactions Table - 🚀 FIXED MOBILE WIDTH */}
-                <div className="overflow-x-auto custom-scrollbar">
-                  <table className="w-full text-left min-w-[850px]">
-                    <thead className="bg-slate-100/50 dark:bg-slate-800/30 text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest border-b border-slate-200 dark:border-slate-700">
-                      <tr>
-                        <th className="p-4 pl-6 text-center w-16">Type</th>
-                        <th className="p-4">Details</th>
-                        <th className="p-4">Vault Impact</th>
-                        <th className="p-4 text-right">Native Amount</th>
-                        <th className="p-4 text-right">Base Value</th>
-                        <th className="p-4 pr-6 text-right w-16">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                {isOpen && (
+                  <div className="animate-in fade-in duration-200">
+                    {/* Month Summary */}
+                    <div className="px-6 py-4 grid grid-cols-2 sm:grid-cols-3 gap-4 bg-white dark:bg-slate-900 border-t border-b border-slate-200 dark:border-slate-800">
+                      <div><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Opening</p><p className="font-black text-slate-700 dark:text-slate-300">{currencySymbol}{opening.toLocaleString(undefined, {minimumFractionDigits: 2})}</p></div>
+                      <div><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Inflow</p><p className="font-black text-emerald-600">+{currencySymbol}{inflow.toLocaleString(undefined, {minimumFractionDigits: 2})}</p></div>
+                      <div><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Outflow</p><p className="font-black text-rose-600">-{currencySymbol}{outflow.toLocaleString(undefined, {minimumFractionDigits: 2})}</p></div>
+                      <div className="col-span-2 sm:col-span-1"><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Closing</p><p className="font-black text-rose-700 dark:text-rose-400">{currencySymbol}{closing.toLocaleString(undefined, {minimumFractionDigits: 2})}</p></div>
+                    </div>
+
+                    {/* 📱 Mobile Cards */}
+                    <div className="md:hidden flex flex-col divide-y divide-slate-100 dark:divide-slate-800/50">
                       {month.records.map((rec) => {
                         const style = getTypeStyles(rec.logType);
-                        
-                        // Precise time extraction
                         const dateObj = new Date(rec.date);
                         const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
                         return (
-                          <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors group">
-                            
-                            {/* Type Badge */}
-                            <td className="p-4 pl-6 text-center align-top">
-                              <div className={`w-10 h-10 mx-auto rounded-xl flex items-center justify-center ${style.bg} ${style.text} border ${style.border}`}>
-                                {style.icon}
-                              </div>
-                            </td>
-
-                            {/* Details */}
-                            <td className="p-4 align-top">
-                              {rec.logType === 'shift' ? (
-                                <div>
-                                  <p className="font-black text-slate-900 dark:text-white text-sm">Capital Shift</p>
-                                  <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-1">
-                                    <HiOutlineSwitchHorizontal size={14}/> {rec.routingPlatform || 'Internal Network'}
-                                  </p>
-                                  <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 flex items-center gap-1 mt-1">
-                                    {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]}
-                                    <span className="opacity-60 border-l border-slate-300 dark:border-slate-600 pl-1 ml-1">{timeStr}</span>
-                                  </p>
-                                </div>
-                              ) : (
-                                <div>
-                                  <p className="font-black text-slate-900 dark:text-white text-sm truncate max-w-[200px]" title={rec.title}>{rec.title}</p>
-                                  <div className="flex gap-1.5 flex-wrap mt-1.5">
-                                    <ActivityBadge type={rec.logType} />
-                                    {rec.khataDetails?.length > 0 && (
-                                      <span className="px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1 border border-blue-200 dark:border-blue-500/30 shadow-sm">
-                                        <FaUserFriends size={10}/> SHARED
-                                      </span>
-                                    )}
+                          <div key={rec.id} className="p-4">
+                            <div className="flex justify-between items-start mb-2">
+                              <div className="flex-1 min-w-0 pr-2">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${style.bg} ${style.text} border ${style.border}`}>
+                                    {style.icon}
                                   </div>
-                                  <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 flex items-center gap-1 mt-1.5">
-                                    {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]} 
-                                    <span className="opacity-60 border-l border-slate-300 dark:border-slate-600 pl-1 ml-0.5">{timeStr}</span>
-                                    <span className="text-slate-300 dark:text-slate-600 px-1">•</span> 
-                                    <span className="truncate max-w-[100px]">{rec.category}</span>
-                                  </p>
+                                  <ActivityBadge type={rec.logType} />
                                 </div>
-                              )}
-                            </td>
-
-                            {/* Vault Impact */}
-                            <td className="p-4 align-top">
-                              {rec.logType === 'shift' ? (
-                                <div className="flex items-center gap-2 mt-0.5">
-                                  <span className="px-2 py-1 bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400 border border-rose-200 dark:border-rose-500/30 rounded-md text-[9px] font-black uppercase tracking-widest">{rec.fromVault}</span>
-                                  <FaExchangeAlt className="text-slate-400" size={10} />
-                                  <span className="px-2 py-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 rounded-md text-[9px] font-black uppercase tracking-widest">{rec.toVault}</span>
-                                </div>
-                              ) : rec.isSplit ? (
-                                <span className="px-2 py-1 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30 rounded-md text-[9px] font-black flex items-center gap-1 w-fit shadow-sm mt-0.5 uppercase tracking-widest">
-                                  <FaRandom size={10}/> Split Engine
-                                </span>
-                              ) : (
-                                <div className="flex flex-col gap-1 mt-0.5">
-                                  <span className="text-[10px] font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5 capitalize">
-                                    {getVaultIcon(rec.vault)} {rec.vault} Vault
-                                  </span>
-                                  {rec.subWallet && (
-                                    <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1 bg-slate-100 dark:bg-slate-800 w-fit px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 mt-1">
-                                      <FaBuilding size={10}/> {rec.subWallet}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-
-                            {/* Amount */}
-                            <td className="p-4 text-right align-top">
-                              {rec.logType === 'shift' ? (
-                                <p className="font-bold text-slate-800 dark:text-slate-300 mt-0.5">
-                                  {Number(rec.grossAmount).toLocaleString()} <span className="text-[10px] text-slate-500 font-bold">{rec.fromAsset}</span>
+                                {rec.logType === 'shift' ? (
+                                  <p className="font-black text-slate-900 dark:text-white text-sm mt-1">Capital Shift</p>
+                                ) : (
+                                  <p className="font-black text-slate-900 dark:text-white text-sm break-words">{rec.title}</p>
+                                )}
+                                {rec.category && rec.logType !== 'shift' && (
+                                  <span className="inline-block px-1.5 py-0.5 bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400 text-[8px] font-black uppercase tracking-wider rounded mt-1 border border-rose-200 dark:border-rose-500/20 shadow-sm">{rec.category}</span>
+                                )}
+                              </div>
+                              <div className="text-right shrink-0">
+                                {rec.logType === 'shift' ? (
+                                  <p className="text-base font-black text-indigo-600 dark:text-indigo-400 tracking-tight">↔</p>
+                                ) : (
+                                  <>
+                                    <p className={`text-base font-black tracking-tight ${rec.logType === 'income' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                      {rec.logType === 'income' ? '+' : '-'}{currencySymbol}{(Number(rec.finalBaseAmount) || 0).toLocaleString(undefined, {minimumFractionDigits: 0})}
+                                    </p>
+                                    {rec.asset !== baseCurrency && !rec.isSplit && rec.logType !== 'shift' && (
+                                      <p className="text-[9px] font-bold text-slate-500 mt-1">{Number(rec.amount || 0).toLocaleString()} {rec.asset}</p>
+                                    )}
+                                    {rec.isSplit && <p className="text-[9px] font-bold text-slate-500 mt-1">Multi-Asset</p>}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap justify-between items-end gap-2 mt-3">
+                              <div className="flex flex-col gap-1.5">
+                                {rec.logType === 'shift' ? (
+                                  <div className="flex items-center gap-2 px-2 py-1 bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/30 rounded-md text-[9px] font-black text-indigo-700 dark:text-indigo-400">
+                                    <span>{rec.fromVault}</span> <FaExchangeAlt size={10} /> <span>{rec.toVault}</span>
+                                  </div>
+                                ) : rec.isSplit ? (
+                                  <span className="px-2 py-1 bg-amber-100/50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/30 rounded-md text-[9px] font-black text-amber-800 dark:text-amber-400 flex items-center gap-1"><FaRandom /> Split Expense</span>
+                                ) : (
+                                  <div className="flex items-center gap-1.5 w-max px-2 py-1 rounded-md border text-[9px] font-bold bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+                                    {getVaultIcon(rec.vault)} <span className="capitalize">{rec.vault}</span>
+                                    {rec.subWallet && <span className="opacity-70 ml-0.5">· {rec.subWallet}</span>}
+                                  </div>
+                                )}
+                                <p className="text-[9px] font-bold text-slate-400 flex items-center gap-1">
+                                  <HiOutlineCalendar size={10}/> {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]}
+                                  <span className="opacity-50">· {timeStr}</span>
                                 </p>
-                              ) : rec.isSplit ? (
-                                <span className="text-amber-600 dark:text-amber-500 text-[9px] font-black uppercase tracking-widest bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-2 py-1 rounded-md inline-block mt-0.5">MULTI-ASSET</span>
-                              ) : (
-                                <p className={`font-bold mt-0.5 ${rec.logType === 'expense' && rec.khataDetails?.length > 0 ? 'text-slate-400 line-through' : 'text-slate-800 dark:text-slate-300'}`}>
-                                  {Number(rec.totalPaidFromVault || rec.amount || 0).toLocaleString()} <span className="text-[10px] text-slate-500 font-bold">{rec.currency || rec.asset}</span>
-                                </p>
-                              )}
-                            </td>
-
-                            {/* Base Value */}
-                            <td className="p-4 text-right align-top">
-                              <p className={`text-base font-black tracking-tight mt-0.5 ${style.text}`}>
-                                {rec.logType === 'shift' ? '↔' : (rec.logType === 'income' ? '+' : '-')}
-                                {currencySymbol}{Number(rec.finalBaseAmount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
-                              </p>
-                            </td>
-
-                            {/* Delete Button (🚀 FIXED: ALWAYS VISIBLE ON MOBILE) */}
-                            <td className="p-4 pr-6 align-top text-right">
-                              <button 
-                                onClick={() => initiateDelete(rec)}
-                                className="p-2.5 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-200 dark:hover:bg-rose-500/20 border border-slate-300 dark:border-slate-700 rounded-lg transition-all md:opacity-0 group-hover:opacity-100 shadow-sm active:scale-95"
-                                title={`Delete this ${rec.logType} record`}
-                              >
-                                <HiOutlineTrash size={16} />
-                              </button>
-                            </td>
-                          </tr>
+                              </div>
+                              <div className="flex gap-1">
+                                <button onClick={() => initiateDelete(rec)} className="p-1.5 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-md border border-rose-200 dark:border-rose-500/30 shadow-sm"><HiOutlineTrash size={14} /></button>
+                              </div>
+                            </div>
+                          </div>
                         );
                       })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+                    </div>
 
-      {/* Delete Confirmation Modal */}
-      {deleteContext && (
-        <div className="fixed inset-0 z-[500] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2rem] shadow-2xl overflow-hidden border border-slate-300 dark:border-slate-700 flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95">
-            <div className="px-6 py-5 bg-gradient-to-r from-rose-600 to-pink-600 text-white shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center shadow-inner">
-                  <HiOutlineShieldCheck size={24} />
-                </div>
-                <div>
-                  <h3 className="text-xl font-black">Security Verification</h3>
-                  <p className="text-[10px] font-bold text-rose-100 uppercase tracking-widest">Permanent Deletion</p>
+                    {/* 🖥️ Desktop Table */}
+                    <div className="hidden md:block overflow-x-auto custom-scrollbar">
+                      <table className="w-full text-left min-w-[900px]">
+                        <thead className="bg-white dark:bg-slate-900 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
+                          <tr>
+                            <th className="p-4 pl-6 text-center w-16">Type</th>
+                            <th className="p-4">Details</th>
+                            <th className="p-4">Vault Impact</th>
+                            <th className="p-4 text-right">Native Amount</th>
+                            <th className="p-4 text-right">Base Value</th>
+                            <th className="p-4 pr-6 text-right w-16">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
+                          {month.records.map((rec) => {
+                            const style = getTypeStyles(rec.logType);
+                            const dateObj = new Date(rec.date);
+                            const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            return (
+                              <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors group">
+                                <td className="p-4 pl-6 text-center align-top">
+                                  <div className={`w-10 h-10 mx-auto rounded-xl flex items-center justify-center ${style.bg} ${style.text} border ${style.border}`}>
+                                    {style.icon}
+                                  </div>
+                                </td>
+                                <td className="p-4 align-top">
+                                  {rec.logType === 'shift' ? (
+                                    <div>
+                                      <p className="font-black text-slate-900 dark:text-white text-sm">Capital Shift</p>
+                                      <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-1">
+                                        <HiOutlineSwitchHorizontal size={14}/> {rec.routingPlatform || 'Internal Network'}
+                                      </p>
+                                      <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 flex items-center gap-1 mt-1">
+                                        {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]}
+                                        <span className="opacity-60 border-l border-slate-300 dark:border-slate-600 pl-1 ml-1">{timeStr}</span>
+                                      </p>
+                                    </div>
+                                  ) : (
+                                    <div>
+                                      <p className="font-black text-slate-900 dark:text-white text-sm truncate max-w-[200px]" title={rec.title}>{rec.title}</p>
+                                      <div className="flex gap-1.5 flex-wrap mt-1.5">
+                                        <ActivityBadge type={rec.logType} />
+                                        {rec.khataDetails?.length > 0 && (
+                                          <span className="px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1 border border-blue-200 dark:border-blue-500/30 shadow-sm">
+                                            <FaUserFriends size={10}/> SHARED
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 flex items-center gap-1 mt-1.5">
+                                        {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]}
+                                        <span className="opacity-60 border-l border-slate-300 dark:border-slate-600 pl-1 ml-0.5">{timeStr}</span>
+                                        <span className="text-slate-300 dark:text-slate-600 px-1">•</span>
+                                        <span className="truncate max-w-[100px]">{rec.category}</span>
+                                      </p>
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="p-4 align-top">
+                                  {rec.logType === 'shift' ? (
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                      <span className="px-2 py-1 bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400 border border-rose-200 dark:border-rose-500/30 rounded-md text-[9px] font-black uppercase tracking-widest">{rec.fromVault}</span>
+                                      <FaExchangeAlt className="text-slate-400" size={10} />
+                                      <span className="px-2 py-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 rounded-md text-[9px] font-black uppercase tracking-widest">{rec.toVault}</span>
+                                    </div>
+                                  ) : rec.isSplit ? (
+                                    <span className="px-2 py-1 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30 rounded-md text-[9px] font-black flex items-center gap-1 w-fit shadow-sm mt-0.5 uppercase tracking-widest">
+                                      <FaRandom size={10}/> Split Engine
+                                    </span>
+                                  ) : (
+                                    <div className="flex flex-col gap-1 mt-0.5">
+                                      <span className="text-[10px] font-black text-slate-700 dark:text-slate-300 flex items-center gap-1.5 capitalize">
+                                        {getVaultIcon(rec.vault)} {rec.vault} Vault
+                                      </span>
+                                      {rec.subWallet && (
+                                        <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1 bg-slate-100 dark:bg-slate-800 w-fit px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 mt-1">
+                                          <FaBuilding size={10}/> {rec.subWallet}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="p-4 text-right align-top">
+                                  {rec.logType === 'shift' ? (
+                                    <p className="font-bold text-slate-800 dark:text-slate-300 mt-0.5">
+                                      {Number(rec.grossAmount).toLocaleString()} <span className="text-[10px] text-slate-500 font-bold">{rec.fromAsset}</span>
+                                    </p>
+                                  ) : rec.isSplit ? (
+                                    <span className="text-amber-600 dark:text-amber-500 text-[9px] font-black uppercase tracking-widest bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-2 py-1 rounded-md inline-block mt-0.5">MULTI-ASSET</span>
+                                  ) : (
+                                    <p className={`font-bold mt-0.5 ${rec.logType === 'expense' && rec.khataDetails?.length > 0 ? 'text-slate-400 line-through' : 'text-slate-800 dark:text-slate-300'}`}>
+                                      {Number(rec.totalPaidFromVault || rec.amount || 0).toLocaleString()} <span className="text-[10px] text-slate-500 font-bold">{rec.currency || rec.asset}</span>
+                                    </p>
+                                  )}
+                                </td>
+                                <td className="p-4 text-right align-top">
+                                  <p className={`text-base font-black tracking-tight mt-0.5 ${rec.logType === 'income' ? 'text-emerald-600 dark:text-emerald-400' : rec.logType === 'expense' ? 'text-rose-600 dark:text-rose-400' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                                    {rec.logType === 'shift' ? '↔' : (rec.logType === 'income' ? '+' : '-')}
+                                    {currencySymbol}{Number(rec.finalBaseAmount || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                  </p>
+                                </td>
+                                <td className="p-4 pr-6 align-top text-right">
+                                  <button
+                                    onClick={() => initiateDelete(rec)}
+                                    className="p-2.5 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-200 dark:hover:bg-rose-500/20 border border-slate-300 dark:border-slate-700 rounded-lg transition-all md:opacity-0 group-hover:opacity-100 shadow-sm active:scale-95"
+                                    title={`Delete this ${rec.logType} record`}
+                                  >
+                                    <HiOutlineTrash size={16} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {deleteContext && (
+          <div className="fixed inset-0 z-[500] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
+            <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2rem] shadow-2xl overflow-hidden border border-slate-300 dark:border-slate-700 flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95">
+              <div className="px-6 py-5 bg-gradient-to-r from-rose-600 to-pink-600 text-white shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center shadow-inner">
+                    <HiOutlineShieldCheck size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black">Security Verification</h3>
+                    <p className="text-[10px] font-bold text-rose-100 uppercase tracking-widest">Permanent Deletion</p>
+                  </div>
                 </div>
               </div>
+              <form onSubmit={executeSecureDelete} className="p-6 sm:p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
+                <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-500/30 rounded-2xl shadow-sm">
+                  <p className="text-xs font-bold text-amber-800 dark:text-amber-300 leading-relaxed">
+                    Deleting this <span className="font-black capitalize">{deleteContext.logType}</span> will reverse all associated vault entries and update connected Khata balances automatically across the system.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1 text-center block">Security PIN</label>
+                  <input
+                    type="password" maxLength={6} required autoFocus
+                    value={pinInput} onChange={(e) => setPinInput(e.target.value)}
+                    className="w-full text-center tracking-[0.4em] text-2xl p-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-2xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors shadow-sm"
+                    placeholder="••••"
+                  />
+                  {pinError && <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-2 text-center animate-bounce">{pinError}</p>}
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button type="button" onClick={() => setDeleteContext(null)} className="flex-1 p-4 rounded-xl font-black text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 transition-colors shadow-sm active:scale-95 uppercase tracking-widest">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-xl font-black text-sm bg-gradient-to-r from-rose-600 to-pink-600 text-white hover:from-rose-700 hover:to-pink-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30 active:scale-95 uppercase tracking-widest">
+                    {isVerifying ? <HiOutlineRefresh className="animate-spin" size={18} /> : <HiOutlineTrash size={18} />}
+                    Confirm
+                  </button>
+                </div>
+              </form>
             </div>
-            
-            <form onSubmit={executeSecureDelete} className="p-6 sm:p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
-              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-500/30 rounded-2xl shadow-sm">
-                <p className="text-xs font-bold text-amber-800 dark:text-amber-300 leading-relaxed">
-                  Deleting this <span className="font-black capitalize">{deleteContext.logType}</span> will reverse all associated vault entries and update connected Khata balances automatically across the system.
-                </p>
-              </div>
-              
-              <div className="space-y-2">
-                <label className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1 text-center block">Security PIN</label>
-                <input 
-                  type="password" maxLength={6} required autoFocus
-                  value={pinInput} onChange={(e) => setPinInput(e.target.value)}
-                  className="w-full text-center tracking-[0.4em] text-2xl p-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-2xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors shadow-sm"
-                  placeholder="••••"
-                />
-                {pinError && <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-2 text-center animate-bounce">{pinError}</p>}
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setDeleteContext(null)} className="flex-1 p-4 rounded-xl font-black text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 transition-colors shadow-sm active:scale-95 uppercase tracking-widest">
-                  Cancel
-                </button>
-                <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-xl font-black text-sm bg-gradient-to-r from-rose-600 to-pink-600 text-white hover:from-rose-700 hover:to-pink-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30 active:scale-95 uppercase tracking-widest">
-                  {isVerifying ? <HiOutlineRefresh className="animate-spin" size={18} /> : <HiOutlineTrash size={18} />}
-                  Confirm
-                </button>
-              </div>
-            </form>
           </div>
-        </div>
-      )}
-
+        )}
+      </div>
     </div>
   );
 };
+
+const HistoryLogs = () => (
+  <ToastProvider>
+    <HistoryLogsContent />
+  </ToastProvider>
+);
 
 export default HistoryLogs;

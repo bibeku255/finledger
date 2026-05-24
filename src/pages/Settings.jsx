@@ -5,15 +5,15 @@ import {
   HiOutlineCamera, HiOutlineShieldCheck, HiOutlineLockClosed, 
   HiOutlineCalendar, HiOutlineGlobeAlt 
 } from "react-icons/hi";
-import { FaMountain, FaMoon } from 'react-icons/fa'; // 🚀 Added FaMoon for Hijri
+import { FaMountain, FaMoon } from 'react-icons/fa';
 import { auth, db } from "../firebase/firebaseConfig";
-import { doc, setDoc } from "firebase/firestore"; 
+import { doc, setDoc, updateDoc } from "firebase/firestore"; // ← updateDoc added
 import { updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification } from "firebase/auth";
 import Cropper from "react-easy-crop";
 import getCroppedImg from "../utils/cropImage";
 import Avatar from "../components/ui/Avatar"; 
 import { hashPIN, verifyPIN } from '../utils/cryptoUtils';
-// 🚀 NAYA: Calendar Options Array for clean UI rendering
+
 const calendarOptions = [
   { 
     id: 'gregorian', 
@@ -201,15 +201,16 @@ const handlePinSave = async (e) => {
   }
 };
 
-  // 🚀 SAVE CALENDAR SETTING
+  // 🚀 SAVE CALENDAR SETTING – FIXED
   const handleCalendarUpdate = async (selectedCode) => {
     if (!user) return;
     setCalLoading(true);
     setBaseCalendar(selectedCode);
     try {
-      await setDoc(doc(db, "users", user.uid), {
-        settings: { baseCalendar: selectedCode }
-      }, { merge: true });
+      // Use updateDoc with dot notation to avoid overwriting the entire settings object
+      await updateDoc(doc(db, "users", user.uid), {
+        "settings.baseCalendar": selectedCode
+      });
       await refreshUser();
     } catch (error) {
       alert("Failed to update calendar settings");

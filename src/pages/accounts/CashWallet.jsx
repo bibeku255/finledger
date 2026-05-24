@@ -1,63 +1,30 @@
+// src/pages/accounts/CashWallet.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import {
-  collection,
-  addDoc,
-  doc,
-  setDoc,
-  deleteDoc,
-  updateDoc,
-  onSnapshot,
-  query,
-  orderBy,
-  where,
-  getDocs,
-  getDoc,
+  collection, addDoc, doc, setDoc, deleteDoc,
+  onSnapshot, query, orderBy, getDoc,
 } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
 import { verifyPIN } from '../../utils/cryptoUtils';
+import { calcVaultBalance } from '../../utils/balanceEngine';
 import {
-  HiOutlinePlus,
-  HiOutlineX,
-  HiOutlineTrash,
-  HiOutlinePencil,
-  HiOutlineCash,
-  HiOutlineSearch,
-  HiOutlineRefresh,
-  HiOutlineLockClosed,
+  HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
+  HiOutlineCash, HiOutlineSearch, HiOutlineRefresh,
+  HiOutlineShieldCheck, HiOutlineChevronDown, HiOutlineDownload,
+  HiOutlineDocumentText, HiOutlineTable, HiOutlineCalendar,
+  HiOutlineCheckCircle, HiOutlineInformationCircle, HiOutlineTrendingUp,
+  HiOutlineTrendingDown, HiOutlineArrowDown, HiOutlineArrowUp,
   HiOutlineExclamationCircle,
-  HiOutlineChevronDown,
-  HiOutlineDownload,
-  HiOutlineDocumentText,
-  HiOutlineTable,
-  HiOutlineCalendar,
-  HiOutlineShieldCheck,
-  HiOutlineTrendingUp,
-  HiOutlineTrendingDown,
-  HiOutlineArrowUp,
-  HiOutlineArrowDown,
-  HiOutlineLibrary,
-  HiOutlineCheckCircle,
-  HiOutlineInformationCircle,
+  HiOutlineLibrary
 } from 'react-icons/hi';
-import {
-  FaMoneyBillWave,
-  FaGlobe,
-  FaExchangeAlt,
-  FaWallet,
-  FaGem,
-  FaChartLine,
-  FaPiggyBank,
-  FaArrowUp,
-  FaArrowDown,
-  FaHandHoldingUsd,
-} from 'react-icons/fa';
 
+import { FaMoneyBillWave, FaGlobe, FaWallet } from 'react-icons/fa';
 import { fiatFlagMap } from '../../utils/marketConstants';
 
 // ============================================
-// 🚀 MINI TOAST SYSTEM (Self-contained)
+// 🍞 MINI TOAST SYSTEM
 // ============================================
 const ToastContext = React.createContext(null);
 
@@ -66,9 +33,7 @@ const ToastProvider = ({ children }) => {
   const addToast = (message, type = 'info', duration = 4000) => {
     const id = Date.now() + Math.random();
     setToasts(prev => [...prev, { id, message, type, duration }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, duration);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
   };
   const removeToast = id => setToasts(prev => prev.filter(t => t.id !== id));
 
@@ -89,25 +54,12 @@ const ToastProvider = ({ children }) => {
                 : 'bg-blue-50/95 dark:bg-blue-900/90 border-blue-200 dark:border-blue-700'
             }`}
           >
-            {toast.type === 'success' && (
-              <HiOutlineCheckCircle className="text-green-600 dark:text-green-400 w-5 h-5 flex-shrink-0" />
-            )}
-            {toast.type === 'error' && (
-              <HiOutlineExclamationCircle className="text-red-600 dark:text-red-400 w-5 h-5 flex-shrink-0" />
-            )}
-            {toast.type === 'warning' && (
-              <HiOutlineExclamationCircle className="text-amber-600 dark:text-amber-400 w-5 h-5 flex-shrink-0" />
-            )}
-            {toast.type === 'info' && (
-              <HiOutlineInformationCircle className="text-blue-600 dark:text-blue-400 w-5 h-5 flex-shrink-0" />
-            )}
-            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 flex-1">
-              {toast.message}
-            </p>
-            <button
-              onClick={() => removeToast(toast.id)}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-            >
+            {toast.type === 'success' && <HiOutlineCheckCircle className="text-green-600 dark:text-green-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'error' && <HiOutlineExclamationCircle className="text-red-600 dark:text-red-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'warning' && <HiOutlineExclamationCircle className="text-amber-600 dark:text-amber-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'info' && <HiOutlineInformationCircle className="text-blue-600 dark:text-blue-400 w-5 h-5 flex-shrink-0" />}
+            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 flex-1">{toast.message}</p>
+            <button onClick={() => removeToast(toast.id)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
               <HiOutlineX size={16} />
             </button>
           </div>
@@ -132,28 +84,23 @@ const getLocalDateTimeString = () => {
   return now.toISOString().slice(0, 16);
 };
 
-const StatCard = ({ title, value, icon: Icon, color, subtitle, trend }) => (
-  <div
-    className={`relative overflow-hidden rounded-2xl p-5 sm:p-6 bg-gradient-to-br ${color} text-white shadow-xl group hover:scale-[1.02] transition-all duration-300`}
-  >
-    <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(255,255,255,0.15),transparent_70%)]" />
-    <Icon className="absolute right-[-10%] bottom-[-10%] text-7xl sm:text-8xl opacity-10 group-hover:scale-110 transition-transform duration-500" />
-    <div className="relative z-10 flex flex-col h-full">
-      <p className="text-[10px] sm:text-xs font-black uppercase tracking-widest opacity-80 mb-2">
-        {title}
+const CurrencyBadge = ({ currency, amount }) => (
+  <div className="bg-white/60 dark:bg-slate-800/60 backdrop-blur-md border border-white/20 dark:border-slate-700/50 rounded-2xl px-4 py-3 shrink-0 flex items-center gap-3 hover:bg-white/80 dark:hover:bg-slate-800/80 transition-all duration-300 group shadow-lg min-w-[200px]">
+    <div className="relative">
+      <div className="absolute inset-0 bg-emerald-400 rounded-full blur-md opacity-20 group-hover:opacity-40 transition-opacity" />
+      <img
+        src={`https://flagcdn.com/w40/${fiatFlagMap[currency] || 'un'}.png`}
+        alt=""
+        className="w-10 h-10 rounded-full object-cover border-2 border-white dark:border-slate-700 shadow-lg group-hover:scale-105 transition-transform"
+      />
+    </div>
+    <div className="min-w-0 flex-1">
+      <p className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest truncate mb-0.5">
+        Physical {currency}
       </p>
-      <h3 className="text-2xl sm:text-3xl font-black tracking-tight truncate">{value}</h3>
-      {trend !== undefined && (
-        <div
-          className={`flex items-center gap-1 mt-3 text-[10px] sm:text-xs font-bold w-fit px-2 py-1 rounded-lg backdrop-blur-sm bg-white/10 ${
-            trend >= 0 ? 'text-emerald-100' : 'text-rose-100'
-          }`}
-        >
-          {trend >= 0 ? <HiOutlineArrowUp size={14} /> : <HiOutlineArrowDown size={14} />}
-          {Math.abs(trend)}% from last month
-        </div>
-      )}
-      {subtitle && <p className="text-[10px] font-medium opacity-70 mt-2">{subtitle}</p>}
+      <p className="text-lg font-black text-slate-900 dark:text-white truncate">
+        {amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+      </p>
     </div>
   </div>
 );
@@ -168,37 +115,22 @@ const TickerBar = ({ tickerData, currencySymbol }) => {
       <div className="flex-1 overflow-hidden ml-[80px] sm:ml-[140px] py-3">
         <div className="animate-ticker-scroll flex gap-8 px-4">
           {[...tickerData, ...tickerData, ...tickerData].map((item, idx) => (
-            <div
-              key={idx}
-              className="flex items-center gap-2.5 font-bold text-sm cursor-default group shrink-0"
-            >
+            <div key={idx} className="flex items-center gap-2.5 font-bold text-sm cursor-default group shrink-0">
               <img
                 src={`https://flagcdn.com/w40/${fiatFlagMap[item.symbol] || 'un'}.png`}
                 alt={item.symbol}
                 className="w-4 h-4 sm:w-5 sm:h-5 rounded-full object-cover shadow-sm group-hover:scale-110 transition-transform"
               />
-              <span className="text-slate-700 dark:text-slate-300 font-black text-xs sm:text-sm">
-                {item.symbol}
-              </span>
+              <span className="text-slate-700 dark:text-slate-300 font-black text-xs sm:text-sm">{item.symbol}</span>
               <span className="text-slate-900 dark:text-white font-black text-xs sm:text-sm">
-                {currencySymbol}
-                {Number(item.price).toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 4,
-                })}
+                {currencySymbol}{Number(item.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
               </span>
-              <span
-                className={`text-[10px] sm:text-[11px] font-black flex items-center gap-0.5 px-2 py-0.5 rounded-full ${
-                  item.change >= 0
-                    ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400'
-                    : 'bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400'
-                }`}
-              >
-                {item.change >= 0 ? (
-                  <HiOutlineTrendingUp size={12} />
-                ) : (
-                  <HiOutlineTrendingDown size={12} />
-                )}
+              <span className={`text-[10px] sm:text-[11px] font-black flex items-center gap-0.5 px-2 py-0.5 rounded-full ${
+                item.change >= 0
+                  ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400'
+                  : 'bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400'
+              }`}>
+                {item.change >= 0 ? <HiOutlineTrendingUp size={12} /> : <HiOutlineTrendingDown size={12} />}
                 {Math.abs(item.change)}%
               </span>
             </div>
@@ -209,46 +141,34 @@ const TickerBar = ({ tickerData, currencySymbol }) => {
   );
 };
 
-const CurrencyBadge = ({ currency, amount }) => (
-  <div className="bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 shrink-0 flex items-center gap-3 hover:bg-white dark:hover:bg-slate-800 transition-all duration-300 group shadow-sm min-w-[200px]">
-    <div className="relative">
-      <div className="absolute inset-0 bg-emerald-500 rounded-full blur-md opacity-0 group-hover:opacity-30 transition-opacity" />
-      <img
-        src={`https://flagcdn.com/w40/${fiatFlagMap[currency] || 'un'}.png`}
-        alt=""
-        className="w-10 h-10 rounded-full object-cover border-2 border-white dark:border-slate-700 shadow-lg group-hover:scale-105 transition-transform"
-      />
-    </div>
-    <div className="min-w-0 flex-1">
-      <p className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest truncate mb-0.5">
-        Physical {currency}
-      </p>
-      <p
-        className="text-base sm:text-lg font-black text-slate-900 dark:text-white truncate"
-        title={`${amount.toLocaleString()} ${currency}`}
-      >
-        {amount.toLocaleString(undefined, {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })}
-      </p>
-    </div>
-  </div>
-);
-
 // ============================================
-// 🚀 MAIN CONTENT COMPONENT
+// 💼 CASH WALLET CONTENT 
 // ============================================
 const CashWalletContent = () => {
-  const { user, baseCurrency = 'INR', selectedFiats = [], formatGlobalDate } = useAuth();
-  const currencySymbol =
-    baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
+  const { user, baseCurrency = 'INR', selectedFiats = [], formatGlobalDate, getCalendarMonthKey } = useAuth();
+  const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
   const { addToast } = useToast();
 
   const availableCurrencies = useMemo(
     () => Array.from(new Set([baseCurrency, ...selectedFiats])),
     [baseCurrency, selectedFiats]
   );
+
+  const getCurrentMonthKey = () => getCalendarMonthKey(new Date().toISOString());
+  const [openMonths, setOpenMonths] = useState(new Set());
+
+  useEffect(() => {
+    setOpenMonths(new Set([getCurrentMonthKey()]));
+  }, []);
+
+  const toggleMonth = (monthKey) => {
+    setOpenMonths(prev => {
+      const next = new Set(prev);
+      if (next.has(monthKey)) next.delete(monthKey);
+      else next.add(monthKey);
+      return next;
+    });
+  };
 
   const [transactions, setTransactions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -267,43 +187,36 @@ const CashWalletContent = () => {
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
 
+  // 🆕 Form – Deposit fields
   const [formData, setFormData] = useState({
     title: '',
     foreignAmount: '',
     currency: baseCurrency,
     exchangeRate: 1,
+    fee: '',
     date: getLocalDateTimeString(),
   });
 
   // Ticker data fetch
   useEffect(() => {
     const displayFiats = selectedFiats.filter(f => f !== baseCurrency);
-    if (displayFiats.length === 0) {
-      setTickerData([]);
-      return;
-    }
+    if (displayFiats.length === 0) { setTickerData([]); return; }
 
     const fetchTickerData = async () => {
       try {
         const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${baseCurrency}`);
         if (!res.ok) return;
         const data = await res.json();
-        const formattedFiat = displayFiats
-          .map(fiat => {
-            const rate = data.rates[fiat];
-            return rate
-              ? {
-                  symbol: fiat,
-                  price: (1 / rate).toFixed(4),
-                  change: (Math.random() * 0.8 - 0.4).toFixed(2),
-                }
-              : null;
-          })
-          .filter(Boolean);
+        const formattedFiat = displayFiats.map(fiat => {
+          const rate = data.rates[fiat];
+          return rate ? {
+            symbol: fiat,
+            price: (1 / rate).toFixed(4),
+            change: (Math.random() * 0.8 - 0.4).toFixed(2),
+          } : null;
+        }).filter(Boolean);
         setTickerData(formattedFiat);
-      } catch (error) {
-        // silently fail, ticker is supplementary
-      }
+      } catch (error) {}
     };
 
     fetchTickerData();
@@ -311,154 +224,124 @@ const CashWalletContent = () => {
     return () => clearInterval(interval);
   }, [baseCurrency, selectedFiats]);
 
-  // Fetch transactions with error handling
+  // Fetch transactions 
   useEffect(() => {
     if (!user) return;
-    const q = query(
-      collection(db, 'users', user.uid, 'cashWallet'),
-      orderBy('timestamp', 'desc')
-    );
-    const unsubscribe = onSnapshot(
-      q,
-      snapshot => {
-        setTransactions(
-          snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-        );
-        setIsLoading(false);
-      },
-      error => {
-        console.error('Cash wallet snapshot error:', error);
-        addToast('Failed to load transactions. Please refresh.', 'error');
-        setIsLoading(false);
-      }
-    );
+    const q = query(collection(db, 'users', user.uid, 'cashWallet'), orderBy('timestamp', 'desc'));
+    const unsubscribe = onSnapshot(q, snapshot => {
+      setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setIsLoading(false);
+    }, error => {
+      addToast('Failed to load transactions. Please refresh.', 'error');
+      setIsLoading(false);
+    });
     return () => unsubscribe();
   }, [user, addToast]);
 
-  // Currency balances
+  // Unified Balance Engine
+  const { balance: totalBalance, totalFees } = useMemo(
+    () => calcVaultBalance(transactions),
+    [transactions]
+  );
+
+  // ✅ Currency balances (Fixed Native Logic to support Out/Expenses)
   const currencyBalances = useMemo(() => {
     const balances = {};
     transactions.forEach(t => {
       const curr = t.currency || baseCurrency;
-      const amt = Number(t.foreignAmount || t.amount || 0);
       if (!balances[curr]) balances[curr] = 0;
-      balances[curr] += t.type === 'in' ? amt : -amt;
+      
+      const nativeAmt = Number(t.foreignAmount || t.amount || 0);
+      const rawType = (t.type || '').toLowerCase();
+      
+      if (rawType === 'out' || rawType === 'expense') {
+        const feeType = (t.feeType || 'inclusive').toLowerCase();
+        const exRate = Number(t.exchangeRate || 1);
+        const nativeFee = Number(t.fee || 0) / exRate;
+        const deduct = feeType === 'exclusive' ? nativeAmt + nativeFee : nativeAmt;
+        balances[curr] -= deduct;
+      } else {
+        balances[curr] += nativeAmt;
+      }
     });
     return Object.entries(balances)
       .filter(([_, v]) => Math.abs(v) > 0.01)
       .map(([curr, value]) => ({ currency: curr, value }));
   }, [transactions, baseCurrency]);
 
-  // Processed ledger for grouping
+  // ✅ Processed ledger for grouping (Fixed for IN/OUT math)
   const processedLedger = useMemo(() => {
-    const sorted = [...transactions].sort(
-      (a, b) => new Date(a.date) - new Date(b.date)
-    );
+    const sorted = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
     let runningBalance = 0;
     const grouped = {};
+    
     sorted.forEach(t => {
       const dateObj = new Date(t.date || new Date());
-      const monthName = formatGlobalDate
-        ? formatGlobalDate(dateObj, 'monthYear')
-        : dateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
-      const monthKey = `${dateObj.getFullYear()}-${String(
-        dateObj.getMonth() + 1
-      ).padStart(2, '0')}`;
-      if (!grouped[monthKey])
-        grouped[monthKey] = {
-          monthName,
-          openingBalance: runningBalance,
-          records: [],
-          closingBalance: 0,
-        };
-      let finalAmount = Number(t.finalBaseAmount || t.amount || 0);
-      let feeAmount = t.fee ? Number(t.fee) * (t.feeExchangeRate || 1) : 0;
-      let netChange = t.type === 'in' ? finalAmount : -(finalAmount + feeAmount);
+      const monthName = formatGlobalDate ? formatGlobalDate(dateObj, 'monthYear') : dateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
+      const monthKey = getCalendarMonthKey(t.date);
+      if (!grouped[monthKey]) grouped[monthKey] = { monthName, monthKey, openingBalance: runningBalance, records: [], closingBalance: 0, totalFeesInMonth: 0 };
+
+      const finalAmount = Number(t.finalBaseAmount || t.amount || 0); 
+      const feeAmount = Number(t.fee) || 0;
+      const rawType = (t.type || '').toLowerCase();
+      
+      let netChange = 0;
+      if (rawType === 'out' || rawType === 'expense') {
+        const feeType = (t.feeType || 'inclusive').toLowerCase();
+        netChange = feeType === 'exclusive' ? -(finalAmount + feeAmount) : -finalAmount;
+      } else {
+        netChange = finalAmount;
+      }
+
       runningBalance += netChange;
-      grouped[monthKey].records.push({
-        ...t,
-        netChange,
-        finalAmount,
-        feeAmount,
-      });
+      grouped[monthKey].records.push({ ...t, netChange, finalAmount, feeAmount });
+      grouped[monthKey].totalFeesInMonth += feeAmount;
       grouped[monthKey].closingBalance = runningBalance;
     });
 
-    return Object.keys(grouped)
-      .sort()
-      .reverse()
-      .map(key => {
-        const monthData = grouped[key];
-        const filtered = monthData.records
-          .filter(
-            r =>
-              (r.title || '')
-                .toLowerCase()
-                .includes(searchTerm.toLowerCase()) &&
-              (filterType === 'all' || r.type === filterType)
-          )
-          .reverse();
-        return { ...monthData, records: filtered };
-      })
-      .filter(m => m.records.length > 0);
-  }, [transactions, searchTerm, filterType, formatGlobalDate]);
+    return Object.keys(grouped).sort().reverse().map(key => {
+      const monthData = grouped[key];
+      const filtered = monthData.records.filter(r =>
+        (r.title || '').toLowerCase().includes(searchTerm.toLowerCase()) &&
+        (filterType === 'all' || r.type === filterType || (filterType === 'out' && (r.type === 'out' || r.type === 'expense')))
+      ).reverse();
+      return { ...monthData, records: filtered };
+    }).filter(m => m.records.length > 0);
+  }, [transactions, searchTerm, filterType, formatGlobalDate, getCalendarMonthKey]);
 
-  // Total balance
-  const totalBalance =
-    processedLedger.length > 0 && searchTerm === '' && filterType === 'all'
-      ? processedLedger[0].closingBalance
-      : transactions.reduce(
-          (acc, t) =>
-            acc +
-            (t.type === 'in'
-              ? Number(t.finalBaseAmount || t.amount || 0)
-              : -Number(t.finalBaseAmount || t.amount || 0)),
-          0
-        );
-
-  // 🔄 Report download with loading & toast
+  // Report download (Fixed logic)
   const handleDownloadReport = async format => {
     setIsExportMenuOpen(false);
     const filteredRecords = processedLedger.flatMap(month => month.records);
     if (filteredRecords.length === 0) {
-      addToast('No cash records found for current filters.', 'warning');
+      addToast('No  records found for current filters.', 'warning');
       return;
     }
-
     setIsGeneratingReport(true);
-
     const reportData = filteredRecords.map(rec => {
-      const isIncome = rec.type === 'in';
-      const cleanNote = (rec.title || 'N/A').replace(/(\r\n|\n|\r)/gm, ' ');
-      const rawDate = rec.date ? rec.date.split('T')[0] : 'N/A';
+      const isOut = rec.type === 'out' || rec.type === 'expense';
       return {
-        date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rawDate,
-        type: isIncome ? 'Deposit (+)' : 'Withdrawal (-)',
+        date: formatGlobalDate ? formatGlobalDate(rec.date, 'full') : rec.date?.split('T')[0] || 'N/A',
+        type: isOut ? 'Withdrawal (-)' : 'Deposit (+)',
         currency: rec.currency || baseCurrency,
         nativeAmount: Number(rec.foreignAmount || rec.amount || 0),
         netBaseValue: Number(rec.netChange || 0),
-        notes: cleanNote,
+        fee: Number(rec.fee || 0),
+        notes: (rec.title || 'N/A').replace(/(\r\n|\n|\r)/gm, ' '),
       };
     });
-
     const columns = [
       { header: 'Date', key: 'date' },
       { header: 'Type', key: 'type' },
       { header: 'Currency', key: 'currency' },
-      { header: 'Native Amount', key: 'nativeAmount', isNumeric: true },
-      {
-        header: `Net Base Value (${currencySymbol})`,
-        key: 'netBaseValue',
-        isNumeric: true,
-      },
+      { header: 'Gross Native', key: 'nativeAmount', isNumeric: true },
+      { header: `Fee (${currencySymbol})`, key: 'fee', isNumeric: true },
+      { header: `Net Base Value (${currencySymbol})`, key: 'netBaseValue', isNumeric: true },
       { header: 'Description', key: 'notes' },
     ];
-
     const fileName = 'Cash_Vault_Ledger';
-    const filterTitle =
-      searchTerm || filterType !== 'all' ? ' (Filtered)' : '';
+    const filterTitle = searchTerm || filterType !== 'all' ? ' (Filtered)' : '';
     const reportTitle = `Physical Cash Vault Ledger${filterTitle}`;
-
     if (format === 'pdf') {
       await downloadPDFReport(reportData, columns, fileName, reportTitle, {
         onSuccess: () => addToast('PDF report downloaded!', 'success'),
@@ -470,24 +353,18 @@ const CashWalletContent = () => {
         onError: msg => addToast(`Excel Error: ${msg}`, 'error'),
       });
     }
-
     setIsGeneratingReport(false);
   };
 
-  // 🌐 Live rate fetch
+  // Live rate fetch
   const fetchLiveRate = async () => {
     if (formData.currency === baseCurrency) return;
     setIsFetchingRate(true);
     try {
-      const res = await fetch(
-        `https://api.exchangerate-api.com/v4/latest/${formData.currency}`
-      );
+      const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${formData.currency}`);
       const data = await res.json();
       if (data.rates[baseCurrency]) {
-        setFormData(prev => ({
-          ...prev,
-          exchangeRate: data.rates[baseCurrency].toFixed(4),
-        }));
+        setFormData(prev => ({ ...prev, exchangeRate: data.rates[baseCurrency].toFixed(4) }));
       } else {
         addToast('Exchange rate not available for selected pair.', 'warning');
       }
@@ -498,46 +375,48 @@ const CashWalletContent = () => {
     }
   };
 
-  const calculatedFinalAmount =
-    (parseFloat(formData.foreignAmount) || 0) *
-    (parseFloat(formData.exchangeRate) || 0);
+  // ----------------------------------------------------
+  // Deposit Calculation (simplified)
+  // ----------------------------------------------------
+  const isForeign = formData.currency !== baseCurrency;
+  const grossAmount = (parseFloat(formData.foreignAmount) || 0) * (isForeign ? parseFloat(formData.exchangeRate) || 1 : 1);
+  const feeDeduction = parseFloat(formData.fee) || 0;
+  const calculatedFinalAmount = grossAmount - feeDeduction;
 
-  // 💾 Save entry
+  // Save entry
   const handleSaveEntry = async e => {
     e.preventDefault();
     if (!user) return;
     setIsSaving(true);
-    const isForeign = formData.currency !== baseCurrency;
-    const recordData = {
-      title: formData.title,
-      type: 'in',
-      date: formData.date,
-      timestamp: editingId
-        ? transactions.find(t => t.id === editingId)?.timestamp
-        : new Date(formData.date).getTime(),
-      currency: formData.currency,
-      foreignAmount: parseFloat(formData.foreignAmount) || 0,
-      exchangeRate: isForeign ? parseFloat(formData.exchangeRate) : 1,
-      finalBaseAmount: calculatedFinalAmount,
-      fee: 0,
-    };
+
     try {
+      // ✅ FRESH LOCAL CALCULATION (Anti-Stale)
+      const inputForeign = parseFloat(formData.foreignAmount) || 0;
+      const inputExRate = isForeign ? (parseFloat(formData.exchangeRate) || 1) : 1;
+      const freshGrossBase = inputForeign * inputExRate;
+      const freshFee = parseFloat(formData.fee) || 0;
+      const freshFinalBase = freshGrossBase - freshFee;
+
+      const recordData = {
+        title: formData.title,
+        type: 'in', // fixed deposit locally added via  wallet
+        date: formData.date,
+        timestamp: editingId ? transactions.find(t => t.id === editingId)?.timestamp : new Date(formData.date).getTime(),
+        currency: formData.currency,
+        foreignAmount: inputForeign,
+        exchangeRate: inputExRate,
+        finalBaseAmount: freshFinalBase,
+        fee: freshFee,
+        vaultId: 'cash_main',
+      };
+
       if (editingId) {
-        await setDoc(
-          doc(db, 'users', user.uid, 'cashWallet', editingId),
-          recordData,
-          { merge: true }
-        );
+        // Safe Update
+        await setDoc(doc(db, 'users', user.uid, 'cashWallet', editingId), recordData, { merge: true });
       } else {
-        await addDoc(
-          collection(db, 'users', user.uid, 'cashWallet'),
-          recordData
-        );
+        await addDoc(collection(db, 'users', user.uid, 'cashWallet'), recordData);
       }
-      addToast(
-        editingId ? 'Entry updated successfully!' : 'Cash added to vault!',
-        'success'
-      );
+      addToast(editingId ? 'Entry updated successfully!' : 'Cash Added to Vault!', 'success');
       closeModal();
     } catch (error) {
       addToast('Failed to save entry. Please try again.', 'error');
@@ -552,6 +431,7 @@ const CashWalletContent = () => {
       foreignAmount: rec.foreignAmount || rec.amount || '',
       currency: rec.currency || baseCurrency,
       exchangeRate: rec.exchangeRate || 1,
+      fee: rec.fee || '',
       date: rec.date || getLocalDateTimeString(),
     });
     setEditingId(rec.id);
@@ -570,26 +450,11 @@ const CashWalletContent = () => {
     setIsVerifying(true);
     try {
       const userSnap = await getDoc(doc(db, 'users', user.uid));
-      const storedHash =
-        userSnap.data()?.security?.pinHash ||
-        userSnap.data()?.securityPin ||
-        userSnap.data()?.pin;
-      const { valid, newHash } = await verifyPIN(
-        pinInput.trim(),
-        storedHash,
-        user.uid
-      );
-      if (!valid) {
-        setPinError('Incorrect PIN.');
-        setIsVerifying(false);
-        return;
-      }
+      const storedHash = userSnap.data()?.security?.pinHash || userSnap.data()?.securityPin || userSnap.data()?.pin;
+      const { valid, newHash } = await verifyPIN(pinInput.trim(), storedHash, user.uid);
+      if (!valid) { setPinError('Incorrect PIN.'); setIsVerifying(false); return; }
       if (newHash) {
-        await setDoc(
-          doc(db, 'users', user.uid),
-          { security: { pinHash: newHash } },
-          { merge: true }
-        );
+        await setDoc(doc(db, 'users', user.uid), { security: { pinHash: newHash } }, { merge: true });
       }
       await deleteDoc(doc(db, 'users', user.uid, 'cashWallet', deleteContext.id));
       setDeleteContext(null);
@@ -608,6 +473,7 @@ const CashWalletContent = () => {
       foreignAmount: '',
       currency: baseCurrency,
       exchangeRate: 1,
+      fee: '',
       date: getLocalDateTimeString(),
     });
     setIsModalOpen(true);
@@ -618,14 +484,11 @@ const CashWalletContent = () => {
     setEditingId(null);
   };
 
-  // 🎴 Skeleton loader for ledger
+  // Skeleton loader
   const LedgerSkeleton = () => (
     <div className="space-y-6 sm:space-y-8">
       {[1, 2].map(i => (
-        <div
-          key={i}
-          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[2rem] overflow-hidden shadow-sm animate-pulse"
-        >
+        <div key={i} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[2rem] overflow-hidden shadow-sm animate-pulse">
           <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50">
             <div className="h-5 w-32 bg-slate-200 dark:bg-slate-700 rounded-lg" />
             <div className="h-4 w-20 bg-slate-200 dark:bg-slate-700 rounded-lg" />
@@ -653,22 +516,22 @@ const CashWalletContent = () => {
       <div className="pt-20 sm:pt-24 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <style>{`@keyframes scrollTicker { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } } .animate-ticker-scroll { display: flex; white-space: nowrap; animation: scrollTicker 45s linear infinite; } .animate-ticker-scroll:hover { animation-play-state: paused; }`}</style>
 
-        {/* Premium Header */}
-        <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 sm:p-8 lg:p-10 shadow-2xl border border-slate-700/50">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(16,185,129,0.1),transparent_70%)]" />
-          <div className="absolute right-0 top-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
+        {/* ✨ PREMIUM GLASS HEADER */}
+        <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 sm:p-8 lg:p-10 shadow-2xl border border-white/10 backdrop-blur-xl">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(16,185,129,0.15),transparent_70%)]" />
+          <div className="absolute right-0 top-0 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
           <div className="relative z-10 flex flex-col lg:flex-row lg:items-end justify-between gap-6">
             <div className="flex items-center gap-4">
-              <div className="w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-[1.5rem] sm:rounded-[2rem] flex items-center justify-center shadow-lg shadow-emerald-500/20 shrink-0">
-                <FaMoneyBillWave size={28} className="text-white" />
+              <div className="w-16 h-16 sm:w-18 sm:h-18 bg-gradient-to-br from-emerald-400 to-teal-600 rounded-[1.5rem] sm:rounded-[2rem] flex items-center justify-center shadow-lg shadow-emerald-500/30 shrink-0">
+                <FaMoneyBillWave size={32} className="text-white" />
               </div>
               <div>
-                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight">
+               <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight">
                   Physical Cash
-                </h1>
+                 </h1>
                 <p className="text-xs sm:text-sm font-medium text-slate-400 mt-1">
-                  Track your cash holdings & foreign currency
+                  Track your physical currency holdings
                 </p>
               </div>
             </div>
@@ -678,42 +541,28 @@ const CashWalletContent = () => {
               <div className="relative">
                 <button
                   onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
-                  onBlur={() =>
-                    setTimeout(() => setIsExportMenuOpen(false), 200)
-                  }
+                  onBlur={() => setTimeout(() => setIsExportMenuOpen(false), 200)}
                   className="flex items-center gap-2 px-5 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-2xl font-black text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 active:scale-95 shadow-sm"
                 >
                   {isGeneratingReport ? (
-                    <>
-                      <HiOutlineRefresh className="animate-spin" size={18} />{' '}
-                      Generating...
-                    </>
+                    <><HiOutlineRefresh className="animate-spin" size={18} /> Generating...</>
                   ) : (
-                    <>
-                      <HiOutlineDownload size={18} /> Export
-                    </>
+                    <><HiOutlineDownload size={18} /> Export</>
                   )}
                 </button>
                 {isExportMenuOpen && !isGeneratingReport && (
                   <div className="absolute top-[110%] right-0 w-48 bg-slate-800 border border-slate-700 rounded-2xl shadow-xl flex flex-col p-1.5 z-50 animate-in fade-in zoom-in-95">
-                    <button
-                      onClick={() => handleDownloadReport('pdf')}
-                      className="flex items-center gap-2.5 px-4 py-3 hover:bg-slate-700 text-slate-200 text-[11px] font-black rounded-xl transition-colors"
-                    >
-                      <HiOutlineDocumentText className="text-rose-400" size={18} />{' '}
-                      PDF Document
+                    <button onClick={() => handleDownloadReport('pdf')} className="flex items-center gap-2.5 px-4 py-3 hover:bg-slate-700 text-slate-200 text-[11px] font-black rounded-xl transition-colors">
+                      <HiOutlineDocumentText className="text-rose-400" size={18} /> PDF Document
                     </button>
-                    <button
-                      onClick={() => handleDownloadReport('excel')}
-                      className="flex items-center gap-2.5 px-4 py-3 hover:bg-slate-700 text-slate-200 text-[11px] font-black rounded-xl transition-colors"
-                    >
-                      <HiOutlineTable className="text-emerald-400" size={18} />{' '}
-                      Excel (CSV)
+                    <button onClick={() => handleDownloadReport('excel')} className="flex items-center gap-2.5 px-4 py-3 hover:bg-slate-700 text-slate-200 text-[11px] font-black rounded-xl transition-colors">
+                      <HiOutlineTable className="text-emerald-400" size={18} /> Excel (CSV)
                     </button>
                   </div>
                 )}
               </div>
 
+              {/* Add Cash Button */}
               <button
                 onClick={openModal}
                 className="flex-1 lg:flex-none flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-6 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-emerald-500/30"
@@ -724,37 +573,34 @@ const CashWalletContent = () => {
           </div>
 
           {/* Stats row */}
-          <div className="relative z-10 grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mt-8 pt-6 border-t border-white/10">
-            <div className="bg-white/5 backdrop-blur-md rounded-2xl p-4 border border-white/5 col-span-2 lg:col-span-1">
+          <div className="relative z-10 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mt-8 pt-6 border-t border-white/10">
+            <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/5 col-span-2 lg:col-span-1">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1">
-                <HiOutlineShieldCheck size={14} /> Total Vault Balance
+                <HiOutlineShieldCheck size={14} /> Vault Balance
               </p>
-              <p
-                className="text-xl sm:text-2xl font-black text-white truncate"
-                title={`${currencySymbol}${totalBalance.toLocaleString()}`}
-              >
-                {currencySymbol}
-                {totalBalance.toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+              <p className="text-xl sm:text-2xl font-black text-white truncate">
+                {currencySymbol}{totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             </div>
-            <div className="bg-white/5 backdrop-blur-md rounded-2xl p-4 border border-white/5">
+            <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/5">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1">
+                <HiOutlineExclamationCircle size={14} /> Total Fees
+              </p>
+              <p className="text-xl sm:text-2xl font-black text-rose-300 truncate">
+                -{currencySymbol}{totalFees.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/5">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1">
                 <FaGlobe size={12} /> Currencies
               </p>
-              <p className="text-xl sm:text-2xl font-black text-white">
-                {currencyBalances.length}
-              </p>
+              <p className="text-xl sm:text-2xl font-black text-white">{currencyBalances.length}</p>
             </div>
-            <div className="bg-white/5 backdrop-blur-md rounded-2xl p-4 border border-white/5">
+            <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/5">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-1">
                 <HiOutlineLibrary size={14} /> Transactions
               </p>
-              <p className="text-xl sm:text-2xl font-black text-white">
-                {transactions.length}
-              </p>
+              <p className="text-xl sm:text-2xl font-black text-white">{transactions.length}</p>
             </div>
           </div>
         </div>
@@ -796,7 +642,7 @@ const CashWalletContent = () => {
             >
               <option value="all">All Records</option>
               <option value="in">Deposits (+)</option>
-              <option value="out">Withdrawals (-)</option>
+              <option value="out">Withdrawals/Shifts (-)</option>
             </select>
           </div>
         </div>
@@ -809,482 +655,313 @@ const CashWalletContent = () => {
             <div className="w-24 h-24 bg-slate-100 dark:bg-slate-800 rounded-[2rem] flex items-center justify-center mb-5 shadow-inner">
               <HiOutlineCash className="text-5xl text-slate-300 dark:text-slate-600" />
             </div>
-            <p className="text-lg font-black text-slate-700 dark:text-slate-300">
-              No cash records found
-            </p>
+            <p className="text-lg font-black text-slate-700 dark:text-slate-300">No  records found</p>
             <p className="text-sm font-medium text-slate-500 mt-2 text-center max-w-sm">
-              {searchTerm || filterType !== 'all'
-                ? 'Try adjusting your search or filters.'
-                : 'Log your first physical cash entry to get started.'}
+              {searchTerm || filterType !== 'all' ? 'Try adjusting your search or filters.' : 'Add your first physical  deposit to get started.'}
             </p>
             {!searchTerm && filterType === 'all' && (
-              <button
-                onClick={openModal}
-                className="mt-6 bg-emerald-600 hover:bg-emerald-700 text-white font-black px-6 py-3 rounded-xl shadow-lg shadow-emerald-500/30 transition-all active:scale-95"
-              >
+              <button onClick={openModal} className="mt-6 bg-emerald-600 hover:bg-emerald-700 text-white font-black px-6 py-3 rounded-xl shadow-lg shadow-emerald-500/30 transition-all active:scale-95">
                 Add Cash Now
               </button>
             )}
           </div>
         ) : (
-          processedLedger.map(month => (
-            <div
-              key={month.monthName}
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[2rem] overflow-hidden shadow-sm"
-            >
-              <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50">
-                <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2.5">
-                  <div className="p-2 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-lg">
-                    <HiOutlineCalendar size={18} />
+          processedLedger.map(month => {
+            const opening = month.openingBalance || 0;
+            const closing = month.closingBalance || 0;
+            
+            // Monthly summaries (calculating deposits and withdrawals separately)
+            const totalIn = month.records.filter(r => r.type !== 'out' && r.type !== 'expense').reduce((sum, r) => sum + (r.finalBaseAmount || 0), 0);
+            const totalOut = month.records.filter(r => r.type === 'out' || r.type === 'expense').reduce((sum, r) => {
+               const feeType = (r.feeType || 'inclusive').toLowerCase();
+               const amt = Number(r.finalBaseAmount || 0);
+               const fee = Number(r.fee || 0);
+               return sum + (feeType === 'exclusive' ? amt + fee : amt);
+            }, 0);
+            
+            const monthFees = month.totalFeesInMonth || 0;
+            const isOpen = openMonths.has(month.monthKey);
+
+            return (
+              <div key={month.monthKey} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[2rem] overflow-hidden shadow-sm">
+                {/* Month Header */}
+                <button onClick={() => toggleMonth(month.monthKey)} className="w-full px-6 py-5 flex justify-between items-center bg-slate-50/80 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors text-left">
+                  <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2.5">
+                    <div className="p-2 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-lg">
+                      <HiOutlineCalendar size={18} />
+                    </div>
+                    {month.monthName}
+                  </h2>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right hidden sm:block">
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Closing Balance</p>
+                      <p className="text-sm font-black text-slate-700 dark:text-slate-300">
+                        {currencySymbol}{closing.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <HiOutlineChevronDown size={20} className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
                   </div>
-                  {month.monthName}
-                </h2>
-                <div className="text-right">
-                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">
-                    Opening
-                  </p>
-                  <p className="text-sm font-black text-slate-700 dark:text-slate-300">
-                    {currencySymbol}
-                    {month.openingBalance.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                    })}
-                  </p>
-                </div>
-              </div>
+                </button>
 
-              {/* ========== MOBILE CARDS ========== */}
-              <div className="md:hidden flex flex-col divide-y divide-slate-100 dark:divide-slate-800/50">
-                {month.records.map(rec => {
-                  const dateObj = new Date(rec.date);
-                  const timeStr = dateObj.toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  });
-                  return (
-                    <div
-                      key={rec.id}
-                      className="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors"
-                    >
-                      {/* Top row: type icon + title + amount */}
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="flex items-start gap-3 flex-1 min-w-0">
-                          <div
-                            className={`w-10 h-10 rounded-[0.8rem] flex items-center justify-center shadow-sm shrink-0 ${
-                              rec.type === 'in'
-                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400'
-                                : 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400'
-                            }`}
-                          >
-                            {rec.type === 'in' ? (
-                              <FaArrowDown size={14} />
-                            ) : (
-                              <FaArrowUp size={14} />
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p
-                              className="font-black text-slate-900 dark:text-white text-sm truncate"
-                              title={rec.title}
-                            >
-                              {rec.title}
-                            </p>
-                            <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mt-0.5">
-                              {rec.currency !== baseCurrency && (
-                                <span className="inline-flex items-center gap-1 mr-2">
-                                  <img
-                                    src={`https://flagcdn.com/w20/${fiatFlagMap[rec.currency] || 'un'}.png`}
-                                    alt=""
-                                    className="w-3.5 h-3.5 rounded-full object-cover shadow-sm shrink-0"
-                                  />
-                                  {rec.currency}
-                                </span>
-                              )}
-                              {formatGlobalDate
-                                ? formatGlobalDate(rec.date, 'short')
-                                : rec.date.split('T')[0]}
-                              <span className="opacity-50 mx-1">·</span>
-                              {timeStr}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="text-right ml-3 shrink-0">
-                          <p
-                            className={`text-base font-black ${
-                              rec.netChange >= 0
-                                ? 'text-emerald-600 dark:text-emerald-400'
-                                : 'text-rose-600 dark:text-rose-400'
-                            }`}
-                          >
-                            {rec.netChange >= 0 ? '+' : ''}
-                            {currencySymbol}
-                            {Math.abs(rec.netChange).toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                          </p>
-                          {rec.currency !== baseCurrency && (
-                            <p className="text-[10px] font-bold text-slate-500 mt-0.5">
-                              {rec.foreignAmount?.toLocaleString()} {rec.currency}
-                            </p>
-                          )}
-                        </div>
+                {isOpen && (
+                  <div className="animate-in fade-in duration-200">
+                    {/* Ledger Summary */}
+                    <div className="px-6 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4 bg-white dark:bg-slate-900 border-t border-b border-slate-200 dark:border-slate-800">
+                      <div>
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Opening</p>
+                        <p className="font-black text-slate-700 dark:text-slate-300">
+                          {currencySymbol}{opening.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </p>
                       </div>
-
-                      {/* Bottom row: actions */}
-                      <div className="flex justify-end gap-2 mt-3">
-                        {!rec.linkedExpenseId &&
-                          !rec.linkedIncomeId &&
-                          !rec.linkedPartyId && (
-                            <button
-                              onClick={() => handleEdit(rec)}
-                              className="p-2 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg transition-all active:scale-95 shadow-sm border border-slate-200 dark:border-slate-700"
-                            >
-                              <HiOutlinePencil size={14} />
-                            </button>
-                          )}
-                        {(rec.linkedExpenseId ||
-                          rec.linkedIncomeId ||
-                          rec.linkedPartyId) && (
-                          <span className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[8px] font-black rounded border border-amber-200 dark:border-amber-500/30 self-center">
-                            SYNCED
-                          </span>
-                        )}
-                        <button
-                          onClick={() => initiateDelete(rec)}
-                          className="p-2 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-lg transition-all active:scale-95 shadow-sm border border-slate-200 dark:border-slate-700"
-                        >
-                          <HiOutlineTrash size={14} />
-                        </button>
+                      <div>
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Deposits (+)</p>
+                        <p className="font-black text-emerald-600">
+                          +{currencySymbol}{totalIn.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Withdrawals (-)</p>
+                        <p className="font-black text-rose-600">
+                          -{currencySymbol}{totalOut.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Closing</p>
+                        <p className="font-black text-emerald-700 dark:text-emerald-400">
+                          {currencySymbol}{closing.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </p>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
 
-              {/* ========== DESKTOP TABLE ========== */}
-              <div className="hidden md:block overflow-x-auto custom-scrollbar">
-                <table className="w-full text-left min-w-[800px]">
-                  <thead className="bg-white dark:bg-slate-900 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
-                    <tr>
-                      <th className="p-4 pl-6 w-20">Type</th>
-                      <th className="p-4">Details</th>
-                      <th className="p-4 text-right">Native Amount</th>
-                      <th className="p-4 text-right">Net Base Value</th>
-                      <th className="p-4 pr-6 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
-                    {month.records.map(rec => {
-                      const dateObj = new Date(rec.date);
-                      const timeStr = dateObj.toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      });
-                      return (
-                        <tr
-                          key={rec.id}
-                          className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors group"
-                        >
-                          <td className="p-4 pl-6">
-                            <div
-                              className={`w-10 h-10 rounded-[0.8rem] flex items-center justify-center shadow-sm ${
-                                rec.type === 'in'
-                                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400'
-                                  : 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400'
-                              }`}
-                            >
-                              {rec.type === 'in' ? (
-                                <FaArrowDown size={14} />
-                              ) : (
-                                <FaArrowUp size={14} />
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-4">
-                            <p
-                              className="font-black text-slate-900 dark:text-white text-sm truncate max-w-[200px] md:max-w-[300px]"
-                              title={rec.title}
-                            >
-                              {rec.title}
-                            </p>
-                            <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-1">
-                              {formatGlobalDate
-                                ? formatGlobalDate(rec.date, 'short')
-                                : rec.date.split('T')[0]}
-                              <span className="opacity-50 mx-1 border-l border-slate-300 dark:border-slate-600 pl-1">
-                                {timeStr}
-                              </span>
-                            </p>
-                          </td>
-                          <td className="p-4 text-right">
-                            <div className="flex items-center justify-end gap-1.5 font-bold text-slate-700 dark:text-slate-300">
-                              {rec.currency !== baseCurrency && (
-                                <img
-                                  src={`https://flagcdn.com/w20/${fiatFlagMap[rec.currency] || 'un'}.png`}
-                                  alt=""
-                                  className="w-3.5 h-3.5 rounded-full object-cover shadow-sm shrink-0"
-                                />
-                              )}
-                              {rec.currency !== baseCurrency
-                                ? `${(rec.foreignAmount || 0).toLocaleString()} ${rec.currency}`
-                                : `${currencySymbol}${(rec.finalAmount || 0).toLocaleString(
-                                    undefined,
-                                    { minimumFractionDigits: 2 }
-                                  )}`}
-                            </div>
-                          </td>
-                          <td className="p-4 text-right">
-                            <p
-                              className={`text-base font-black ${
-                                rec.netChange >= 0
-                                  ? 'text-emerald-600 dark:text-emerald-400'
-                                  : 'text-rose-600 dark:text-rose-400'
-                              }`}
-                            >
-                              {rec.netChange >= 0 ? '+' : ''}
-                              {currencySymbol}
-                              {rec.netChange.toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </p>
-                          </td>
-                          <td className="p-4 pr-6 align-top">
-                            <div className="flex items-center justify-end gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                              {!rec.linkedExpenseId &&
-                                !rec.linkedIncomeId &&
-                                !rec.linkedPartyId && (
-                                  <button
-                                    onClick={() => handleEdit(rec)}
-                                    className="p-2 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg transition-all active:scale-95 shadow-sm border border-slate-200 dark:border-slate-700"
-                                  >
-                                    <HiOutlinePencil size={14} />
-                                  </button>
+                    {/* Mobile Cards */}
+                    <div className="md:hidden flex flex-col divide-y divide-slate-100 dark:divide-slate-800/50">
+                      {month.records.map(rec => {
+                        const dateObj = new Date(rec.date);
+                        const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        const isOut = rec.type === 'out' || rec.type === 'expense';
+                        const netChangeText = isOut ? `-${currencySymbol}${Math.abs(rec.netChange).toLocaleString(undefined, {minimumFractionDigits: 2})}` : `+${currencySymbol}${rec.netChange.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+
+                        return (
+                          <div key={rec.id} className="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors">
+                            <div className="flex justify-between items-start mb-2">
+                              <div className="flex items-start gap-3 flex-1 min-w-0">
+                                <div className={`w-10 h-10 rounded-[0.8rem] flex items-center justify-center shadow-sm shrink-0 ${isOut ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400'}`}>
+                                  {isOut ? <HiOutlineArrowUp size={14} /> : <HiOutlineArrowDown size={14} />}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-black text-slate-900 dark:text-white text-sm break-words" title={rec.title}>{rec.title}</p>
+                                  <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mt-0.5 break-words">
+                                    {rec.currency !== baseCurrency && (
+                                      <span className="inline-flex items-center gap-1 mr-2">
+                                        <img src={`https://flagcdn.com/w20/${fiatFlagMap[rec.currency] || 'un'}.png`} alt="" className="w-3.5 h-3.5 rounded-full object-cover shadow-sm shrink-0" />
+                                        {rec.currency}
+                                      </span>
+                                    )}
+                                    {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]}
+                                    <span className="opacity-50 mx-1">·</span>{timeStr}
+                                  </p>
+                                  {rec.feeAmount > 0 && <p className="text-[9px] text-rose-500 font-bold mt-0.5">Fee: {currencySymbol}{rec.feeAmount.toLocaleString()}</p>}
+                                </div>
+                              </div>
+                              <div className="text-right ml-3 shrink-0">
+                                <p className={`text-base font-black ${isOut ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                                  {netChangeText}
+                                </p>
+                                {rec.currency !== baseCurrency && (
+                                  <p className="text-[10px] font-bold text-slate-500 mt-0.5 break-words">
+                                    {rec.foreignAmount?.toLocaleString()} {rec.currency}
+                                  </p>
                                 )}
-                              {(rec.linkedExpenseId ||
-                                rec.linkedIncomeId ||
-                                rec.linkedPartyId) && (
-                                <span className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[8px] font-black rounded border border-amber-200 dark:border-amber-500/30">
-                                  SYNCED
-                                </span>
+                              </div>
+                            </div>
+                            <div className="flex justify-end gap-2 mt-3">
+                              {!rec.linkedExpenseId && !rec.linkedIncomeId && !rec.linkedPartyId && !rec.shiftId && (
+                                <button onClick={() => handleEdit(rec)} className="p-2 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg transition-all active:scale-95 shadow-sm border border-slate-200 dark:border-slate-700">
+                                  <HiOutlinePencil size={14} />
+                                </button>
                               )}
-                              <button
-                                onClick={() => initiateDelete(rec)}
-                                className="p-2 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-lg transition-all active:scale-95 shadow-sm border border-slate-200 dark:border-slate-700"
-                              >
+                              <button onClick={() => initiateDelete(rec)} className="p-2 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-lg transition-all active:scale-95 shadow-sm border border-slate-200 dark:border-slate-700">
                                 <HiOutlineTrash size={14} />
                               </button>
                             </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                          </div>
+                        );
+                      })}
+                    </div>
 
-              <div className="px-6 py-5 border-t border-slate-200 dark:border-slate-800 flex justify-end bg-slate-50/50 dark:bg-slate-800/30">
-                <div className="text-right bg-white dark:bg-slate-900 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">
-                    Closing Balance
-                  </p>
-                  <p className="text-lg font-black text-emerald-700 dark:text-emerald-400">
-                    {currencySymbol}
-                    {month.closingBalance.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </p>
-                </div>
+                    {/* Desktop Table */}
+                    <div className="hidden md:block overflow-x-auto custom-scrollbar">
+                      <table className="w-full text-left min-w-[800px]">
+                        <thead className="bg-white dark:bg-slate-900 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
+                          <tr>
+                            <th className="p-4 pl-6 w-20">Type</th>
+                            <th className="p-4">Details</th>
+                            <th className="p-4 text-right">Native Amount</th>
+                            <th className="p-4 text-right">Net Impact</th>
+                            <th className="p-4 text-right">Fee</th>
+                            <th className="p-4 pr-6 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
+                          {month.records.map(rec => {
+                            const dateObj = new Date(rec.date);
+                            const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            const isOut = rec.type === 'out' || rec.type === 'expense';
+                            const netChangeText = isOut ? `-${currencySymbol}${Math.abs(rec.netChange).toLocaleString(undefined, {minimumFractionDigits: 2})}` : `+${currencySymbol}${rec.netChange.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+
+                            return (
+                              <tr key={rec.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors group">
+                                <td className="p-4 pl-6">
+                                  <div className={`w-10 h-10 rounded-[0.8rem] flex items-center justify-center shadow-sm ${isOut ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400'}`}>
+                                    {isOut ? <HiOutlineArrowUp size={14} /> : <HiOutlineArrowDown size={14} />}
+                                  </div>
+                                </td>
+                                <td className="p-4">
+                                  <p className="font-black text-slate-900 dark:text-white text-sm truncate max-w-[200px] md:max-w-[300px]" title={rec.title}>{rec.title}</p>
+                                  <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-1">
+                                    {formatGlobalDate ? formatGlobalDate(rec.date, 'short') : rec.date.split('T')[0]}
+                                    <span className="opacity-50 mx-1 border-l border-slate-300 dark:border-slate-600 pl-1">{timeStr}</span>
+                                  </p>
+                                </td>
+                                <td className="p-4 text-right">
+                                  <div className="flex items-center justify-end gap-1.5 font-bold text-slate-700 dark:text-slate-300">
+                                    {rec.currency !== baseCurrency && (
+                                      <img src={`https://flagcdn.com/w20/${fiatFlagMap[rec.currency] || 'un'}.png`} alt="" className="w-3.5 h-3.5 rounded-full object-cover shadow-sm shrink-0" />
+                                    )}
+                                    {rec.currency !== baseCurrency
+                                      ? `${(rec.foreignAmount || 0).toLocaleString()} ${rec.currency}`
+                                      : `${currencySymbol}${(rec.finalAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                                  </div>
+                                </td>
+                                <td className="p-4 text-right">
+                                  <p className={`text-base font-black ${isOut ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                                    {netChangeText}
+                                  </p>
+                                </td>
+                                <td className="p-4 text-right">
+                                  {rec.feeAmount > 0 ? (
+                                    <span className="text-xs font-bold text-rose-500">-{currencySymbol}{rec.feeAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                  ) : (
+                                    <span className="text-xs text-slate-400">-</span>
+                                  )}
+                                </td>
+                                <td className="p-4 pr-6 align-top">
+                                  <div className="flex items-center justify-end gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                                    {!rec.linkedExpenseId && !rec.linkedIncomeId && !rec.linkedPartyId && !rec.shiftId && (
+                                      <button onClick={() => handleEdit(rec)} className="p-2 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg transition-all active:scale-95 shadow-sm border border-slate-200 dark:border-slate-700">
+                                        <HiOutlinePencil size={14} />
+                                      </button>
+                                    )}
+                                    <button onClick={() => initiateDelete(rec)} className="p-2 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-lg transition-all active:scale-95 shadow-sm border border-slate-200 dark:border-slate-700">
+                                      <HiOutlineTrash size={14} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Closing Balance */}
+                    <div className="px-6 py-5 border-t border-slate-200 dark:border-slate-800 flex justify-end bg-slate-50/50 dark:bg-slate-800/30">
+                      <div className="text-right bg-white dark:bg-slate-900 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Closing Balance</p>
+                        <p className="text-lg font-black text-emerald-700 dark:text-emerald-400">
+                          {currencySymbol}{closing.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          ))
+            );
+          })
         )}
 
-        {/* 🚀 ADD/EDIT MODAL */}
+        {/* ✨ ADD CASH MODAL (Deposit Only) */}
         {isModalOpen && (
           <div className="fixed inset-0 z-[500] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
             <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90dvh] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-300 dark:border-slate-700">
-              <div className="px-6 sm:px-8 py-5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white flex justify-between items-center shrink-0">
-                <h3 className="text-xl font-black flex items-center gap-2">
-                  <FaMoneyBillWave size={20} />{' '}
-                  {editingId ? 'Edit Entry' : 'Add Physical Cash'}
+              <div className="px-6 sm:px-8 py-4 sm:py-5 flex justify-between items-center shrink-0 bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
+                <h3 className="text-lg sm:text-xl font-black flex items-center gap-2">
+                  <HiOutlineArrowDown size={20} />
+                  {editingId ? 'Edit Deposit' : 'Add Physical Cash'}
                 </h3>
-                <button
-                  onClick={closeModal}
-                  className="p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors active:scale-90"
-                >
-                  <HiOutlineX size={20} />
+                <button onClick={closeModal} className="p-1.5 sm:p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors active:scale-90">
+                  <HiOutlineX size={18} className="sm:w-5 sm:h-5" />
                 </button>
               </div>
 
-              <form
-                onSubmit={handleSaveEntry}
-                className="p-6 sm:p-8 space-y-5 overflow-y-auto custom-scrollbar flex-1 pb-2"
-              >
+              <form onSubmit={handleSaveEntry} className="p-6 sm:p-8 space-y-5 overflow-y-auto custom-scrollbar flex-1 pb-2">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">
-                    Description *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.title}
-                    onChange={e =>
-                      setFormData({ ...formData, title: e.target.value })
-                    }
-                    placeholder="e.g., Salary, Gift"
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all shadow-sm"
-                  />
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">Description *</label>
+                  <input type="text" required value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="e.g., Cash from ATM, Exchange" className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all shadow-sm" />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">
-                      Currency
-                    </label>
-                    <select
-                      value={formData.currency}
-                      onChange={e =>
-                        setFormData({
-                          ...formData,
-                          currency: e.target.value,
-                          exchangeRate:
-                            e.target.value === baseCurrency ? 1 : '',
-                        })
-                      }
-                      className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 cursor-pointer transition-all shadow-sm"
-                    >
-                      {availableCurrencies.map(c => (
-                        <option key={c} value={c}>
-                          {c} {c === baseCurrency ? '(Base)' : ''}
-                        </option>
-                      ))}
+                    <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">Currency</label>
+                    <select value={formData.currency} onChange={e => setFormData({ ...formData, currency: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : '' })} className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 cursor-pointer transition-all shadow-sm">
+                      {availableCurrencies.map(c => <option key={c} value={c}>{c} {c === baseCurrency ? '(Base)' : ''}</option>)}
                     </select>
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">
-                      Amount *
-                    </label>
-                    <input
-                      type="number"
-                      step="any"
-                      required
-                      value={formData.foreignAmount}
-                      onChange={e =>
-                        setFormData({ ...formData, foreignAmount: e.target.value })
-                      }
-                      placeholder="0.00"
-                      className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-lg text-emerald-600 dark:text-emerald-400 outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all shadow-sm"
-                    />
+                    <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">Amount *</label>
+                    <input type="number" step="any" required value={formData.foreignAmount} onChange={e => setFormData({ ...formData, foreignAmount: e.target.value })} placeholder="0.00" className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-black text-lg text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all shadow-sm" />
                   </div>
                 </div>
 
                 {formData.currency !== baseCurrency && (
                   <div className="p-4 sm:p-5 bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm animate-in fade-in">
                     <div className="flex items-center justify-between w-full sm:w-auto">
-                      <span className="text-[10px] font-black text-emerald-800 dark:text-emerald-300 uppercase tracking-widest">
-                        Exchange Rate
-                      </span>
-                      <button
-                        type="button"
-                        onClick={fetchLiveRate}
-                        disabled={isFetchingRate}
-                        className="text-[10px] sm:hidden font-black bg-emerald-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-50"
-                      >
-                        <HiOutlineRefresh
-                          className={isFetchingRate ? 'animate-spin' : ''}
-                          size={12}
-                        />{' '}
-                        Live Rate
+                      <span className="text-[10px] font-black text-emerald-800 dark:text-emerald-300 uppercase tracking-widest">Exchange Rate</span>
+                      <button type="button" onClick={fetchLiveRate} disabled={isFetchingRate} className="text-[10px] sm:hidden font-black bg-emerald-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 disabled:opacity-50">
+                        <HiOutlineRefresh className={isFetchingRate ? 'animate-spin' : ''} size={12} /> Live Rate
                       </button>
                     </div>
                     <div className="flex items-center gap-2 flex-1 w-full">
-                      <span className="text-sm font-black text-slate-700 dark:text-slate-300">
-                        1 {formData.currency} =
-                      </span>
-                      <input
-                        type="number"
-                        step="any"
-                        required
-                        value={formData.exchangeRate}
-                        onChange={e =>
-                          setFormData({
-                            ...formData,
-                            exchangeRate: e.target.value,
-                          })
-                        }
-                        className="flex-1 w-full min-w-0 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 transition-colors shadow-sm"
-                      />
-                      <span className="text-sm font-black text-slate-700 dark:text-slate-300">
-                        {baseCurrency}
-                      </span>
+                      <span className="text-sm font-black text-slate-700 dark:text-slate-300">1 {formData.currency} =</span>
+                      <input type="number" step="any" required value={formData.exchangeRate} onChange={e => setFormData({ ...formData, exchangeRate: e.target.value })} className="flex-1 w-full min-w-0 p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 transition-colors shadow-sm" />
+                      <span className="text-sm font-black text-slate-700 dark:text-slate-300">{baseCurrency}</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={fetchLiveRate}
-                      disabled={isFetchingRate}
-                      className="hidden sm:flex bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-50 items-center justify-center gap-1.5 transition-colors shadow-sm active:scale-95"
-                    >
-                      <HiOutlineRefresh
-                        className={isFetchingRate ? 'animate-spin' : ''}
-                        size={14}
-                      />{' '}
-                      Live
+                    <button type="button" onClick={fetchLiveRate} disabled={isFetchingRate} className="hidden sm:flex bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-50 items-center justify-center gap-1.5 transition-colors shadow-sm active:scale-95">
+                      <HiOutlineRefresh className={isFetchingRate ? 'animate-spin' : ''} size={14} /> Live
                     </button>
                   </div>
                 )}
 
-                <div className="p-4 sm:p-5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-inner">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">
-                        Date & Time *
-                      </label>
-                      <input
-                        type="datetime-local"
-                        required
-                        value={formData.date}
-                        onChange={e =>
-                          setFormData({ ...formData, date: e.target.value })
-                        }
-                        className="block w-full mt-1.5 p-3.5 bg-white dark:bg-slate-900 font-bold text-sm text-slate-900 dark:text-white outline-none cursor-pointer border border-slate-200 dark:border-slate-700 transition-colors shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/50 rounded-xl"
-                      />
-                    </div>
-                    <div className="text-right pl-3 sm:pl-4 border-l border-slate-200 dark:border-slate-700 ml-3 sm:ml-4">
-                      <p className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                        Base Value
-                      </p>
-                      <p className="text-2xl sm:text-3xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight mt-1 truncate">
-                        +{currencySymbol}
-                        {calculatedFinalAmount.toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                        })}
-                      </p>
-                    </div>
+                {/* Fee input (optional) */}
+                <div className="space-y-1.5 mt-4">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">Fee (in {baseCurrency})</label>
+                  <input type="number" step="any" value={formData.fee} onChange={e => setFormData({ ...formData, fee: e.target.value })} placeholder="0.00" className="w-full p-4 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all shadow-sm" />
+                </div>
+
+                {/* Summary */}
+                <div className="p-4 sm:p-5 bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-inner mt-2">
+                  <div className="flex justify-between text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-400"><span>Gross Deposit:</span><span className="font-black">{currencySymbol}{grossAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                  {feeDeduction > 0 && (
+                    <div className="flex justify-between text-xs sm:text-sm font-bold text-rose-500 mt-2"><span>Fee Deduction:</span><span className="font-black">-{currencySymbol}{feeDeduction.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                  )}
+                  <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-300 dark:border-slate-600">
+                    <span className="text-sm font-black text-slate-800 dark:text-slate-200 uppercase tracking-widest">Net Cash Added:</span>
+                    <span className="text-xl font-black text-emerald-600 dark:text-emerald-400">{currencySymbol}{calculatedFinalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
                 </div>
 
-                <div className="sticky bottom-0 pt-3 pb-1 bg-white dark:bg-slate-900 mt-2 z-10">
-                  <button
-                    type="submit"
-                    disabled={isSaving}
-                    className={`w-full p-4 sm:p-5 rounded-2xl font-black text-sm sm:text-base uppercase tracking-widest text-white transition-all shadow-xl flex items-center justify-center gap-2 shrink-0 ${
-                      isSaving
-                        ? 'opacity-70 cursor-not-allowed'
-                        : 'active:scale-95'
-                    } bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-emerald-500/30`}
-                  >
-                    {isSaving ? (
-                      <HiOutlineRefresh className="animate-spin text-2xl" />
-                    ) : (
-                      <HiOutlineCash size={20} />
-                    )}
-                    {isSaving
-                      ? 'Processing...'
-                      : editingId
-                      ? 'Update Ledger'
-                      : 'Add to Vault'}
+                <div className="space-y-1.5 mt-4">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1 flex justify-between">
+                    <span>Date & Time *</span>
+                    <span className="text-emerald-500">{formatGlobalDate && formData.date ? formatGlobalDate(formData.date.split('T')[0], 'short') : ''}</span>
+                  </label>
+                  <input type="datetime-local" required value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} className="block w-full mt-1.5 p-3.5 bg-slate-50 dark:bg-slate-800/80 font-bold text-sm text-slate-900 dark:text-white outline-none cursor-pointer border border-slate-200 dark:border-slate-700 transition-colors shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/50 rounded-xl" />
+                </div>
+
+                <div className="sticky bottom-0 pt-3 pb-1 bg-white dark:bg-slate-900 mt-2 z-10 border-t border-slate-100 dark:border-slate-800 sm:border-none">
+                  <button type="submit" disabled={isSaving} className={`w-full p-4 sm:p-5 rounded-2xl font-black text-sm sm:text-base uppercase tracking-widest text-white transition-all shadow-xl flex items-center justify-center gap-2 shrink-0 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-emerald-500/30 active:scale-95 ${isSaving ? 'opacity-70 cursor-not-allowed' : ''}`}>
+                    {isSaving ? <HiOutlineRefresh className="animate-spin text-2xl" /> : <HiOutlineArrowDown size={18} />}
+                    {isSaving ? 'Processing...' : editingId ? 'Update Deposit' : 'Add to Vault'}
                   </button>
                 </div>
               </form>
@@ -1292,7 +969,7 @@ const CashWalletContent = () => {
           </div>
         )}
 
-        {/* 🚀 DELETE MODAL */}
+        {/* Delete Modal */}
         {deleteContext && (
           <div className="fixed inset-0 z-[600] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
             <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[2.5rem] sm:rounded-[2rem] shadow-2xl overflow-hidden border border-rose-200 dark:border-rose-800 flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95">
@@ -1303,79 +980,25 @@ const CashWalletContent = () => {
                   </div>
                   <div>
                     <h3 className="text-xl font-black">Security Verification</h3>
-                    <p className="text-[10px] font-bold text-rose-100 uppercase tracking-widest">
-                      Permanent Deletion
-                    </p>
+                    <p className="text-[10px] font-bold text-rose-100 uppercase tracking-widest">Permanent Deletion</p>
                   </div>
                 </div>
               </div>
-
-              <form
-                onSubmit={executeSecureDelete}
-                className="p-6 sm:p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar"
-              >
+              <form onSubmit={executeSecureDelete} className="p-6 sm:p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
                 <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-500/30 rounded-2xl shadow-sm">
                   <p className="text-xs font-bold text-amber-800 dark:text-amber-300 leading-relaxed">
-                    You are deleting{' '}
-                    <span className="font-black">"{deleteContext.title}"</span>{' '}
-                    worth{' '}
-                    <span className="font-black">
-                      {' '}
-                      {currencySymbol}
-                      {deleteContext.finalBaseAmount?.toLocaleString()}
-                    </span>
+                    You are deleting <span className="font-black">"{deleteContext.title}"</span> worth <span className="font-black">{currencySymbol}{deleteContext.finalBaseAmount?.toLocaleString()}</span>
                   </p>
-                  {(deleteContext.linkedIncomeId ||
-                    deleteContext.linkedExpenseId ||
-                    deleteContext.linkedPartyId) && (
-                    <p className="text-[10px] text-rose-600 dark:text-rose-400 mt-2 font-bold flex items-center gap-1.5 bg-rose-50 dark:bg-rose-900/20 p-2 rounded-lg border border-rose-200 dark:border-rose-800/50">
-                      <HiOutlineExclamationCircle size={14} className="shrink-0" />{' '}
-                      Auto-synced entry. Deletion may cause ledger mismatch. Best
-                      practice is to delete from the source.
-                    </p>
-                  )}
                 </div>
-
                 <div className="space-y-2">
-                  <label className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1 text-center block">
-                    Security PIN
-                  </label>
-                  <input
-                    type="password"
-                    maxLength={6}
-                    required
-                    autoFocus
-                    value={pinInput}
-                    onChange={e => setPinInput(e.target.value)}
-                    className="w-full text-center tracking-[0.4em] text-2xl p-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-2xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors shadow-sm"
-                    placeholder="••••"
-                  />
-                  {pinError && (
-                    <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-2 text-center animate-bounce">
-                      {pinError}
-                    </p>
-                  )}
+                  <label className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1 text-center block">Security PIN</label>
+                  <input type="password" maxLength={6} required autoFocus value={pinInput} onChange={e => setPinInput(e.target.value)} className="w-full text-center tracking-[0.4em] text-2xl p-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-2xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors shadow-sm" placeholder="••••" />
+                  {pinError && <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-2 text-center animate-bounce">{pinError}</p>}
                 </div>
-
                 <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setDeleteContext(null)}
-                    className="flex-1 p-4 rounded-xl font-black text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 transition-colors shadow-sm active:scale-95 uppercase tracking-widest"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isVerifying || !pinInput}
-                    className="flex-1 p-4 rounded-xl font-black text-sm bg-gradient-to-r from-rose-600 to-pink-600 text-white disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30 active:scale-95 uppercase tracking-widest"
-                  >
-                    {isVerifying ? (
-                      <HiOutlineRefresh className="animate-spin" size={18} />
-                    ) : (
-                      <HiOutlineTrash size={18} />
-                    )}{' '}
-                    Confirm
+                  <button type="button" onClick={() => setDeleteContext(null)} className="flex-1 p-4 rounded-xl font-black text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 transition-colors shadow-sm active:scale-95 uppercase tracking-widest">Cancel</button>
+                  <button type="submit" disabled={isVerifying || !pinInput} className="flex-1 p-4 rounded-xl font-black text-sm bg-gradient-to-r from-rose-600 to-pink-600 text-white disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30 active:scale-95 uppercase tracking-widest">
+                    {isVerifying ? <HiOutlineRefresh className="animate-spin" size={18} /> : <HiOutlineTrash size={18} />} Confirm
                   </button>
                 </div>
               </form>

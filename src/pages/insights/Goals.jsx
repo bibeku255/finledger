@@ -1,31 +1,70 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../hooks/useAuth';
-import { useAIVoice } from '../../hooks/useAIVoice'; 
+import { useAIVoice } from '../../hooks/useAIVoice';
 import { collection, addDoc, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDocs, where, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { verifyPIN } from '../../utils/cryptoUtils';
-import { 
+import {
   HiOutlinePlus, HiOutlineX, HiOutlineTrash, HiOutlinePencil,
   HiOutlineCheckCircle, HiOutlineClock, HiOutlineTrendingUp,
   HiOutlineShieldCheck, HiOutlineSparkles, HiOutlineLockClosed,
   HiOutlineExclamationCircle, HiOutlineLightningBolt, HiOutlineCalendar,
-  HiOutlineArrowRight, HiOutlineArrowUp, HiOutlineRefresh
+  HiOutlineArrowRight, HiOutlineArrowUp, HiOutlineRefresh,
+  HiOutlineInformationCircle
 } from 'react-icons/hi';
-import { 
-  FaTrophy, FaPiggyBank, FaStar, FaUniversity, FaMoneyBillWave, 
-  FaLock, FaUnlockAlt, FaWallet, FaFlag, FaBullseye, FaRocket 
+import {
+  FaTrophy, FaPiggyBank, FaStar, FaUniversity, FaMoneyBillWave,
+  FaLock, FaUnlockAlt, FaWallet, FaFlag, FaBullseye, FaRocket
 } from 'react-icons/fa';
 
+// ============================================
+// 🚀 MINI TOAST SYSTEM (identical to other modules)
+// ============================================
+const ToastContext = React.createContext(null);
+const ToastProvider = ({ children }) => {
+  const [toasts, setToasts] = useState([]);
+  const addToast = (message, type = 'info', duration = 4000) => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type, duration }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
+  };
+  const removeToast = id => setToasts(prev => prev.filter(t => t.id !== id));
+  return (
+    <ToastContext.Provider value={{ addToast, removeToast }}>
+      {children}
+      <div className="fixed top-24 right-4 z-[10000] space-y-2 max-w-sm w-full pointer-events-none px-4 md:px-0">
+        {toasts.map(toast => (
+          <div key={toast.id} className={`pointer-events-auto flex items-start gap-3 p-4 rounded-2xl shadow-2xl backdrop-blur-xl border animate-in slide-in-from-right-4 fade-in duration-300 ${
+            toast.type === 'success' ? 'bg-green-50/95 dark:bg-green-900/90 border-green-200 dark:border-green-700' :
+            toast.type === 'error' ? 'bg-red-50/95 dark:bg-red-900/90 border-red-200 dark:border-red-700' :
+            toast.type === 'warning' ? 'bg-amber-50/95 dark:bg-amber-900/90 border-amber-200 dark:border-amber-700' :
+            'bg-blue-50/95 dark:bg-blue-900/90 border-blue-200 dark:border-blue-700'
+          }`}>
+            {toast.type === 'success' && <HiOutlineCheckCircle className="text-green-600 dark:text-green-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'error' && <HiOutlineExclamationCircle className="text-red-600 dark:text-red-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'warning' && <HiOutlineExclamationCircle className="text-amber-600 dark:text-amber-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'info' && <HiOutlineInformationCircle className="text-blue-600 dark:text-blue-400 w-5 h-5 flex-shrink-0" />}
+            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 flex-1">{toast.message}</p>
+            <button onClick={() => removeToast(toast.id)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"><HiOutlineX size={16} /></button>
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+};
+const useToast = () => React.useContext(ToastContext);
+
+// Helpers (unchanged)
 const getLocalISOString = () => {
   const tzOffset = (new Date()).getTimezoneOffset() * 60000;
   return (new Date(Date.now() - tzOffset)).toISOString().slice(0, 16);
 };
 
 // ============================================
-// 🚀 PREMIUM COMPONENTS
+// 🧩 EXISTING SUB‑COMPONENTS (completely unchanged)
 // ============================================
-
 const MasterProgressCard = ({ totalSaved, totalTarget, overallProgress, currencySymbol, goalsCount }) => (
+  // ... (keep exactly as before) ...
   <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-[2.5rem] p-6 sm:p-10 shadow-2xl border border-slate-700/50">
     {/* Background decorations */}
     <div className="absolute -right-8 -top-8 opacity-[0.02] dark:opacity-5 pointer-events-none">
@@ -34,71 +73,49 @@ const MasterProgressCard = ({ totalSaved, totalTarget, overallProgress, currency
     <div className="absolute left-0 bottom-0 opacity-[0.03] dark:opacity-5 pointer-events-none">
       <FaRocket size={200} className="text-white" />
     </div>
-    
     {/* Glow effects */}
     <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-yellow-500/10 rounded-full blur-3xl pointer-events-none" />
     <div className="absolute bottom-1/4 right-1/4 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-    
     <div className="relative z-10 flex flex-col lg:flex-row items-center gap-6 lg:gap-10">
-      {/* Left - Amount */}
       <div className="flex-1 text-center lg:text-left min-w-0 w-full">
         <div className="flex items-center justify-center lg:justify-start gap-2 mb-3">
           <div className="p-2 bg-yellow-500/20 rounded-xl ring-1 ring-yellow-500/30 shadow-sm shrink-0">
             <FaLock className="text-yellow-400" size={16} />
           </div>
-          <p className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-[0.2em] truncate">
-            Total Locked Savings
-          </p>
+          <p className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-[0.2em] truncate">Total Locked Savings</p>
         </div>
-        
         <h2 className="text-4xl sm:text-5xl lg:text-6xl font-black text-white tracking-tighter mb-4 truncate break-all" title={`${currencySymbol}${totalSaved.toLocaleString()}`}>
-          <span className="text-yellow-400">{currencySymbol}</span>
-          {totalSaved.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2})}
+          <span className="text-yellow-400">{currencySymbol}</span>{totalSaved.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2})}
         </h2>
-        
         <div className="flex flex-wrap items-center justify-center lg:justify-start gap-2 sm:gap-3 text-[10px] sm:text-xs font-bold text-slate-400">
           <span className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700">
             <FaBullseye className="text-yellow-500 shrink-0" size={12} />
             <span className="truncate max-w-[120px] sm:max-w-none">Target: {currencySymbol}{totalTarget.toLocaleString(undefined, {maximumFractionDigits:0})}</span>
           </span>
           <span className="px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700 flex items-center gap-1.5">
-            <HiOutlineLightningBolt className="text-blue-400 shrink-0" size={12}/>
-            {goalsCount} Active Goal{goalsCount !== 1 ? 's' : ''}
+            <HiOutlineLightningBolt className="text-blue-400 shrink-0" size={12}/>{goalsCount} Active Goal{goalsCount !== 1 ? 's' : ''}
           </span>
         </div>
       </div>
-      
-      {/* Right - Progress */}
       <div className="w-full lg:w-80 space-y-3 lg:shrink-0 bg-white/5 backdrop-blur-sm p-5 rounded-[2rem] border border-white/10">
         <div className="flex justify-between items-center mb-1">
           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Overall Progress</span>
           <span className="text-sm font-black text-yellow-400">{overallProgress.toFixed(1)}%</span>
         </div>
-        
         <div className="relative">
           <div className="w-full h-3 sm:h-4 bg-slate-900 rounded-full overflow-hidden shadow-inner ring-1 ring-white/5">
-            <div 
-              className="h-full bg-gradient-to-r from-yellow-500 via-yellow-400 to-amber-300 rounded-full transition-all duration-1500 ease-out relative overflow-hidden"
-              style={{ width: `${Math.min(overallProgress, 100)}%` }}
-            >
+            <div className="h-full bg-gradient-to-r from-yellow-500 via-yellow-400 to-amber-300 rounded-full transition-all duration-1500 ease-out relative overflow-hidden" style={{ width: `${Math.min(overallProgress, 100)}%` }}>
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer" />
             </div>
           </div>
-          
-          {/* Milestone markers */}
           {[25, 50, 75, 100].map(milestone => (
             <div key={milestone} className="absolute top-0 bottom-0 w-0.5 bg-white/20" style={{ left: `${milestone}%` }}>
               {overallProgress >= milestone && <div className="absolute -top-1 -right-1 w-2 h-2 bg-yellow-400 rounded-full shadow-[0_0_8px_rgba(250,204,21,0.8)]" />}
             </div>
           ))}
         </div>
-        
         <p className="text-[10px] font-bold text-slate-400 text-center lg:text-left pt-2">
-          {overallProgress >= 100 ? '🎉 All goals achieved! Amazing work!' :
-           overallProgress >= 75 ? '🚀 Almost there! Keep pushing forward.' :
-           overallProgress >= 50 ? '💪 Halfway to financial freedom!' :
-           overallProgress >= 25 ? '🌱 Great progress! Stay consistent.' :
-           '🎯 Start locking funds to see progress.'}
+          {overallProgress >= 100 ? '🎉 All goals achieved! Amazing work!' : overallProgress >= 75 ? '🚀 Almost there! Keep pushing forward.' : overallProgress >= 50 ? '💪 Halfway to financial freedom!' : overallProgress >= 25 ? '🌱 Great progress! Stay consistent.' : '🎯 Start locking funds to see progress.'}
         </p>
       </div>
     </div>
@@ -106,10 +123,11 @@ const MasterProgressCard = ({ totalSaved, totalTarget, overallProgress, currency
 );
 
 const GoalCard = ({ goal, currencySymbol, onEdit, onDelete, onFund, onRelease, formatGlobalDate }) => {
+  // ... (exactly as before) ...
   const progress = (goal.currentSaved / goal.targetAmount) * 100;
   const remaining = Math.max(0, goal.targetAmount - (goal.currentSaved || 0));
   const isDone = goal.status === 'achieved' || progress >= 100;
-  
+
   const aiMessages = {
     complete: { text: "🎉 Goal Achieved! You did it!", color: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-50 dark:bg-emerald-500/10", border: "border-emerald-200 dark:border-emerald-500/30" },
     nearComplete: { text: `Almost there! ${currencySymbol}${remaining.toLocaleString()} to go. 🚀`, color: "text-blue-700 dark:text-blue-400", bg: "bg-blue-50 dark:bg-blue-500/10", border: "border-blue-200 dark:border-blue-500/30" },
@@ -117,7 +135,6 @@ const GoalCard = ({ goal, currencySymbol, onEdit, onDelete, onFund, onRelease, f
     started: { text: "📈 Great start! Consistency is key.", color: "text-purple-700 dark:text-purple-400", bg: "bg-purple-50 dark:bg-purple-500/10", border: "border-purple-200 dark:border-purple-500/30" },
     empty: { text: "🎯 Ready to start saving!", color: "text-slate-600 dark:text-slate-400", bg: "bg-slate-50 dark:bg-slate-800", border: "border-slate-200 dark:border-slate-700" }
   };
-  
   const aiMsg = isDone ? aiMessages.complete : progress >= 80 ? aiMessages.nearComplete : progress >= 50 ? aiMessages.halfway : progress > 0 ? aiMessages.started : aiMessages.empty;
 
   return (
@@ -126,7 +143,6 @@ const GoalCard = ({ goal, currencySymbol, onEdit, onDelete, onFund, onRelease, f
     >
       <div className={`absolute top-0 left-0 right-0 h-1.5 ${isDone ? 'bg-gradient-to-r from-emerald-400 to-teal-400' : progress > 0 ? 'bg-gradient-to-r from-yellow-400 to-amber-400' : 'bg-slate-200 dark:bg-slate-700'}`} />
       <div className={`absolute -bottom-8 -right-8 w-40 h-40 rounded-full blur-3xl opacity-0 group-hover:opacity-10 transition-opacity duration-500 pointer-events-none ${isDone ? 'bg-emerald-500' : progress > 50 ? 'bg-yellow-500' : 'bg-blue-500'}`} />
-      
       <div className="relative z-10 flex flex-col flex-1">
         <div className="flex items-start justify-between mb-4">
           <div className={`p-3.5 rounded-2xl ring-1 transition-transform group-hover:scale-110 duration-300 shrink-0
@@ -138,15 +154,12 @@ const GoalCard = ({ goal, currencySymbol, onEdit, onDelete, onFund, onRelease, f
             <button onClick={(e) => { e.stopPropagation(); onDelete(goal); }} className="p-2.5 rounded-lg text-slate-500 hover:text-rose-500 hover:bg-white dark:hover:bg-slate-700 transition-colors active:scale-90"><HiOutlineTrash size={15} /></button>
           </div>
         </div>
-        
         <h3 className="text-lg sm:text-xl font-black text-slate-800 dark:text-white leading-tight mb-2 line-clamp-2 break-words">{goal.title}</h3>
-        
         {goal.deadline && (
           <p className="text-[10px] sm:text-[11px] font-bold text-slate-400 dark:text-slate-500 flex items-center gap-1.5 mb-4">
             <HiOutlineCalendar size={14} className="shrink-0" /> Target: {formatGlobalDate ? formatGlobalDate(goal.deadline.split('T')[0], 'short') : goal.deadline.split('T')[0]}
           </p>
         )}
-        
         <div className="mt-auto space-y-4 pt-4 border-t border-slate-100 dark:border-slate-800/50">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
             <div className="min-w-0">
@@ -162,20 +175,17 @@ const GoalCard = ({ goal, currencySymbol, onEdit, onDelete, onFund, onRelease, f
               </span>
             </div>
           </div>
-          
           <div className="w-full h-2.5 sm:h-3 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden shadow-inner relative">
             <div className={`h-full rounded-full transition-all duration-1000 ease-out relative overflow-hidden ${isDone ? 'bg-gradient-to-r from-emerald-400 to-teal-400 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-gradient-to-r from-yellow-400 to-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]'}`} style={{ width: `${Math.min(progress, 100)}%` }}>
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer" />
             </div>
           </div>
-          
           <div className={`p-3 rounded-xl text-[10px] font-bold border ${aiMsg.bg} ${aiMsg.color} ${aiMsg.border}`}>
             <div className="flex items-start gap-1.5">
               <HiOutlineSparkles size={14} className="shrink-0 mt-0.5" />
               <span className="leading-relaxed">{aiMsg.text}</span>
             </div>
           </div>
-          
           <div className="flex gap-2 sm:gap-3 pt-2">
             <button onClick={(e) => { e.stopPropagation(); onFund(goal); }} className="flex-1 py-3.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700 shadow-sm">
               <FaLock size={12} /> Lock
@@ -193,6 +203,7 @@ const GoalCard = ({ goal, currencySymbol, onEdit, onDelete, onFund, onRelease, f
 };
 
 const VaultSelector = ({ selected, onChange, exclude = [] }) => {
+  // ... (unchanged)
   const vaults = [
     { id: 'bank', icon: FaUniversity, label: 'Bank', color: 'blue' },
     { id: 'online', icon: FaWallet, label: 'Online', color: 'purple' },
@@ -260,25 +271,25 @@ const DeleteModal = ({ context, onClose, onSubmit, pinInput, setPinInput, pinErr
 };
 
 // ============================================
-// 🚀 MAIN COMPONENT
+// 🚀 MAIN CONTENT COMPONENT
 // ============================================
-
-const Goals = () => {
+const GoalsContent = () => {
   const { user, baseCurrency = 'INR', formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
-  const { speak } = useAIVoice(); 
+  const { speak } = useAIVoice();
+  const { addToast } = useToast();
 
   const [goals, setGoals] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
-  
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isFundModalOpen, setIsFundModalOpen] = useState(false);
-  const [isReleaseModalOpen, setIsReleaseModalOpen] = useState(false); 
+  const [isReleaseModalOpen, setIsReleaseModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [activeGoal, setActiveGoal] = useState(null);
 
-  const [deleteContext, setDeleteContext] = useState(null); 
+  const [deleteContext, setDeleteContext] = useState(null);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
@@ -310,9 +321,12 @@ const Goals = () => {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setGoals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setIsLoading(false);
+    }, (err) => {
+      addToast('Failed to load goals.', 'error');
+      setIsLoading(false);
     });
     return () => unsubscribe();
-  }, [user]);
+  }, [user, addToast]);
 
   const totalTarget = useMemo(() => goals.reduce((acc, g) => acc + Number(g.targetAmount), 0), [goals]);
   const totalSaved = useMemo(() => goals.reduce((acc, g) => acc + Number(g.currentSaved || 0), 0), [goals]);
@@ -327,17 +341,27 @@ const Goals = () => {
       currentSaved: editingId ? goals.find(g => g.id === editingId)?.currentSaved : 0, status: 'active'
     };
     try {
-      if (editingId) await setDoc(doc(db, "users", user.uid, "savingsGoals", editingId), goalRecord, { merge: true });
-      else await addDoc(collection(db, "users", user.uid, "savingsGoals"), goalRecord);
+      if (editingId) {
+        await setDoc(doc(db, "users", user.uid, "savingsGoals", editingId), goalRecord, { merge: true });
+        addToast('Goal updated!', 'success');
+      } else {
+        await addDoc(collection(db, "users", user.uid, "savingsGoals"), goalRecord);
+        addToast('New goal created!', 'success');
+      }
       setIsModalOpen(false);
-    } catch (error) { alert("Failed to save goal."); } finally { setIsProcessing(false); }
+    } catch (error) {
+      addToast("Failed to save goal.", "error");
+    } finally { setIsProcessing(false); }
   };
 
   const handleAddFunds = async (e) => {
     e.preventDefault(); if (!user || !activeGoal) return;
     const addAmount = parseFloat(fundData.amount);
-    if (addAmount <= 0) return alert("Amount must be > 0");
-    if ((fundData.sourceVault === 'bank' || fundData.sourceVault === 'online') && !fundData.subWallet.trim()) return alert("Please specify the exact Vault Name.");
+    if (addAmount <= 0) { addToast("Amount must be greater than zero.", "warning"); return; }
+    if ((fundData.sourceVault === 'bank' || fundData.sourceVault === 'online') && !fundData.subWallet.trim()) {
+      addToast("Please specify the exact Vault Name.", "warning");
+      return;
+    }
 
     setIsProcessing(true);
     const oldSavedAmount = activeGoal.currentSaved || 0;
@@ -355,7 +379,7 @@ const Goals = () => {
       const formattedDate = fundData.date.split('T')[0];
 
       const vaultRecord = {
-        title: `Locked for Goal: ${activeGoal.title}`, type: 'out', date: formattedDate, timestamp, currency: baseCurrency, foreignAmount: addAmount, exchangeRate: 1, finalBaseAmount: addAmount, fee: 0, isGoalLock: true, linkedExpenseId: lockId, walletName: fundData.subWallet.trim() || 'Savings Lock', bankName: fundData.subWallet.trim() || 'Savings Lock', transferType: 'Investment/Savings', goalId: activeGoal.id 
+        title: `Locked for Goal: ${activeGoal.title}`, type: 'out', date: formattedDate, timestamp, currency: baseCurrency, foreignAmount: addAmount, exchangeRate: 1, finalBaseAmount: addAmount, fee: 0, isGoalLock: true, linkedExpenseId: lockId, walletName: fundData.subWallet.trim() || 'Savings Lock', bankName: fundData.subWallet.trim() || 'Savings Lock', transferType: 'Investment/Savings', goalId: activeGoal.id
       };
       await addDoc(collection(db, "users", user.uid, vaultCollection), vaultRecord);
 
@@ -370,19 +394,31 @@ const Goals = () => {
       else if (oldProgress < 25 && newProgress >= 25) milestoneMsg = `25% milestone: ${activeGoal.title}!`;
 
       if (milestoneMsg) {
-        if (speak) speak(milestoneMsg); 
+        if (speak) speak(milestoneMsg);
         await addDoc(collection(db, "users", user.uid, "notifications"), { title: "Goal Milestone!", message: milestoneMsg, type: "goal_milestone", isRead: false, timestamp: new Date().getTime(), link: "/dashboard/goals" });
+        addToast(milestoneMsg, 'success');
+      } else {
+        addToast(`Locked ${currencySymbol}${addAmount.toLocaleString()} for "${activeGoal.title}"`, 'success');
       }
+
       setIsFundModalOpen(false); setFundData({ amount: '', sourceVault: 'bank', subWallet: existingVaultNames[0] || '', date: getLocalISOString() });
-    } catch (error) { alert("Failed to lock funds."); } finally { setIsProcessing(false); }
+    } catch (error) {
+      addToast("Failed to lock funds.", "error");
+    } finally { setIsProcessing(false); }
   };
 
   const handleReleaseFunds = async (e) => {
     e.preventDefault(); if (!user || !activeGoal) return;
     const releaseAmount = parseFloat(fundData.amount);
-    if (releaseAmount <= 0) return alert("Amount must be > 0");
-    if (releaseAmount > (activeGoal.currentSaved || 0)) return alert(`Insufficient balance. Available: ${currencySymbol}${activeGoal.currentSaved}`);
-    if ((fundData.sourceVault === 'bank' || fundData.sourceVault === 'online') && !fundData.subWallet.trim()) return alert("Please specify the receiving Vault Name.");
+    if (releaseAmount <= 0) { addToast("Amount must be greater than zero.", "warning"); return; }
+    if (releaseAmount > (activeGoal.currentSaved || 0)) {
+      addToast(`Insufficient balance. Available: ${currencySymbol}${activeGoal.currentSaved.toLocaleString()}`, "error");
+      return;
+    }
+    if ((fundData.sourceVault === 'bank' || fundData.sourceVault === 'online') && !fundData.subWallet.trim()) {
+      addToast("Please specify the receiving Vault Name.", "warning");
+      return;
+    }
 
     setIsProcessing(true);
     const newSavedAmount = (activeGoal.currentSaved || 0) - releaseAmount;
@@ -403,62 +439,65 @@ const Goals = () => {
         title: `Goal Funds Released: ${activeGoal.title}`, category: "Other Income", vault: fundData.sourceVault, subWallet: (fundData.sourceVault === 'bank' || fundData.sourceVault === 'online') ? fundData.subWallet.trim() : '', asset: baseCurrency, amount: releaseAmount, exchangeRate: 1, finalBaseAmount: releaseAmount, date: formattedDate, timestamp, linkedIncomeId: releaseId, goalId: activeGoal.id
       });
 
+      addToast(`Released ${currencySymbol}${releaseAmount.toLocaleString()} from "${activeGoal.title}"`, 'success');
       setIsReleaseModalOpen(false); setFundData({ amount: '', sourceVault: 'bank', subWallet: existingVaultNames[0] || '', date: getLocalISOString() });
-    } catch (error) { alert("Failed to release funds."); } finally { setIsProcessing(false); }
+    } catch (error) {
+      addToast("Failed to release funds.", "error");
+    } finally { setIsProcessing(false); }
   };
 
   const initiateSecureDelete = (goal) => { setDeleteContext(goal); setPinInput(''); setPinError(''); };
 
   const executeSecureDelete = async (e) => {
-  e.preventDefault(); 
-  if (!pinInput.trim()) return setPinError("PIN required."); 
-  setIsVerifying(true); 
-  setPinError('');
-  try {
-    const userDoc = await getDoc(doc(db, "users", user.uid));
-    const storedHash = userDoc.data()?.security?.pinHash || userDoc.data()?.securityPin || userDoc.data()?.pin;
-    
-    const { valid, newHash } = await verifyPIN(pinInput.trim(), storedHash, user.uid);
-    
-    if (!valid) {
-      setPinError("Incorrect PIN!");
+    e.preventDefault();
+    if (!pinInput.trim()) return setPinError("PIN required.");
+    setIsVerifying(true);
+    setPinError('');
+    try {
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      const storedHash = userDoc.data()?.security?.pinHash || userDoc.data()?.securityPin || userDoc.data()?.pin;
+      const { valid, newHash } = await verifyPIN(pinInput.trim(), storedHash, user.uid);
+
+      if (!valid) {
+        setPinError("Incorrect PIN!");
+        setIsVerifying(false);
+        return;
+      }
+
+      if (newHash) {
+        await setDoc(doc(db, "users", user.uid), { security: { pinHash: newHash } }, { merge: true });
+      }
+
+      const currentSavedAmount = deleteContext.currentSaved || 0;
+      await deleteDoc(doc(db, "users", user.uid, "savingsGoals", deleteContext.id));
+
+      if (currentSavedAmount > 0) {
+        const timestamp = new Date().getTime();
+        const refundId = `REFUND_CANCEL_${timestamp}`;
+        const formattedDate = new Date().toISOString().split('T')[0];
+
+        await addDoc(collection(db, "users", user.uid, "bankWallet"), {
+          title: `Goal Refund: ${deleteContext.title}`, type: 'in', date: formattedDate, timestamp, currency: baseCurrency, foreignAmount: currentSavedAmount, exchangeRate: 1, finalBaseAmount: currentSavedAmount, fee: 0, isGoalLock: true, linkedIncomeId: refundId, walletName: 'Auto Refund', transferType: 'Refund/Reversal'
+        });
+
+        await addDoc(collection(db, "users", user.uid, "incomeLogs"), {
+          title: `Goal Refund: ${deleteContext.title}`, category: "Other Income", vault: "bank", asset: baseCurrency, amount: currentSavedAmount, exchangeRate: 1, finalBaseAmount: currentSavedAmount, date: formattedDate, timestamp, linkedIncomeId: refundId,
+        });
+      }
+
+      for (let q of [{ col: "expenseLogs", field: "goalId" }, { col: "incomeLogs", field: "goalId" }, { col: "bankWallet", field: "goalId" }, { col: "cashWallet", field: "goalId" }, { col: "onlineWallet", field: "goalId" }]) {
+        const snaps = await getDocs(query(collection(db, "users", user.uid, q.col), where(q.field, "==", deleteContext.id)));
+        snaps.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, q.col, d.id)));
+      }
+
+      addToast(`Goal "${deleteContext.title}" deleted and funds refunded.`, 'info');
+      setDeleteContext(null);
+    } catch (error) {
+      setPinError("System error during deletion.");
+    } finally {
       setIsVerifying(false);
-      return;
     }
-    
-    if (newHash) {
-      await setDoc(doc(db, "users", user.uid), { security: { pinHash: newHash } }, { merge: true });
-    }
-
-    const currentSavedAmount = deleteContext.currentSaved || 0;
-    await deleteDoc(doc(db, "users", user.uid, "savingsGoals", deleteContext.id));
-
-    if (currentSavedAmount > 0) {
-      const timestamp = new Date().getTime();
-      const refundId = `REFUND_CANCEL_${timestamp}`;
-      const formattedDate = new Date().toISOString().split('T')[0];
-
-      await addDoc(collection(db, "users", user.uid, "bankWallet"), {
-        title: `Goal Refund: ${deleteContext.title}`, type: 'in', date: formattedDate, timestamp, currency: baseCurrency, foreignAmount: currentSavedAmount, exchangeRate: 1, finalBaseAmount: currentSavedAmount, fee: 0, isGoalLock: true, linkedIncomeId: refundId, walletName: 'Auto Refund', transferType: 'Refund/Reversal'
-      });
-
-      await addDoc(collection(db, "users", user.uid, "incomeLogs"), {
-        title: `Goal Refund: ${deleteContext.title}`, category: "Other Income", vault: "bank", asset: baseCurrency, amount: currentSavedAmount, exchangeRate: 1, finalBaseAmount: currentSavedAmount, date: formattedDate, timestamp, linkedIncomeId: refundId,
-      });
-    }
-
-    for (let q of [{ col: "expenseLogs", field: "goalId" }, { col: "incomeLogs", field: "goalId" }, { col: "bankWallet", field: "goalId" }, { col: "cashWallet", field: "goalId" }, { col: "onlineWallet", field: "goalId" }]) {
-      const snaps = await getDocs(query(collection(db, "users", user.uid, q.col), where(q.field, "==", deleteContext.id)));
-      snaps.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, q.col, d.id)));
-    }
-
-    setDeleteContext(null); 
-  } catch (error) { 
-    setPinError("System error during deletion."); 
-  } finally { 
-    setIsVerifying(false); 
-  }
-};
+  };
 
   const openEditModal = (goal) => {
     let editDateStr = goal.deadline || getLocalISOString();
@@ -472,12 +511,10 @@ const Goals = () => {
 
   return (
     <div className="pt-20 sm:pt-24 space-y-6 sm:space-y-8 pb-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      
-      {/* 🚀 HEADER */}
+      {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 sm:gap-6 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-[2.5rem] p-6 sm:p-8 shadow-2xl relative overflow-hidden border border-slate-700/50">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(234,179,8,0.15),transparent_70%)]" />
         <div className="absolute right-[-5%] top-[-10%] opacity-[0.03] text-white blur-[2px] pointer-events-none"><FaTrophy size={200}/></div>
-
         <div className="flex items-center gap-4 sm:gap-5 relative z-10">
           <div className="p-3.5 sm:p-4 bg-gradient-to-br from-yellow-500 to-amber-500 rounded-2xl sm:rounded-[1.5rem] shadow-xl shadow-yellow-500/30 ring-1 ring-white/20 shrink-0">
             <FaTrophy size={28} className="text-white" />
@@ -487,16 +524,15 @@ const Goals = () => {
             <p className="text-[11px] sm:text-sm font-semibold text-slate-400 mt-1 max-w-lg">Set targets, lock funds securely, and watch your wealth grow</p>
           </div>
         </div>
-        
         <button onClick={() => { setEditingId(null); setFormData({title:'', targetAmount:'', deadline: getLocalISOString()}); setIsModalOpen(true); }} className="w-full lg:w-auto relative z-10 flex items-center justify-center gap-2 bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-600 hover:to-amber-700 text-white px-5 sm:px-7 py-3.5 sm:py-4 rounded-2xl font-black text-xs sm:text-sm shadow-lg shadow-yellow-500/30 transition-all active:scale-95 whitespace-nowrap mt-2 lg:mt-0">
           <HiOutlinePlus size={20} className="shrink-0"/> Create Goal
         </button>
       </div>
 
-      {/* 🚀 MASTER PROGRESS */}
+      {/* Master Progress Card */}
       <MasterProgressCard totalSaved={totalSaved} totalTarget={totalTarget} overallProgress={overallProgress} currencySymbol={currencySymbol} goalsCount={activeGoalsCount} />
 
-      {/* 🚀 GOALS GRID */}
+      {/* Goals Grid */}
       {isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
           {[1,2,3].map(i => <div key={i} className="h-96 bg-slate-200 dark:bg-slate-800 rounded-[2.5rem] animate-pulse shadow-sm" />)}
@@ -522,7 +558,7 @@ const Goals = () => {
         </div>
       )}
 
-      {/* 🚀 CREATE/EDIT MODAL */}
+      {/* Modals – all unchanged except alerts replaced and toasts added */}
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingId ? 'Edit Goal' : 'New Savings Goal'} icon={editingId ? HiOutlinePencil : FaBullseye} color="from-yellow-500 to-amber-600">
         <form onSubmit={handleSaveGoal} className="p-6 sm:p-8 space-y-6 overflow-y-auto custom-scrollbar flex-1">
           <div className="space-y-2">
@@ -552,7 +588,6 @@ const Goals = () => {
         </form>
       </Modal>
 
-      {/* 🚀 LOCK FUNDS MODAL */}
       <Modal isOpen={isFundModalOpen} onClose={() => setIsFundModalOpen(false)} title="Lock Funds" icon={FaLock} color="from-emerald-500 to-teal-600">
         <form onSubmit={handleAddFunds} className="p-6 sm:p-8 space-y-6 overflow-y-auto custom-scrollbar flex-1">
           <div className="text-center bg-slate-50 dark:bg-slate-800/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
@@ -593,7 +628,6 @@ const Goals = () => {
         </form>
       </Modal>
 
-      {/* 🚀 RELEASE FUNDS MODAL */}
       <Modal isOpen={isReleaseModalOpen} onClose={() => setIsReleaseModalOpen(false)} title="Release Funds" icon={FaUnlockAlt} color="from-rose-500 to-pink-600">
         <form onSubmit={handleReleaseFunds} className="p-6 sm:p-8 space-y-6 overflow-y-auto custom-scrollbar flex-1">
           <div className="text-center bg-slate-50 dark:bg-slate-800/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
@@ -634,11 +668,15 @@ const Goals = () => {
         </form>
       </Modal>
 
-      {/* 🚀 DELETE CONFIRMATION MODAL */}
       <DeleteModal context={deleteContext} onClose={() => setDeleteContext(null)} onSubmit={executeSecureDelete} pinInput={pinInput} setPinInput={setPinInput} pinError={pinError} isVerifying={isVerifying} currencySymbol={currencySymbol} />
-
     </div>
   );
 };
+
+const Goals = () => (
+  <ToastProvider>
+    <GoalsContent />
+  </ToastProvider>
+);
 
 export default Goals;

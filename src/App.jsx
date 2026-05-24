@@ -46,6 +46,9 @@ import IncomeStreams from './pages/accounts/IncomeStreams';
 import ExpenseTracker from './pages/accounts/ExpenseTracker';
 import HistoryLogs from './pages/accounts/HistoryLogs';
 
+// 🚀 CRYPTO PRICE PROVIDER
+import { CryptoPriceProvider } from './context/CryptoPriceContext';
+
 // Parties (Smart Khata)
 import PartyDirectory from './pages/parties/PartyDirectory';
 import PartyLedger from './pages/parties/PartyLedger';
@@ -89,214 +92,216 @@ function App() {
 
   return (
     <AppLayout>
-      <Routes>
-        {/* --- 1. Public Routes --- */}
-        <Route path="/" element={<Home />} />
-        <Route path="/services" element={<Services />} />
-        <Route path="/blogs" element={<Blogs />} />
-        <Route path="/blogs/:slug" element={<BlogDetail />} />
-        <Route path="/about" element={<About />} />
-        <Route path="/contact" element={<Contact />} />
-        <Route path="/faq" element={<Faq />} />
-        
-        {/* --- 2. Auth Routes --- */}
-        <Route path="/login" element={<Login />} />
-        <Route path="/signup" element={<Signup />} /> 
-        <Route path="/forgot-password" element={<ForgotPassword />} />
-        
-        {/* Temp Route for Email Verification */}
-        <Route path="/verify-email" element={<div className="min-h-screen flex items-center justify-center font-black uppercase tracking-widest text-slate-400">Please Verify Your Email</div>} />
-
-        {/* --- 3. Legal & Support --- */}
-        <Route path="/support" element={<Support />} />
-        <Route path="/privacy" element={<Privacy />} />
-        <Route path="/terms" element={<Terms />} />
-        <Route path="/disclaimer" element={<Disclaimer />} />
-
-        {/* --- 4. Protected Routes (Auth Required) --- */}
-        
-        {/* 🚀 FINLEDGER STUDIO (ADMIN ONLY WRITER) */}
-        <Route path="/admin/write" element={
-          <ProtectedRoute>
-            <WriteBlog />
-          </ProtectedRoute>
-        } />
-        
-        {/* 🛡️ 2FA Gatekeeper Access */}
-        <Route path="/verify-pin" element={
-          <ProtectedRoute>
-            <VerifyPin />
-          </ProtectedRoute>
-        } />
-
-        {/* Dashboard Overview */}
-        <Route path="/dashboard" element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        } />
-
-        {/* Profile & Security Settings */}
-        <Route path="/profile" element={
-          <ProtectedRoute>
-            <Settings />
-          </ProtectedRoute>
-        } />
-
-        {/* 🌍 Base Currency Selector */}
-        <Route path="/dashboard/settings/currency" element={
-          <ProtectedRoute>
-            <SetCurrency />
-          </ProtectedRoute>
-        } />
-
-        {/* --- MONEY & CAPITAL ROUTES --- */}
-        <Route path="/dashboard/accounts/cash" element={
-          <ProtectedRoute>
-            <CashWallet />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/dashboard/accounts/bank" element={
-          <ProtectedRoute>
-            <BankWallet />
-          </ProtectedRoute>
-        } />
+      <CryptoPriceProvider>
+        <Routes>
+          {/* --- 1. Public Routes --- */}
+          <Route path="/" element={<Home />} />
+          <Route path="/services" element={<Services />} />
+          <Route path="/blogs" element={<Blogs />} />
+          <Route path="/blogs/:slug" element={<BlogDetail />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/contact" element={<Contact />} />
+          <Route path="/faq" element={<Faq />} />
           
-        <Route path="/dashboard/accounts/online" element={
-          <ProtectedRoute>
-            <OnlineWallet />
-          </ProtectedRoute>
-        } />
+          {/* --- 2. Auth Routes --- */}
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} /> 
+          <Route path="/forgot-password" element={<ForgotPassword />} />
           
-        <Route path="/dashboard/shifting" element={
-          <ProtectedRoute>
-            <CapitalShifting />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/dashboard/income" element={
-          <ProtectedRoute>
-            <IncomeStreams />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/dashboard/expense" element={
-          <ProtectedRoute>
-            <ExpenseTracker />
-          </ProtectedRoute>
-        } />
+          {/* Temp Route for Email Verification */}
+          <Route path="/verify-email" element={<div className="min-h-screen flex items-center justify-center font-black uppercase tracking-widest text-slate-400">Please Verify Your Email</div>} />
 
-        <Route path="/dashboard/history" element={
-          <ProtectedRoute>
-            <HistoryLogs />
-          </ProtectedRoute>
-        } />
+          {/* --- 3. Legal & Support --- */}
+          <Route path="/support" element={<Support />} />
+          <Route path="/privacy" element={<Privacy />} />
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/disclaimer" element={<Disclaimer />} />
 
-        {/* --- SMART KHATA (PARTIES) ROUTES --- */}
-        <Route path="/dashboard/parties" element={
-          <ProtectedRoute>
-            <PartyDirectory />
-          </ProtectedRoute>
-        } />
+          {/* --- 4. Protected Routes (Auth Required) --- */}
           
-        <Route path="/dashboard/parties/:id" element={
-          <ProtectedRoute>
-            <PartyLedger />
-          </ProtectedRoute>
-        } />
-
-        {/* --- DIGITAL ASSETS (CRYPTO) ROUTES --- */}
-        <Route path="/dashboard/crypto/tokens" element={
-          <ProtectedRoute>
-            <CryptoManager />
-          </ProtectedRoute>
-        } />
-
-        <Route path="/dashboard/crypto/wallet" element={
-          <ProtectedRoute>
-            <CryptoWallet />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/dashboard/crypto/micro-earn" element={
-          <ProtectedRoute>
-            <MicroEarn />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/dashboard/crypto/hold-profit" element={
-          <ProtectedRoute>
-            <HoldAndSwap />
-          </ProtectedRoute>
-        } />
-
-        <Route path="/dashboard/crypto/swap-bridge" element={
-          <ProtectedRoute>
-            <SwapAndBridge />
-          </ProtectedRoute>
-        } />
+          {/* 🚀 FINLEDGER STUDIO (ADMIN ONLY WRITER) */}
+          <Route path="/admin/write" element={
+            <ProtectedRoute>
+              <WriteBlog />
+            </ProtectedRoute>
+          } />
           
-        <Route path="/dashboard/crypto/staking" element={
-          <ProtectedRoute>
-            <StakingAndYield />
-          </ProtectedRoute>
-        } />  
+          {/* 🛡️ 2FA Gatekeeper Access */}
+          <Route path="/verify-pin" element={
+            <ProtectedRoute>
+              <VerifyPin />
+            </ProtectedRoute>
+          } />
+
+          {/* Dashboard Overview */}
+          <Route path="/dashboard" element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          } />
+
+          {/* Profile & Security Settings */}
+          <Route path="/profile" element={
+            <ProtectedRoute>
+              <Settings />
+            </ProtectedRoute>
+          } />
+
+          {/* 🌍 Base Currency Selector */}
+          <Route path="/dashboard/settings/currency" element={
+            <ProtectedRoute>
+              <SetCurrency />
+            </ProtectedRoute>
+          } />
+
+          {/* --- MONEY & CAPITAL ROUTES --- */}
+          <Route path="/dashboard/accounts/cash" element={
+            <ProtectedRoute>
+              <CashWallet />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/dashboard/accounts/bank" element={
+            <ProtectedRoute>
+              <BankWallet />
+            </ProtectedRoute>
+          } />
             
-        {/* --- INSIGHTS & INTELLIGENCE ROUTES --- */}
-        <Route path="/dashboard/analytics" element={
-          <ProtectedRoute>
-            <Analytics />
-          </ProtectedRoute>
-        } />
+          <Route path="/dashboard/accounts/online" element={
+            <ProtectedRoute>
+              <OnlineWallet />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/dashboard/shifting" element={
+            <ProtectedRoute>
+              <CapitalShifting />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/dashboard/income" element={
+            <ProtectedRoute>
+              <IncomeStreams />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/dashboard/expense" element={
+            <ProtectedRoute>
+              <ExpenseTracker />
+            </ProtectedRoute>
+          } />
 
-        <Route path="/dashboard/suggestions" element={
-          <ProtectedRoute>
-            <SmartSuggestions />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/dashboard/strategy" element={
-          <ProtectedRoute>
-            <AiStrategy />
-          </ProtectedRoute>
-        } />
+          <Route path="/dashboard/history" element={
+            <ProtectedRoute>
+              <HistoryLogs />
+            </ProtectedRoute>
+          } />
 
-        <Route path="/dashboard/goals" element={
-          <ProtectedRoute>
-            <Goals />
-          </ProtectedRoute>
-        } />
-        
-        {/* --- ALERTS & UTILITIES --- */}
-        <Route path="/dashboard/alerts/bills" element={
-          <ProtectedRoute>
-            <BillPayments />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/dashboard/calendar" element={
-          <ProtectedRoute>
-            <SmartCalendar />
-          </ProtectedRoute>
-        } />
+          {/* --- SMART KHATA (PARTIES) ROUTES --- */}
+          <Route path="/dashboard/parties" element={
+            <ProtectedRoute>
+              <PartyDirectory />
+            </ProtectedRoute>
+          } />
+            
+          <Route path="/dashboard/parties/:id" element={
+            <ProtectedRoute>
+              <PartyLedger />
+            </ProtectedRoute>
+          } />
 
-        {/* --- SMART TOOLS --- */}
-        <Route path="/dashboard/tools/notes" element={
-          <ProtectedRoute>
-            <SecureNotes />
-          </ProtectedRoute>
-        } />
+          {/* --- DIGITAL ASSETS (CRYPTO) ROUTES --- */}
+          <Route path="/dashboard/crypto/tokens" element={
+            <ProtectedRoute>
+              <CryptoManager />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/dashboard/crypto/wallet" element={
+            <ProtectedRoute>
+              <CryptoWallet />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/dashboard/crypto/micro-earn" element={
+            <ProtectedRoute>
+              <MicroEarn />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/dashboard/crypto/hold-profit" element={
+            <ProtectedRoute>
+              <HoldAndSwap />
+            </ProtectedRoute>
+          } />
 
-        <Route path="/dashboard/tools/converter" element={
-          <ProtectedRoute>
-            <CryptoForex />
-          </ProtectedRoute>
-        } />
+          <Route path="/dashboard/crypto/swap-bridge" element={
+            <ProtectedRoute>
+              <SwapAndBridge />
+            </ProtectedRoute>
+          } />
+            
+          <Route path="/dashboard/crypto/staking" element={
+            <ProtectedRoute>
+              <StakingAndYield />
+            </ProtectedRoute>
+          } />  
+              
+          {/* --- INSIGHTS & INTELLIGENCE ROUTES --- */}
+          <Route path="/dashboard/analytics" element={
+            <ProtectedRoute>
+              <Analytics />
+            </ProtectedRoute>
+          } />
 
-        {/* --- 5. 404 Fallback --- */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          <Route path="/dashboard/suggestions" element={
+            <ProtectedRoute>
+              <SmartSuggestions />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/dashboard/strategy" element={
+            <ProtectedRoute>
+              <AiStrategy />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/dashboard/goals" element={
+            <ProtectedRoute>
+              <Goals />
+            </ProtectedRoute>
+          } />
+          
+          {/* --- ALERTS & UTILITIES --- */}
+          <Route path="/dashboard/alerts/bills" element={
+            <ProtectedRoute>
+              <BillPayments />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/dashboard/calendar" element={
+            <ProtectedRoute>
+              <SmartCalendar />
+            </ProtectedRoute>
+          } />
+
+          {/* --- SMART TOOLS --- */}
+          <Route path="/dashboard/tools/notes" element={
+            <ProtectedRoute>
+              <SecureNotes />
+            </ProtectedRoute>
+          } />
+
+          <Route path="/dashboard/tools/converter" element={
+            <ProtectedRoute>
+              <CryptoForex />
+            </ProtectedRoute>
+          } />
+
+          {/* --- 5. 404 Fallback --- */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </CryptoPriceProvider>
     </AppLayout>
   );
 }

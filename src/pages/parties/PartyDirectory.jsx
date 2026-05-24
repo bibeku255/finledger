@@ -1,47 +1,68 @@
+// src/pages/parties/PartyDirectory.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { collection, addDoc, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDoc, getDocs, where } from 'firebase/firestore';
 import { db } from '../../firebase/firebaseConfig';
 import { downloadExcelReport, downloadPDFReport } from '../../utils/reportUtils';
-
-import { 
-  HiOutlineUserAdd, HiOutlineSearch, HiOutlineUsers, 
-  HiOutlineTrendingUp, HiOutlineTrendingDown, HiOutlineX, 
+import { verifyPIN } from '../../utils/cryptoUtils';
+import {
+  HiOutlineUserAdd, HiOutlineSearch, HiOutlineUsers,
+  HiOutlineTrendingUp, HiOutlineTrendingDown, HiOutlineX,
   HiOutlineTrash, HiOutlineChevronRight,
   HiOutlineExclamationCircle, HiOutlineRefresh, HiOutlinePencil,
   HiOutlineLockClosed, HiOutlineShieldCheck, HiOutlineChevronDown,
   HiOutlineCalendar, HiOutlineDownload,
   HiOutlineDocumentText, HiOutlineTable, HiOutlinePhone,
-  HiOutlineUser
+  HiOutlineUser, HiOutlineCheckCircle, HiOutlineInformationCircle
 } from 'react-icons/hi';
-
-import { 
-  FaUserCircle, FaPhoneAlt, FaUniversity, 
+import {
+  FaUserCircle, FaPhoneAlt, FaUniversity,
   FaArrowUp, FaArrowDown, FaUserFriends,
   FaHandHoldingHeart, FaHandHoldingUsd, FaWallet, FaBitcoin
-} from 'react-icons/fa'; 
-
-// 🚀 GLOBALS
+} from 'react-icons/fa';
 import { fiatFlagMap } from '../../utils/marketConstants';
 
-const cryptoPlatformsList = [
-  "CoinDCX", "WazirX", "ZebPay", "Mudrex", "SunCrypto",
-  "Binance", "Coinbase", "Bybit", "KuCoin", "OKX", "Kraken", "Mexc", "Gate.io",
-  "FaucetPay", "Trust Wallet", "MetaMask", "Phantom", "NC Wallet", "Payeer",
-  "Hardware Wallet (Ledger/Trezor)", 
-  "CoinPayU", "Cointiply", "FreeBitcoin", "FireFaucet", "PipeFlare", 
-  "GlobalHive", "AdBTC", "Viefaucet", "DutchyCorp", "LarvelFaucet", 
-  "Coinpot", "RollerCoin", "Other Wallet/Site"
-];
-
-const hashPIN = async (pinCode) => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(pinCode);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+// ============================================
+// 🚀 MINI TOAST SYSTEM
+// ============================================
+const ToastContext = React.createContext(null);
+const ToastProvider = ({ children }) => {
+  const [toasts, setToasts] = useState([]);
+  const addToast = (message, type = 'info', duration = 4000) => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type, duration }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
+  };
+  const removeToast = id => setToasts(prev => prev.filter(t => t.id !== id));
+  return (
+    <ToastContext.Provider value={{ addToast, removeToast }}>
+      {children}
+      <div className="fixed top-24 right-4 z-[10000] space-y-2 max-w-sm w-full pointer-events-none px-4 md:px-0">
+        {toasts.map(toast => (
+          <div key={toast.id} className={`pointer-events-auto flex items-start gap-3 p-4 rounded-2xl shadow-2xl backdrop-blur-xl border animate-in slide-in-from-right-4 fade-in duration-300 ${
+            toast.type === 'success' ? 'bg-green-50/95 dark:bg-green-900/90 border-green-200 dark:border-green-700' :
+            toast.type === 'error' ? 'bg-red-50/95 dark:bg-red-900/90 border-red-200 dark:border-red-700' :
+            toast.type === 'warning' ? 'bg-amber-50/95 dark:bg-amber-900/90 border-amber-200 dark:border-amber-700' :
+            'bg-blue-50/95 dark:bg-blue-900/90 border-blue-200 dark:border-blue-700'
+          }`}>
+            {toast.type === 'success' && <HiOutlineCheckCircle className="text-green-600 dark:text-green-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'error' && <HiOutlineExclamationCircle className="text-red-600 dark:text-red-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'warning' && <HiOutlineExclamationCircle className="text-amber-600 dark:text-amber-400 w-5 h-5 flex-shrink-0" />}
+            {toast.type === 'info' && <HiOutlineInformationCircle className="text-blue-600 dark:text-blue-400 w-5 h-5 flex-shrink-0" />}
+            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 flex-1">{toast.message}</p>
+            <button onClick={() => removeToast(toast.id)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"><HiOutlineX size={16} /></button>
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
 };
+const useToast = () => React.useContext(ToastContext);
 
+// ============================================
+// 🧩 REUSABLE PARTY CARD
+// ============================================
 const PartyCard = ({ party, onEdit, onDelete, onClick, currencySymbol, formatGlobalDate }) => {
   const getStatusColor = () => {
     if (party.status === 'bad_debt') return 'from-rose-500/20 to-rose-600/20 border-rose-500/30';
@@ -51,18 +72,17 @@ const PartyCard = ({ party, onEdit, onDelete, onClick, currencySymbol, formatGlo
   };
 
   return (
-    <div 
+    <div
       onClick={onClick}
       className={`group relative overflow-hidden rounded-[1.5rem] p-5 bg-white dark:bg-slate-900 border shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer ${getStatusColor()}`}
     >
       <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 to-cyan-500/0 group-hover:from-blue-500/5 group-hover:to-cyan-500/5 transition-all duration-500 pointer-events-none" />
-      
       <div className="relative z-10">
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-start gap-3 min-w-0">
             <div className={`relative w-12 h-12 rounded-xl flex items-center justify-center shrink-0 shadow-lg group-hover:scale-105 transition-transform duration-300 ${
-              party.status === 'bad_debt' ? 'bg-rose-100 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400' : 
-              party.accountType === 'loan' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400' : 
+              party.status === 'bad_debt' ? 'bg-rose-100 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400' :
+              party.accountType === 'loan' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400' :
               'bg-gradient-to-br from-blue-100 to-cyan-100 dark:from-blue-500/20 dark:to-cyan-500/20 text-blue-600 dark:text-blue-400'
             }`}>
               {party.accountType === 'loan' ? <FaUniversity size={22} /> : <FaUserCircle size={28} />}
@@ -83,17 +103,16 @@ const PartyCard = ({ party, onEdit, onDelete, onClick, currencySymbol, formatGlo
               )}
             </div>
           </div>
-          
           <div className="flex items-center gap-1 md:opacity-0 group-hover:opacity-100 transition-opacity duration-300 shrink-0">
-            <button 
-              onClick={(e) => { e.stopPropagation(); onEdit(party, e); }} 
+            <button
+              onClick={(e) => { e.stopPropagation(); onEdit(party, e); }}
               className="p-2 bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 rounded-lg transition-all border border-slate-300 dark:border-slate-700 shadow-sm active:scale-95"
               title="Edit Details"
             >
               <HiOutlinePencil size={16} />
             </button>
-            <button 
-              onClick={(e) => { e.stopPropagation(); onDelete(party, e); }} 
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(party, e); }}
               className="p-2 bg-slate-100 dark:bg-slate-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-500/20 rounded-lg transition-all border border-slate-300 dark:border-slate-700 shadow-sm active:scale-95"
               title="Delete"
             >
@@ -103,25 +122,25 @@ const PartyCard = ({ party, onEdit, onDelete, onClick, currencySymbol, formatGlo
         </div>
 
         <div className={`p-4 rounded-xl mt-2 backdrop-blur-sm border ${
-          party.status === 'bad_debt' ? 'bg-rose-50 dark:bg-rose-900/10 border-rose-300 dark:border-rose-800' : 
+          party.status === 'bad_debt' ? 'bg-rose-50 dark:bg-rose-900/10 border-rose-300 dark:border-rose-800' :
           'bg-slate-50 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700'
         }`}>
           <div className="flex flex-wrap items-center justify-between mb-1 gap-1">
             <p className="text-[9px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest shrink-0">
-              {party.status === 'bad_debt' ? 'Bad Debt / Defaulter' : 
-               party.netBalance > 0 ? 'You will get' : 
+              {party.status === 'bad_debt' ? 'Bad Debt / Defaulter' :
+               party.netBalance > 0 ? 'You will get' :
                party.netBalance < 0 ? 'You will give' : 'Account Settled'}
             </p>
             {party.accountType === 'loan' && party.emiDueDate && party.netBalance !== 0 && (
               <span className="text-indigo-700 dark:text-indigo-400 flex items-center gap-0.5 text-[9px] font-black shrink-0">
-                <HiOutlineCalendar size={12}/> 
+                <HiOutlineCalendar size={12}/>
                 Due: {formatGlobalDate ? formatGlobalDate(party.emiDueDate, 'short') : new Date(party.emiDueDate).getDate()}
               </span>
             )}
           </div>
           <p className={`text-2xl font-black tracking-tight break-words truncate ${
-            party.status === 'bad_debt' ? 'text-rose-700 dark:text-rose-400' : 
-            party.netBalance > 0 ? 'text-emerald-700 dark:text-emerald-400' : 
+            party.status === 'bad_debt' ? 'text-rose-700 dark:text-rose-400' :
+            party.netBalance > 0 ? 'text-emerald-700 dark:text-emerald-400' :
             party.netBalance < 0 ? 'text-rose-700 dark:text-rose-400' : 'text-slate-500'
           }`} title={`${currencySymbol}${Math.abs(party.netBalance).toLocaleString()}`}>
             {currencySymbol}{Math.abs(party.netBalance).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
@@ -142,10 +161,14 @@ const PartyCard = ({ party, onEdit, onDelete, onClick, currencySymbol, formatGlo
   );
 };
 
-const PartyDirectory = () => {
+// ============================================
+// 🚀 MAIN CONTENT COMPONENT
+// ============================================
+const PartyDirectoryContent = () => {
   const { user, baseCurrency = 'INR', selectedCryptos = [], selectedFiats = [], formatGlobalDate } = useAuth();
   const currencySymbol = baseCurrency === 'INR' ? '₹' : baseCurrency === 'NPR' ? 'रू' : '$';
   const navigate = useNavigate();
+  const { addToast } = useToast();
 
   const availableFiats = useMemo(() => Array.from(new Set([baseCurrency, ...selectedFiats])), [baseCurrency, selectedFiats]);
   const availableCryptos = useMemo(() => {
@@ -156,41 +179,45 @@ const PartyDirectory = () => {
   const [parties, setParties] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState('all'); 
-  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false); 
-  
+  const [activeTab, setActiveTab] = useState('all');
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isFetchingRate, setIsFetchingRate] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [editingPartyId, setEditingPartyId] = useState(null); 
-  const [deleteContext, setDeleteContext] = useState(null); 
+  const [editingPartyId, setEditingPartyId] = useState(null);
+  const [deleteContext, setDeleteContext] = useState(null);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
-  const [customUserCoins, setCustomUserCoins] = useState([]); 
-  
+  const [customUserCoins, setCustomUserCoins] = useState([]);
+
   const [existingVaultNames, setExistingVaultNames] = useState([]);
   const [existingCryptoPlatforms, setExistingCryptoPlatforms] = useState([]);
 
   const [formData, setFormData] = useState({
-    name: '', phone: '', address: '', accountType: 'casual', 
-    emiDueDate: '', emiAmount: '', initialBalanceType: 'none', 
+    name: '', phone: '', address: '', accountType: 'casual',
+    emiDueDate: '', emiAmount: '', initialBalanceType: 'none',
     initialAmount: '', currency: baseCurrency, exchangeRate: 1,
-    vault: 'none', subWallet: '', cryptoPlatform: '' 
+    vault: 'none', subWallet: '', cryptoPlatform: '', isCustomPlatform: false
   });
 
+  // Firestore listener
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, "users", user.uid, "parties"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const partyData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setParties(partyData);
+      setParties(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setIsLoading(false);
+    }, (err) => {
+      addToast('Failed to load accounts.', 'error');
       setIsLoading(false);
     });
     return () => unsubscribe();
-  }, [user]);
+  }, [user, addToast]);
 
+  // Fetch user custom coins & existing vault/platform lists
   useEffect(() => {
     const fetchUserDataAndVaults = async () => {
       if (!user) return;
@@ -199,7 +226,6 @@ const PartyDirectory = () => {
       if (userSnap.exists() && userSnap.data().customCoins) {
         setCustomUserCoins(userSnap.data().customCoins);
       }
-
       const qBank = query(collection(db, "users", user.uid, "bankWallet"));
       const snapBank = await getDocs(qBank);
       const qOnline = query(collection(db, "users", user.uid, "onlineWallet"));
@@ -233,20 +259,18 @@ const PartyDirectory = () => {
   const activeParties = parties.filter(p => p.status === 'active').length;
 
   const filteredParties = parties.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           (p.phone && p.phone.includes(searchTerm)) ||
                           (p.address && p.address.toLowerCase().includes(searchTerm.toLowerCase()));
-    
     let matchesTab = true;
     if (activeTab === 'receivable') matchesTab = p.netBalance > 0 && p.status !== 'bad_debt';
     if (activeTab === 'payable') matchesTab = p.netBalance < 0 && p.status !== 'bad_debt';
     if (activeTab === 'settled') matchesTab = p.netBalance === 0 || p.status === 'bad_debt' || p.status === 'settled';
     if (activeTab === 'loans') matchesTab = p.accountType === 'loan';
-
     return matchesSearch && matchesTab;
   });
 
-  const nameSuggestions = (!editingPartyId && formData.name.trim().length > 0) 
+  const nameSuggestions = (!editingPartyId && formData.name.trim().length > 0)
     ? parties.filter(p => p.name.toLowerCase().includes(formData.name.toLowerCase()))
     : [];
 
@@ -255,7 +279,7 @@ const PartyDirectory = () => {
     navigate(`/dashboard/parties/${partyId}`);
   };
 
-  const existingExactMatch = !editingPartyId && parties.find(p => 
+  const existingExactMatch = !editingPartyId && parties.find(p =>
     (formData.phone.length > 5 && p.phone === formData.phone)
   );
 
@@ -278,35 +302,35 @@ const PartyDirectory = () => {
         let priceUsd = null;
 
         if (coinObj.fetchMode === 'contract' && coinObj.network && coinObj.contractAddress) {
-           try {
-              const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${coinObj.network}/tokens/${coinObj.contractAddress}`);
-              if (gtRes.ok) {
-                const gtJson = await gtRes.json();
-                priceUsd = parseFloat(gtJson.data.attributes.price_usd);
-              }
-           } catch(e) {}
+          try {
+            const gtRes = await fetch(`https://api.geckoterminal.com/api/v2/networks/${coinObj.network}/tokens/${coinObj.contractAddress}`);
+            if (gtRes.ok) {
+              const gtJson = await gtRes.json();
+              priceUsd = parseFloat(gtJson.data.attributes.price_usd);
+            }
+          } catch(e) {}
         }
 
         if (!priceUsd) {
-           try {
-              const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
-              const cgData = await cgRes.json();
-              if(cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
-           } catch(e) {}
+          try {
+            const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${searchId}&vs_currencies=usd`);
+            const cgData = await cgRes.json();
+            if(cgData[searchId]?.usd) priceUsd = parseFloat(cgData[searchId].usd);
+          } catch(e) {}
         }
 
         if (!priceUsd) {
-           try {
-              if (['USDT', 'USDC', 'DAI'].includes(upperSym)) {
-                  priceUsd = 1.00;
-              } else {
-                  const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${upperSym}USDT`);
-                  if (bRes.ok) {
-                    const bData = await bRes.json();
-                    priceUsd = parseFloat(bData.price);
-                  }
+          try {
+            if (['USDT', 'USDC', 'DAI'].includes(upperSym)) {
+              priceUsd = 1.00;
+            } else {
+              const bRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${upperSym}USDT`);
+              if (bRes.ok) {
+                const bData = await bRes.json();
+                priceUsd = parseFloat(bData.price);
               }
-           } catch(e) {}
+            }
+          } catch(e) {}
         }
 
         const finalPrice = priceUsd || (coinObj?.fallbackPrice || 0);
@@ -314,7 +338,7 @@ const PartyDirectory = () => {
         setFormData(prev => ({ ...prev, exchangeRate: finalRate.toFixed(4) }));
       }
     } catch (error) {
-      alert("Rate fetch failed. Please enter manually.");
+      addToast("Rate fetch failed. Please enter manually.", "error");
     } finally {
       setIsFetchingRate(false);
     }
@@ -328,23 +352,28 @@ const PartyDirectory = () => {
     if (!user) return;
 
     if (!editingPartyId && existingExactMatch) {
-      alert(`A party with this phone number (${formData.phone}) already exists. Redirecting to their ledger...`);
+      addToast(`An account with this phone (${formData.phone}) already exists. Redirecting...`, 'info');
       handleSelectExisting(existingExactMatch.id);
       return;
     }
 
     if (formData.accountType === 'loan' && (!formData.emiDueDate || !formData.emiAmount)) {
-      alert("Please provide the EMI Amount and Due Date for formal loans.");
+      addToast("Please provide EMI Amount and Due Date for formal loans.", "warning");
       return;
     }
-    
+
     if (formData.initialBalanceType !== 'none' && formData.vault !== 'none') {
-       if (formData.vault === 'crypto' && !formData.cryptoPlatform.trim()) return alert("Please specify the crypto platform.");
-       if ((formData.vault === 'bank' || formData.vault === 'online') && !formData.subWallet.trim()) return alert("Please specify the Bank or Wallet Name.");
+      if (formData.vault === 'crypto' && !formData.cryptoPlatform.trim()) {
+        addToast("Please specify the crypto platform.", "warning");
+        return;
+      }
+      if ((formData.vault === 'bank' || formData.vault === 'online') && !formData.subWallet.trim()) {
+        addToast("Please specify the Bank or Wallet Name.", "warning");
+        return;
+      }
     }
 
     setIsSaving(true);
-
     try {
       if (editingPartyId) {
         await setDoc(doc(db, "users", user.uid, "parties", editingPartyId), {
@@ -355,10 +384,11 @@ const PartyDirectory = () => {
           emiDueDate: formData.accountType === 'loan' ? formData.emiDueDate : null,
           emiAmount: formData.accountType === 'loan' ? parseFloat(formData.emiAmount) : null,
         }, { merge: true });
+        addToast('Account updated!', 'success');
       } else {
         let startingBalanceBase = 0;
-        if (formData.initialBalanceType === 'receivable') startingBalanceBase = initialBaseValue; 
-        if (formData.initialBalanceType === 'payable') startingBalanceBase = -initialBaseValue; 
+        if (formData.initialBalanceType === 'receivable') startingBalanceBase = initialBaseValue;
+        if (formData.initialBalanceType === 'payable') startingBalanceBase = -initialBaseValue;
 
         const newParty = {
           name: formData.name.trim(),
@@ -367,15 +397,15 @@ const PartyDirectory = () => {
           accountType: formData.accountType,
           emiDueDate: formData.accountType === 'loan' ? formData.emiDueDate : null,
           emiAmount: formData.accountType === 'loan' ? parseFloat(formData.emiAmount) : null,
-          netBalance: startingBalanceBase, 
+          netBalance: startingBalanceBase,
           baseCurrency: baseCurrency,
           createdAt: new Date().getTime(),
-          status: 'active', 
-          trustScore: 100 
+          status: 'active',
+          trustScore: 100
         };
 
         const docRef = await addDoc(collection(db, "users", user.uid, "parties"), newParty);
-        
+
         if (startingBalanceBase !== 0) {
           const timestamp = new Date().getTime();
           const formattedDate = new Date().toISOString().split('T')[0];
@@ -393,9 +423,8 @@ const PartyDirectory = () => {
             linkId: linkId
           });
 
-          // Link Vault Entry
           if (formData.vault !== 'none') {
-            const isOutflow = startingBalanceBase > 0; 
+            const isOutflow = startingBalanceBase > 0;
             const typeStr = isOutflow ? 'out' : 'in';
             const actionStr = isOutflow ? 'Lent to' : 'Received from';
 
@@ -405,63 +434,69 @@ const PartyDirectory = () => {
             if (formData.vault === 'crypto') {
               vaultCol = 'cryptoWalletLogs';
               vaultEntry = {
-                  type: typeStr,
-                  coin: formData.currency,
-                  quantity: parseFloat(formData.initialAmount),
-                  platform: formData.cryptoPlatform.trim(),
-                  reason: `${actionStr} ${formData.name.trim()} (Initial Khata)`,
-                  referenceNo: linkId,
-                  date: formattedDate,
-                  timestamp,
-                  linkedPartyId: docRef.id,
-                  linkId
+                type: typeStr,
+                coin: formData.currency,
+                quantity: parseFloat(formData.initialAmount),
+                platform: formData.cryptoPlatform.trim(),
+                reason: `${actionStr} ${formData.name.trim()} (Initial Khata)`,
+                referenceNo: linkId,
+                date: formattedDate,
+                timestamp,
+                linkedPartyId: docRef.id,
+                linkId
               };
             } else {
               vaultCol = formData.vault + 'Wallet';
               vaultEntry = {
-                  title: `${actionStr} ${formData.name.trim()} (Initial Khata)`,
-                  type: typeStr,
-                  date: formattedDate,
-                  timestamp,
-                  currency: formData.currency,
-                  foreignAmount: parseFloat(formData.initialAmount),
-                  exchangeRate: isForeign ? parseFloat(formData.exchangeRate) : 1,
-                  finalBaseAmount: Math.abs(startingBalanceBase),
-                  fee: 0,
-                  walletName: formData.subWallet.trim() || 'Default Wallet',
-                  bankName: formData.subWallet.trim() || 'Default Bank',
-                  transferType: 'Khata Settlement',
-                  linkedPartyId: docRef.id,
-                  linkId
+                title: `${actionStr} ${formData.name.trim()} (Initial Khata)`,
+                type: typeStr,
+                date: formattedDate,
+                timestamp,
+                currency: formData.currency,
+                foreignAmount: parseFloat(formData.initialAmount),
+                exchangeRate: isForeign ? parseFloat(formData.exchangeRate) : 1,
+                finalBaseAmount: Math.abs(startingBalanceBase),
+                fee: 0,
+                walletName: formData.subWallet.trim() || 'Default Wallet',
+                bankName: formData.subWallet.trim() || 'Default Bank',
+                transferType: 'Khata Settlement',
+                linkedPartyId: docRef.id,
+                linkId,
+                vaultId: formData.vault === 'bank'
+                  ? 'bank_' + (formData.subWallet.trim() || 'Main').toUpperCase()
+                  : formData.vault === 'online'
+                  ? 'online_' + (formData.subWallet.trim() || 'Main').toUpperCase()
+                  : 'cash_main'
               };
             }
             await addDoc(collection(db, "users", user.uid, vaultCol), vaultEntry);
           }
         }
+        addToast('New account created!', 'success');
       }
       closeModal();
     } catch (error) {
-      alert(editingPartyId ? "Failed to update party." : "Failed to create party.");
+      addToast(editingPartyId ? "Failed to update account." : "Failed to create account.", "error");
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleEditClick = (party, e) => {
-    e.stopPropagation(); 
+    e.stopPropagation();
     setEditingPartyId(party.id);
     setFormData({
       name: party.name, phone: party.phone || '', address: party.address || '',
       accountType: party.accountType || 'casual', emiDueDate: party.emiDueDate || '',
       emiAmount: party.emiAmount || '', initialBalanceType: 'none', initialAmount: '',
-      currency: baseCurrency, exchangeRate: 1, vault: 'none', subWallet: '', cryptoPlatform: ''
+      currency: baseCurrency, exchangeRate: 1, vault: 'none', subWallet: '', cryptoPlatform: '', isCustomPlatform: false
     });
     setShowSuggestions(false);
     setIsModalOpen(true);
   };
 
   const initiateDelete = (party, e) => {
-    e.stopPropagation(); 
+    e.stopPropagation();
     setDeleteContext(party);
     setPinInput('');
     setPinError('');
@@ -475,23 +510,23 @@ const PartyDirectory = () => {
 
     try {
       const userDoc = await getDoc(doc(db, "users", user.uid));
-      const userData = userDoc.data();
-      const hashedInput = await hashPIN(pinInput.trim());
-      const storedPin = userData?.security?.pinHash || userData?.securityPin || userData?.pin; 
+      const storedHash = userDoc.data()?.security?.pinHash || userDoc.data()?.securityPin || userDoc.data()?.pin;
+      const { valid, newHash } = await verifyPIN(pinInput.trim(), storedHash, user.uid);
 
-      if (storedPin && storedPin.toString() !== hashedInput && storedPin.toString() !== pinInput.trim()) {
-        setPinError("Incorrect PIN. Deletion blocked! 🛑");
+      if (!valid) {
+        setPinError("Incorrect PIN. Deletion blocked!");
         setIsVerifying(false);
         return;
       }
+      if (newHash) {
+        await setDoc(doc(db, "users", user.uid), { security: { pinHash: newHash } }, { merge: true });
+      }
 
       await deleteDoc(doc(db, "users", user.uid, "parties", deleteContext.id));
-      
       const q = query(collection(db, "users", user.uid, "parties", deleteContext.id, "ledger"));
       const snap = await getDocs(q);
       snap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, "parties", deleteContext.id, "ledger", d.id)));
 
-      // Reverse Linked Vault Entries
       const collectionsToCheck = ['bankWallet', 'cashWallet', 'onlineWallet', 'cryptoWalletLogs', 'expenseLogs', 'incomeLogs'];
       for (const colName of collectionsToCheck) {
         const vQ = query(collection(db, "users", user.uid, colName), where("linkedPartyId", "==", deleteContext.id));
@@ -499,9 +534,10 @@ const PartyDirectory = () => {
         vSnap.forEach(async (d) => await deleteDoc(doc(db, "users", user.uid, colName, d.id)));
       }
 
-      setDeleteContext(null); 
+      setDeleteContext(null);
+      addToast(`"${deleteContext.name}" deleted successfully.`, 'info');
     } catch (error) {
-      setPinError("System error during verification. Try again.");
+      setPinError("System error during verification.");
     } finally {
       setIsVerifying(false);
     }
@@ -509,19 +545,22 @@ const PartyDirectory = () => {
 
   const handleDownloadReport = (format) => {
     setIsExportMenuOpen(false);
-    if (filteredParties.length === 0) return alert("No records found to download.");
-    
+    if (filteredParties.length === 0) {
+      addToast("No records found to download.", "warning");
+      return;
+    }
+
     const reportData = filteredParties.map(p => ({
       name: p.name,
       type: p.accountType === 'loan' ? 'Formal Loan' : 'Casual Khata',
       phone: p.phone || 'N/A',
-      balanceValue: Number(p.netBalance || 0), 
+      balanceValue: Number(p.netBalance || 0),
       status: p.status === 'bad_debt' ? 'Bad Debt' : p.netBalance === 0 ? 'Settled' : 'Active'
     }));
 
     const columns = [
       { header: 'Name', key: 'name' }, { header: 'Type', key: 'type' },
-      { header: 'Phone', key: 'phone' }, 
+      { header: 'Phone', key: 'phone' },
       { header: `Net Balance (${currencySymbol})`, key: 'balanceValue', isNumeric: true },
       { header: 'Status', key: 'status' }
     ];
@@ -529,38 +568,73 @@ const PartyDirectory = () => {
     const fileName = `Smart_Khata_Directory`;
     const reportTitle = `Smart Khata & Loans - Directory Report`;
 
-    if (format === 'pdf') downloadPDFReport(reportData, columns, fileName, reportTitle);
-    else downloadExcelReport(reportData, columns, fileName, reportTitle);
+    try {
+      if (format === 'pdf') {
+        downloadPDFReport(reportData, columns, fileName, reportTitle, {
+          onSuccess: () => addToast('PDF report downloaded!', 'success'),
+          onError: (msg) => addToast(`PDF Error: ${msg}`, 'error')
+        });
+      } else {
+        downloadExcelReport(reportData, columns, fileName, reportTitle, {
+          onSuccess: () => addToast('Excel report downloaded!', 'success'),
+          onError: (msg) => addToast(`Excel Error: ${msg}`, 'error')
+        });
+      }
+    } catch (e) {
+      addToast('Failed to generate report.', 'error');
+    }
   };
 
   const openModal = () => {
     setEditingPartyId(null);
-    setFormData({ 
-      name: '', phone: '', address: '', accountType: 'casual', emiDueDate: '', emiAmount: '', 
+    setFormData({
+      name: '', phone: '', address: '', accountType: 'casual', emiDueDate: '', emiAmount: '',
       initialBalanceType: 'none', initialAmount: '', currency: baseCurrency, exchangeRate: 1,
-      vault: 'none', subWallet: existingVaultNames[0] || '', cryptoPlatform: existingCryptoPlatforms[0] || ''
+      vault: 'none', subWallet: existingVaultNames[0] || '', cryptoPlatform: existingCryptoPlatforms[0] || '', isCustomPlatform: false
     });
     setShowSuggestions(false);
     setIsModalOpen(true);
   };
-  
+
   const closeModal = () => {
     setIsModalOpen(false);
     setShowSuggestions(false);
     setEditingPartyId(null);
   };
 
+  // Skeleton grid for loading state
+  const SkeletonGrid = () => (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+      {[1,2,3,4,5,6].map(i => (
+        <div key={i} className="rounded-[1.5rem] p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-sm animate-pulse">
+          <div className="flex items-start justify-between mb-4">
+            <div className="flex items-start gap-3">
+              <div className="w-12 h-12 bg-slate-200 dark:bg-slate-700 rounded-xl" />
+              <div className="space-y-2 flex-1">
+                <div className="h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+                <div className="h-3 w-20 bg-slate-200 dark:bg-slate-700 rounded" />
+              </div>
+            </div>
+          </div>
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800 space-y-3">
+            <div className="h-3 w-24 bg-slate-200 dark:bg-slate-700 rounded" />
+            <div className="h-7 w-28 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <div className="w-full h-auto pb-24">
       <div className="pt-8 md:pt-12 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto px-4 md:px-6">
-        
-        {/* Premium Header (Z-Index isolated for Dropdown) */}
+
+        {/* Premium Header */}
         <div className="relative rounded-[2.5rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6 md:p-8 shadow-2xl border border-slate-700/50 z-20">
           <div className="absolute inset-0 overflow-hidden rounded-[2.5rem] pointer-events-none">
-             <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.1),transparent_70%)]" />
-             <div className="absolute right-0 top-0 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl" />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.1),transparent_70%)]" />
+            <div className="absolute right-0 top-0 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl" />
           </div>
-          
           <div className="relative z-50 flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
               <div className="flex items-center gap-3 mb-3">
@@ -573,12 +647,10 @@ const PartyDirectory = () => {
                 </div>
               </div>
             </div>
-            
-            {/* 🚀 FIXED: Mobile Responsive Grid for Buttons */}
+
             <div className="grid grid-cols-2 sm:flex sm:flex-nowrap items-center gap-2 w-full md:w-auto mt-4 md:mt-0">
-              {/* EXPORT MENU FIX: High Z-Index, Absolute Positioning */}
               <div className="relative w-full sm:w-auto z-50">
-                <button 
+                <button
                   onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
                   onBlur={() => setTimeout(() => setIsExportMenuOpen(false), 200)}
                   className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest backdrop-blur-sm transition-all border border-white/10 shadow-sm"
@@ -596,16 +668,15 @@ const PartyDirectory = () => {
                   </div>
                 )}
               </div>
-              
-              <button 
-                onClick={openModal} 
+              <button
+                onClick={openModal}
                 className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white px-5 py-3.5 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-blue-500/30"
               >
                 <HiOutlineUserAdd size={18} /> Add Account
               </button>
             </div>
           </div>
-          
+
           <div className="relative z-30 grid grid-cols-2 md:grid-cols-3 gap-3 mt-6">
             <div className="bg-white/5 backdrop-blur-sm rounded-xl p-3 border border-white/10 overflow-hidden">
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">To Receive</p>
@@ -626,13 +697,12 @@ const PartyDirectory = () => {
         <div className="space-y-4">
           <div className="relative">
             <HiOutlineSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-            <input 
+            <input
               type="text" placeholder="Search by name, phone or bank..."
               value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-12 pr-4 py-4 bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:border-blue-500 transition-all shadow-sm placeholder-slate-400 dark:placeholder-slate-500"
             />
           </div>
-          
           <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-2">
             <button onClick={() => setActiveTab('all')} className={`px-4 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest whitespace-nowrap transition-all border-2 ${
               activeTab === 'all' ? 'bg-slate-800 text-white border-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:border-slate-100 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-400 shadow-sm'
@@ -652,15 +722,9 @@ const PartyDirectory = () => {
           </div>
         </div>
 
-        {/* Party Grid */}
+        {/* Party Grid or Skeleton or Empty */}
         {isLoading ? (
-          <div className="flex flex-col items-center justify-center py-16">
-            <div className="relative">
-              <div className="absolute inset-0 bg-blue-500 rounded-full blur-xl opacity-30 animate-pulse" />
-              <HiOutlineRefresh className="animate-spin text-4xl text-blue-500 relative" />
-            </div>
-            <p className="text-sm font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest mt-4 animate-pulse">Loading Accounts...</p>
-          </div>
+          <SkeletonGrid />
         ) : filteredParties.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 bg-white dark:bg-slate-900 rounded-3xl border border-slate-300 dark:border-slate-800 shadow-sm">
             <div className="w-20 h-20 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center mb-4">
@@ -679,7 +743,7 @@ const PartyDirectory = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {filteredParties.map(party => (
-              <PartyCard 
+              <PartyCard
                 key={party.id}
                 party={party}
                 onEdit={handleEditClick}
@@ -693,11 +757,10 @@ const PartyDirectory = () => {
         )}
       </div>
 
-      {/* 🚀 Add/Edit Modal */}
+      {/* Add/Edit Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[400] bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden max-h-[90dvh] sm:max-h-[85vh] animate-in slide-in-from-bottom-10 sm:zoom-in-95 border border-slate-300 dark:border-slate-700">
-            
             <div className="px-6 py-5 bg-gradient-to-r from-blue-600 to-cyan-600 text-white flex justify-between items-center shrink-0">
               <h3 className="text-xl font-black flex items-center gap-2">
                 {editingPartyId ? <HiOutlinePencil /> : <HiOutlineUserAdd />}
@@ -707,7 +770,6 @@ const PartyDirectory = () => {
                 <HiOutlineX size={20} />
               </button>
             </div>
-            
             <form onSubmit={handleSaveParty} className="p-6 space-y-5 flex-1 overflow-y-auto custom-scrollbar">
               <div className="flex p-1.5 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
                 <button type="button" onClick={() => setFormData({...formData, accountType: 'casual'})} className={`flex-1 py-2.5 text-xs font-black uppercase tracking-widest rounded-lg transition-all ${
@@ -722,14 +784,13 @@ const PartyDirectory = () => {
                 <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">
                   {formData.accountType === 'loan' ? 'Bank / Lender Name' : 'Person / Company Name'}
                 </label>
-                <input 
-                  type="text" required value={formData.name} 
-                  onChange={(e) => { setFormData({...formData, name: e.target.value}); if (!editingPartyId) setShowSuggestions(true); }} 
+                <input
+                  type="text" required value={formData.name}
+                  onChange={(e) => { setFormData({...formData, name: e.target.value}); if (!editingPartyId) setShowSuggestions(true); }}
                   onFocus={() => { if(!editingPartyId) setShowSuggestions(true) }}
-                  placeholder={formData.accountType === 'loan' ? "e.g., HDFC Home Loan" : "e.g., Rahul, Colleague"} 
-                  className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm placeholder-slate-400 dark:placeholder-slate-500 transition-colors" 
+                  placeholder={formData.accountType === 'loan' ? "e.g., HDFC Home Loan" : "e.g., Rahul, Colleague"}
+                  className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm placeholder-slate-400 dark:placeholder-slate-500 transition-colors"
                 />
-                
                 {showSuggestions && nameSuggestions.length > 0 && (
                   <div className="absolute z-50 w-full mt-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
                     <div className="p-2 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
@@ -754,12 +815,12 @@ const PartyDirectory = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/50 rounded-xl shadow-sm">
                   <div>
                     <label className="text-[10px] font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-widest ml-1">EMI Amount</label>
-                    <input type="number" required value={formData.emiAmount} onChange={(e) => setFormData({...formData, emiAmount: e.target.value})} placeholder="e.g., 5000" 
+                    <input type="number" required value={formData.emiAmount} onChange={(e) => setFormData({...formData, emiAmount: e.target.value})} placeholder="e.g., 5000"
                       className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-sm transition-colors placeholder-slate-400" />
                   </div>
                   <div>
                     <label className="text-[10px] font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-widest ml-1">Next Due Date</label>
-                    <input type="date" required value={formData.emiDueDate} onChange={(e) => setFormData({...formData, emiDueDate: e.target.value})} 
+                    <input type="date" required value={formData.emiDueDate} onChange={(e) => setFormData({...formData, emiDueDate: e.target.value})}
                       className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-sm transition-colors" />
                   </div>
                 </div>
@@ -768,12 +829,12 @@ const PartyDirectory = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Phone (Optional)</label>
-                  <input type="tel" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} placeholder="e.g., +91 987..." 
+                  <input type="tel" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} placeholder="e.g., +91 987..."
                     className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-colors placeholder-slate-400" />
                 </div>
                 <div>
                   <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Notes (Optional)</label>
-                  <input type="text" value={formData.address} onChange={(e) => setFormData({...formData, address: e.target.value})} placeholder="e.g., Loan A/C 4589" 
+                  <input type="text" value={formData.address} onChange={(e) => setFormData({...formData, address: e.target.value})} placeholder="e.g., Loan A/C 4589"
                     className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-colors placeholder-slate-400" />
                 </div>
               </div>
@@ -783,11 +844,10 @@ const PartyDirectory = () => {
                   <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest mb-3 block ml-1">
                     {formData.accountType === 'loan' ? 'Total Loan Principal' : 'Previous Balance (If any)'}
                   </label>
-                  
                   <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                     {['none', 'receivable', 'payable'].map((type) => (
                       <label key={type} className={`p-2.5 sm:p-3 rounded-lg border-2 text-center cursor-pointer font-black text-[9px] sm:text-[10px] uppercase tracking-widest transition-all flex items-center justify-center leading-tight shadow-sm ${
-                        formData.initialBalanceType === type 
+                        formData.initialBalanceType === type
                           ? type === 'none' ? 'bg-slate-200 border-slate-500 text-slate-800 dark:bg-slate-700 dark:border-slate-500 dark:text-white' :
                             type === 'receivable' ? 'bg-emerald-50 border-emerald-400 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500' :
                             'bg-rose-50 border-rose-400 text-rose-800 dark:bg-rose-500/20 dark:text-rose-400 dark:border-rose-500'
@@ -801,9 +861,8 @@ const PartyDirectory = () => {
 
                   {formData.initialBalanceType !== 'none' && (
                     <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-300 dark:border-slate-700 shadow-sm space-y-4">
-                      
                       <div className="flex flex-row gap-2 sm:gap-3 w-full">
-                        <select value={formData.currency} onChange={(e) => setFormData({...formData, currency: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})} 
+                        <select value={formData.currency} onChange={(e) => setFormData({...formData, currency: e.target.value, exchangeRate: e.target.value === baseCurrency ? 1 : ''})}
                           className="w-[35%] sm:w-auto min-w-[80px] p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm cursor-pointer transition-colors focus:border-blue-500">
                           <option value={baseCurrency}>{baseCurrency}</option>
                           <optgroup label="Fiat">
@@ -813,7 +872,7 @@ const PartyDirectory = () => {
                             {availableCryptos.map(c => <option key={c} value={c}>{c}</option>)}
                           </optgroup>
                         </select>
-                        <input type="number" required value={formData.initialAmount} onChange={(e) => setFormData({...formData, initialAmount: e.target.value})} placeholder="Amount" 
+                        <input type="number" required value={formData.initialAmount} onChange={(e) => setFormData({...formData, initialAmount: e.target.value})} placeholder="Amount"
                           className={`w-[65%] flex-1 min-w-0 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-black outline-none shadow-sm transition-colors focus:border-blue-500 placeholder-slate-400 dark:placeholder-slate-500 ${
                             formData.initialBalanceType === 'receivable' ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'
                           }`} />
@@ -826,21 +885,20 @@ const PartyDirectory = () => {
                           </button>
                           <div className="flex items-center gap-2 flex-1 min-w-[150px]">
                             <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 shrink-0">1 {formData.currency} =</span>
-                            <input type="number" step="any" required value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})} 
+                            <input type="number" step="any" required value={formData.exchangeRate} onChange={(e) => setFormData({...formData, exchangeRate: e.target.value})}
                               className="flex-1 w-full min-w-0 p-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg text-sm font-bold text-slate-900 dark:text-white outline-none transition-colors focus:border-blue-500" />
                             <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 shrink-0">{baseCurrency}</span>
                           </div>
                         </div>
                       )}
 
-                      {/* Vault Linking Option */}
                       <div className="pt-4 border-t border-slate-300 dark:border-slate-700 space-y-3">
                         <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-1">
                           <FaUniversity className="text-blue-500"/> Link to Vault?
                         </label>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="relative">
-                            <select value={formData.vault} onChange={(e) => setFormData({...formData, vault: e.target.value, subWallet: ''})} 
+                            <select value={formData.vault} onChange={(e) => setFormData({...formData, vault: e.target.value, subWallet: ''})}
                               className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none cursor-pointer shadow-sm transition-colors focus:border-blue-500">
                               <option value="none">No Vault (Khata Only)</option>
                               <option value="bank">Bank Account</option>
@@ -850,29 +908,37 @@ const PartyDirectory = () => {
                             </select>
                             <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
                           </div>
-                          
                           {(formData.vault === 'bank' || formData.vault === 'online') && (
                             <div className="animate-in fade-in">
-                              <input type="text" list="sub-wallets-party" required value={formData.subWallet} onChange={(e) => setFormData({...formData, subWallet: e.target.value})} 
-                                placeholder={formData.vault === 'bank' ? "e.g., SBI" : "e.g., PayPal"} 
+                              <input type="text" list="sub-wallets-party" required value={formData.subWallet} onChange={(e) => setFormData({...formData, subWallet: e.target.value})}
+                                placeholder={formData.vault === 'bank' ? "e.g., SBI" : "e.g., PayPal"}
                                 className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm placeholder-slate-400 transition-colors focus:border-blue-500" />
                               <datalist id="sub-wallets-party">
                                 {existingVaultNames.map(b => <option key={b} value={b} />)}
                               </datalist>
                             </div>
                           )}
-
                           {formData.vault === 'crypto' && (
                             <div className="animate-in fade-in">
                               {formData.isCustomPlatform ? (
                                 <div className="flex gap-2">
                                   <input type="text" required value={formData.cryptoPlatform} onChange={(e)=>setFormData({...formData, cryptoPlatform: e.target.value})} className="flex-1 p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50" />
-                                  <button type="button" onClick={()=>setFormData({...formData, isCustomPlatform: false, cryptoPlatform: cryptoPlatformsList[0]})} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors shadow-sm border border-slate-300 dark:border-slate-600"><HiOutlineX size={20}/></button>
+                                  <button type="button" onClick={()=>setFormData({...formData, isCustomPlatform: false, cryptoPlatform: existingCryptoPlatforms[0] || ''})} className="px-4 bg-slate-200 dark:bg-slate-700 rounded-xl text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors shadow-sm border border-slate-300 dark:border-slate-600"><HiOutlineX size={20}/></button>
                                 </div>
                               ) : (
                                 <div className="relative">
-                                  <select value={cryptoPlatformsList.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'} onChange={(e) => { if(e.target.value==='CUSTOM'){setFormData({...formData, isCustomPlatform: true, cryptoPlatform: ''})} else {setFormData({...formData, cryptoPlatform: e.target.value})} }} className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none cursor-pointer appearance-none shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50">
-                                    {cryptoPlatformsList.map(p => <option key={p} value={p}>{p}</option>)}
+                                  <select
+                                    value={existingCryptoPlatforms.includes(formData.cryptoPlatform) ? formData.cryptoPlatform : 'CUSTOM'}
+                                    onChange={(e) => {
+                                      if(e.target.value === 'CUSTOM') {
+                                        setFormData({...formData, isCustomPlatform: true, cryptoPlatform: ''});
+                                      } else {
+                                        setFormData({...formData, cryptoPlatform: e.target.value});
+                                      }
+                                    }}
+                                    className="w-full p-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-slate-900 dark:text-white outline-none cursor-pointer appearance-none shadow-sm transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50"
+                                  >
+                                    {existingCryptoPlatforms.map(p => <option key={p} value={p}>{p}</option>)}
                                     <option value="CUSTOM">✨ Custom Platform</option>
                                   </select>
                                   <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
@@ -882,7 +948,6 @@ const PartyDirectory = () => {
                           )}
                         </div>
                       </div>
-
                     </div>
                   )}
                 </div>
@@ -914,28 +979,25 @@ const PartyDirectory = () => {
                 </div>
               </div>
             </div>
-            
             <form onSubmit={executeSecureDelete} className="p-6 space-y-5">
               <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-500/30 rounded-xl">
                 <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
-                  You are deleting <span className="font-black">"{deleteContext.name}"</span>. 
+                  You are deleting <span className="font-black">"{deleteContext.name}"</span>.
                   All related Vault transactions linked to this party will also be reversed automatically.
                   {deleteContext.netBalance !== 0 && (
                     <span className="block mt-2">Active balance: {currencySymbol}{Math.abs(deleteContext.netBalance).toLocaleString()}</span>
                   )}
                 </p>
               </div>
-              
               <div>
                 <label className="text-[10px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest ml-1">Security PIN</label>
-                <input 
+                <input
                   type="password" maxLength={6} required autoFocus
                   value={pinInput} onChange={(e) => setPinInput(e.target.value)}
                   className="w-full text-center tracking-[0.3em] text-xl p-4 bg-slate-50 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-xl font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-500/50 transition-colors shadow-sm focus:border-rose-500"
                 />
                 {pinError && <p className="text-xs font-bold text-rose-700 dark:text-rose-400 mt-2 text-center">{pinError}</p>}
               </div>
-
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setDeleteContext(null)} className="flex-1 p-4 rounded-xl font-black text-sm bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 transition-colors shadow-sm">
                   Cancel
@@ -949,9 +1011,14 @@ const PartyDirectory = () => {
           </div>
         </div>
       )}
-
     </div>
   );
 };
+
+const PartyDirectory = () => (
+  <ToastProvider>
+    <PartyDirectoryContent />
+  </ToastProvider>
+);
 
 export default PartyDirectory;
