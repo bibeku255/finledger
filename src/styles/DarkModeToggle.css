@@ -1,0 +1,134 @@
+/* DarkModeToggle.css - Keep only complex animations */
+.sun-horizontal {
+  background: #FFD700;
+  box-shadow: 
+    0 0 30px #FFA500,
+    0 0 60px #FF8C00,
+    inset 0 0 10px #FFFF00;
+  animation: sunPulseHorizontal 4s ease-in-out infinite;
+}
+
+@keyframes sunPulseHorizontal {
+  0%, 100% {
+    box-shadow: 
+      0 0 30px #FFA500,
+      0 0 60px #FF8C00,
+      inset 0 0 10px #FFFF00;
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 
+      0 0 40px #FFA500,
+      0 0 80px #FF8C00,
+      inset 0 0 15px #FFFF00;
+    transform: scale(1.1);
+  }
+}
+
+.moon-horizontal {
+  background: #F5F5F5;
+  box-shadow: 
+    0 0 25px #FFFFFF,
+    0 0 50px #E0E0E0,
+    inset 0 0 10px #FFFFFF;
+  animation: moonGlowHorizontal 6s ease-in-out infinite;
+}
+
+@keyframes moonGlowHorizontal {
+  0%, 100% {
+    box-shadow: 
+      0 0 25px #FFFFFF,
+      0 0 50px #E0E0E0,
+      inset 0 0 10px #FFFFFF;
+    transform: scale(1) rotate(0deg);
+  }
+  50% {
+    box-shadow: 
+      0 0 35px #FFFFFF,
+      0 0 70px #E0E0E0,
+      inset 0 0 15px #FFFFFF;
+    transform: scale(1.05) rotate(5deg);
+  }
+}
+
+/* Real Cloud Style */
+.real-cloud {
+  display: flex;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
+}
+
+.cloud-ball {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 50%;
+  box-shadow: inset 0 -2px 4px rgba(0,0,0,0.1);
+}
+
+/* Cloud Sizes */
+.cloud-1-h .ball-1 { width: 8px; height: 8px; }
+.cloud-1-h .ball-2 { width: 12px; height: 12px; margin-left: -3px; margin-top: -2px; }
+.cloud-1-h .ball-3 { width: 10px; height: 10px; margin-left: -2px; }
+.cloud-1-h .ball-4 { width: 6px; height: 6px; margin-left: -1px; margin-top: 2px; }
+
+.cloud-2-h .ball-1 { width: 10px; height: 10px; }
+.cloud-2-h .ball-2 { width: 14px; height: 14px; margin-left: -4px; margin-top: -1px; }
+.cloud-2-h .ball-3 { width: 8px; height: 8px; margin-left: -2px; margin-top: 1px; }
+
+.cloud-3-h .ball-1 { width: 7px; height: 7px; }
+.cloud-3-h .ball-2 { width: 11px; height: 11px; margin-left: -3px; margin-top: -1px; }
+.cloud-3-h .ball-3 { width: 9px; height: 9px; margin-left: -2px; }
+.cloud-3-h .ball-4 { width: 5px; height: 5px; margin-left: -1px; margin-top: 2px; }
+.cloud-3-h .ball-5 { width: 6px; height: 6px; margin-left: -1px; }
+
+/* Night Clouds */
+.night-cloud-h .cloud-ball {
+  background: rgba(200, 200, 220, 0.8);
+}
+
+.cloud-4-h .ball-1 { width: 9px; height: 9px; }
+.cloud-4-h .ball-2 { width: 13px; height: 13px; margin-left: -4px; margin-top: -2px; }
+.cloud-4-h .ball-3 { width: 7px; height: 7px; margin-left: -2px; margin-top: 1px; }
+
+.cloud-5-h .ball-1 { width: 8px; height: 8px; }
+.cloud-5-h .ball-2 { width: 12px; height: 12px; margin-left: -3px; margin-top: -1px; }
+.cloud-5-h .ball-3 { width: 10px; height: 10px; margin-left: -3px; }
+.cloud-5-h .ball-4 { width: 6px; height: 6px; margin-left: -1px; margin-top: 2px; }
+
+/* Cloud Animations */
+.cloud-1-h { animation: floatCloudHorizontal 25s linear infinite; }
+.cloud-2-h { animation: floatCloudHorizontal 30s linear infinite reverse; }
+.cloud-3-h { animation: floatCloudHorizontal 35s linear infinite; }
+.cloud-4-h { animation: floatCloudHorizontal 40s linear infinite; }
+.cloud-5-h { animation: floatCloudHorizontal 45s linear infinite reverse; }
+
+@keyframes floatCloudHorizontal {
+  0%, 100% { transform: translateX(0) translateY(0); }
+  25% { transform: translateX(2px) translateY(-1px); }
+  50% { transform: translateX(0) translateY(-2px); }
+  75% { transform: translateX(-2px) translateY(-1px); }
+}
+
+/* Stars */
+.star-h {
+  background: white;
+  border-radius: 50%;
+  animation: twinkleHorizontal 3s ease-in-out infinite;
+  z-index: 10;
+}
+
+.star-1-h { top: 15px; left: 40px; width: 2px; height: 2px; animation-delay: 0s; }
+.star-2-h { top: 25px; left: 60px; width: 1.5px; height: 1.5px; animation-delay: 0.5s; }
+.star-3-h { top: 35px; left: 50px; width: 2px; height: 2px; animation-delay: 1s; }
+.star-4-h { top: 20px; left: 80px; width: 1.5px; height: 1.5px; animation-delay: 1.5s; }
+.star-5-h { top: 40px; left: 70px; width: 2px; height: 2px; animation-delay: 2s; }
+.star-6-h { top: 30px; left: 30px; width: 1.5px; height: 1.5px; animation-delay: 2.5s; }
+
+@keyframes twinkleHorizontal {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}

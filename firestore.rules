@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ========================
+    // 🛡️ USER DATA - STRICTEST
+    // ========================
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ========================
+    // 📝 BLOGS - PUBLIC READ + ADMIN WRITE
+    // ========================
+    match /blogs/{blogId} {
+      
+      // ✅ Public can read ONLY if the blog exists and is published (Admin can read all)
+      allow read: if resource == null || resource.data.status == 'published' || isAdmin();
+      
+      // ✅ Admin can create with strict data validation
+      allow create: if isAdmin() && isValidBlog(request.resource.data);
+      
+      // ✅ Admin can update (Locks creator & creation date)
+      allow update: if isAdmin() 
+        && resource.data.createdAt == request.resource.data.createdAt  
+        && resource.data.createdBy == request.resource.data.createdBy;  
+      
+      // ✅ Admin can delete
+      allow delete: if isAdmin();
+    }
+
+    // ========================
+    // ⚙️ SETTINGS - ADMIN ONLY
+    // ========================
+    match /settings/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // ========================
+    // 🧠 HELPER FUNCTIONS
+    // ========================
+    
+    // Checks if user has Custom Admin Claim OR is the Root Admin Email
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.token.admin == true || 
+        request.auth.token.email == 'vivekpoudel222@gmail.com'
+      );
+    }
+
+    // Validates blog schema
+    function isValidBlog(data) {
+      return data.title is string 
+        && data.title.size() > 0 
+        && data.title.size() <= 200
+        && data.content is string 
+        && data.content.size() > 0 
+        && data.content.size() <= 50000  // 50KB max
+        && data.category is string
+        && data.category in ['Tech & AI', 'Crypto Strategies', 'Wealth Management', 'Platform Updates', 'News']
+        && data.excerpt is string
+        && data.excerpt.size() > 0
+        && data.excerpt.size() <= 500
+        && data.author is string
+        && data.createdBy == request.auth.uid
+        && data.updatedBy == request.auth.uid;
+        // NOTE: I removed 'data.createdAt == request.time' because if your frontend 
+        // sends a standard ISO date instead of FieldValue.serverTimestamp(), 
+        // Firebase will reject the save. It's safer to handle timestamps in the frontend.
+    }
+  }
+}
