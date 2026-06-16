@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth'; // 🚀 Added to make buttons smart
 import { 
   HiOutlineChartPie, HiOutlineShieldCheck, HiOutlineCalculator, 
   HiOutlineLightningBolt, HiOutlineGlobe, HiOutlineLockClosed,
-  HiOutlineArrowRight
+  HiOutlineArrowRight, HiOutlineLogout
 } from 'react-icons/hi';
 import { FaRobot, FaBitcoin, FaWallet, FaLeaf, FaExchangeAlt, FaTrophy } from 'react-icons/fa';
 
@@ -84,7 +84,7 @@ const services = [
 ];
 
 const Services = () => {
-  const { user } = useAuth(); // 🚀 Fetching user status
+  const { user, logout } = useAuth(); // 🚀 Fetching user status and logout action
 
   return (
     <div className="pt-24 pb-24 min-h-screen bg-slate-50 dark:bg-slate-950 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -104,9 +104,14 @@ const Services = () => {
         {/* 🚀 SMART BUTTONS AT THE TOP */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           {user ? (
-            <Link to="/dashboard" className="w-full sm:w-auto px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2">
-              Go to Dashboard <HiOutlineArrowRight size={18} />
-            </Link>
+            <>
+              <Link to="/dashboard" className="w-full sm:w-auto px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2">
+                Go to Dashboard <HiOutlineArrowRight size={18} />
+              </Link>
+              <button onClick={logout} className="w-full sm:w-auto px-8 py-4 bg-white dark:bg-slate-900 hover:bg-red-50 hover:dark:bg-red-500/10 text-slate-800 dark:text-white hover:text-red-500 dark:hover:text-red-400 border border-slate-200 dark:border-slate-800 hover:border-red-200 dark:hover:border-red-500/30 rounded-2xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 text-center shadow-sm flex items-center justify-center gap-2">
+                <HiOutlineLogout size={18} /> Log Out
+              </button>
+            </>
           ) : (
             <>
               <Link to="/signup" className="w-full sm:w-auto px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2">
@@ -164,9 +169,14 @@ const Services = () => {
             {/* 🚀 SMART BUTTONS AT THE BOTTOM */}
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               {user ? (
-                <Link to="/dashboard" className="w-full sm:w-auto px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2">
-                  Go to Dashboard <HiOutlineArrowRight size={18} />
-                </Link>
+                <>
+                  <Link to="/dashboard" className="w-full sm:w-auto px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2">
+                    Go to Dashboard <HiOutlineArrowRight size={18} />
+                  </Link>
+                  <button onClick={logout} className="w-full sm:w-auto px-8 py-4 bg-transparent hover:bg-red-500/10 text-white hover:text-red-400 border border-slate-600 hover:border-red-500 rounded-2xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 text-center flex items-center justify-center gap-2">
+                    <HiOutlineLogout size={18} /> Log Out
+                  </button>
+                </>
               ) : (
                 <>
                   <Link to="/signup" className="w-full sm:w-auto px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2">

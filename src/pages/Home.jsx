@@ -1,11 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
 import { useAuth } from '../hooks/useAuth';
+
+// 🔥 FIREBASE IMPORTS (✅ Fixed Path according to your tree structure!)
+import { collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
+// Assuming your 'db' instance is exported from firebaseConfig.js. 
+// (If it's in db.js, just change it to '../firebase/db')
+import { db } from '../firebase/firebaseConfig'; 
+
 import {
   HiOutlineSparkles, HiOutlineArrowRight, HiOutlineChevronDown,
   HiOutlineChatAlt2, HiOutlineBell, HiOutlineCash, HiOutlineLockClosed,
-  HiOutlineUserGroup, HiOutlineChartPie, HiOutlineLightningBolt
+  HiOutlineUserGroup, HiOutlineChartPie, HiOutlineLightningBolt, HiOutlineLogout,
+  HiOutlineBookOpen
 } from 'react-icons/hi';
 import {
   FaRobot, FaTelegramPlane, FaYoutube, FaFacebook,
@@ -92,16 +100,82 @@ const stagger = {
   visible: { transition: { staggerChildren: 0.1 } }
 };
 
+// Helper function to assign colors to categories
+const getCategoryColor = (category) => {
+  const colors = {
+    'Tech & AI': 'purple',
+    'Crypto Strategies': 'emerald',
+    'Wealth Management': 'blue',
+    'Platform Updates': 'orange',
+    'News': 'rose'
+  };
+  return colors[category] || 'indigo';
+};
+
 // ─── COMPONENT ───────────────────────────────────────────
 const Home = () => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [openFaq, setOpenFaq] = useState(null);
   const { scrollYProgress } = useScroll();
   
-  // Parallax effects for premium feel
+  // 🚀 LIVE BLOGS STATE
+  const [recentBlogs, setRecentBlogs] = useState([]);
+  const [loadingBlogs, setLoadingBlogs] = useState(true);
+
+  // Parallax effects
   const yHeroBg = useTransform(scrollYProgress, [0, 1], [0, 300]);
   const yImage = useTransform(scrollYProgress, [0, 1], [0, -150]);
 
+  // 🚀 FETCH LIVE BLOGS FROM FIREBASE
+  // 🚀 FETCH LIVE BLOGS FROM FIREBASE (✅ Matched exactly with Blogs.jsx logic)
+  useEffect(() => {
+    const fetchLatestBlogs = async () => {
+      try {
+        const blogsRef = collection(db, 'blogs');
+        
+        // Exact same logic as Blogs.jsx, just added limit(3) for Home Page
+        const q = query(
+          blogsRef, 
+          orderBy('createdAt', 'desc'),
+          limit(3)
+        );
+        
+        const snapshot = await getDocs(q);
+
+        const blogsData = snapshot.docs.map(doc => {
+          const data = doc.data();
+          
+          // Format date safely (same as your Blogs.jsx logic)
+          let formattedDate = 'Recent';
+          if (data.createdAt?.toDate) {
+            formattedDate = data.createdAt.toDate().toLocaleDateString('en-US', {
+              month: 'short', day: 'numeric', year: 'numeric'
+            });
+          }
+
+          return {
+            id: doc.id,
+            title: data.title,
+            category: data.category || 'Updates',
+            date: formattedDate,
+            image: data.coverImage || "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?q=80&w=2070&auto=format&fit=crop",
+            // excerpt use karo, warna kuch fallback text dikhao
+            desc: data.excerpt || 'Read the full article to learn more...',
+            slug: data.slug || doc.id, 
+            color: getCategoryColor(data.category)
+          };
+        });
+        
+        setRecentBlogs(blogsData);
+      } catch (error) {
+        console.error("Error fetching live blogs:", error);
+      } finally {
+        setLoadingBlogs(false);
+      }
+    };
+
+    fetchLatestBlogs();
+  }, []);
   return (
     <div className="bg-[#020617] min-h-screen font-sans selection:bg-blue-500/30 overflow-x-hidden text-white">
 
@@ -135,9 +209,14 @@ const Home = () => {
           
           <motion.div variants={fadeInUp} className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-20">
              {user ? (
-               <Link to="/dashboard" className="px-10 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest transition-all shadow-[0_0_40px_-10px_rgba(37,99,235,0.5)] flex items-center justify-center gap-3 w-full sm:w-auto">
-                 Go to Dashboard <HiOutlineArrowRight size={20} />
-               </Link>
+               <>
+                 <Link to="/dashboard" className="px-10 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest transition-all shadow-[0_0_40px_-10px_rgba(37,99,235,0.5)] flex items-center justify-center gap-3 w-full sm:w-auto">
+                   Go to Dashboard <HiOutlineArrowRight size={20} />
+                 </Link>
+                 <button onClick={logout} className="px-10 py-4 bg-slate-800/80 backdrop-blur-sm hover:bg-red-500/10 text-slate-300 hover:text-red-400 rounded-2xl font-black text-sm uppercase tracking-widest transition-all border border-slate-700/50 hover:border-red-500/30 flex items-center justify-center gap-3 w-full sm:w-auto">
+                   <HiOutlineLogout size={18} /> Log Out
+                 </button>
+               </>
              ) : (
                <>
                  <Link to="/signup" className="px-10 py-4 bg-white text-slate-900 hover:bg-slate-200 rounded-2xl font-black text-sm uppercase tracking-widest transition-all shadow-[0_0_40px_-10px_rgba(255,255,255,0.3)] flex items-center justify-center gap-3 w-full sm:w-auto">
@@ -150,7 +229,6 @@ const Home = () => {
              )}
           </motion.div>
 
-          {/* 🖼️ HERO MOTION GRAPHIC / PICTURE */}
           <motion.div 
             style={{ y: yImage }}
             animate={{ y: [0, -15, 0] }} 
@@ -239,7 +317,7 @@ const Home = () => {
             <p className="text-slate-400 text-lg leading-relaxed mb-8">
               Moving balances between Cash, Bank, and Crypto isn't just a ledger entry anymore. Experience smooth, visual capital shifting that makes managing your personal wealth clear and instant.
             </p>
-            <Link to="/dashboard" className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-2xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 group">
+            <Link to="/dashboard/shifting" className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-2xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 group">
               Try Capital Shifting <HiOutlineArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
             </Link>
           </motion.div>
@@ -278,6 +356,85 @@ const Home = () => {
             </motion.div>
           </motion.div>
         </div>
+      </motion.section>
+
+      {/* 📚 LIVE INSIGHTS / BLOGS SECTION */}
+      <motion.section
+        initial="hidden"
+        whileInView="visible"
+        viewport={{ once: true }}
+        variants={stagger}
+        className="py-32 max-w-7xl mx-auto px-4 md:px-8 relative z-20"
+      >
+        <div className="flex flex-col md:flex-row md:items-end justify-between mb-16 gap-6">
+          <motion.div variants={fadeInUp} className="max-w-2xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-500/10 text-indigo-400 font-bold text-[10px] uppercase tracking-widest mb-4 border border-indigo-500/20">
+              <HiOutlineBookOpen size={14} /> From the Vault
+            </div>
+            <h2 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
+              Insights & <span className="text-indigo-400">Strategies.</span>
+            </h2>
+            <p className="text-slate-400 font-semibold text-lg">
+              Expert articles to help you optimize your portfolio and secure your digital wealth.
+            </p>
+          </motion.div>
+          
+          <motion.div variants={fadeInUp}>
+            <Link to="/blogs" className="inline-flex items-center gap-2 px-6 py-3 bg-slate-800/50 hover:bg-slate-700 text-white rounded-xl font-bold text-xs uppercase tracking-widest transition-all border border-slate-700 hover:border-slate-500 group">
+              View All Articles <HiOutlineArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+            </Link>
+          </motion.div>
+        </div>
+
+        {/* Dynamic Firebase Data Rendering */}
+        {loadingBlogs ? (
+          <div className="flex justify-center items-center py-20">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
+          </div>
+        ) : recentBlogs.length === 0 ? (
+          <div className="text-center py-20 bg-slate-800/30 border border-slate-700/50 rounded-3xl">
+            <p className="text-slate-400 font-medium">No insights published yet. Check back soon!</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {recentBlogs.map((blog) => (
+              <motion.div
+                key={blog.id}
+                variants={fadeInUp}
+                whileHover={{ y: -10 }}
+                className="group bg-slate-800/30 border border-slate-700/50 backdrop-blur-sm rounded-3xl overflow-hidden transition-all duration-300 hover:shadow-[0_0_40px_-15px_rgba(99,102,241,0.3)] hover:border-indigo-500/30 flex flex-col h-full"
+              >
+                <div className="relative h-48 overflow-hidden">
+                  <div className="absolute inset-0 bg-slate-900/40 z-10 group-hover:bg-transparent transition-colors duration-500" />
+                  <img 
+                    src={blog.image} 
+                    alt={blog.title} 
+                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                  />
+                  <div className="absolute top-4 left-4 z-20">
+                    <span className={`px-3 py-1 bg-${blog.color}-500/90 backdrop-blur-md text-white text-[10px] font-black uppercase tracking-widest rounded-lg shadow-lg`}>
+                      {blog.category}
+                    </span>
+                  </div>
+                </div>
+                <div className="p-6 md:p-8 flex flex-col flex-grow">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">
+                    {blog.date}
+                  </span>
+                  <h3 className="text-xl md:text-2xl font-black text-white mb-4 leading-snug group-hover:text-indigo-300 transition-colors">
+                    {blog.title}
+                  </h3>
+                  <p className="text-slate-400 text-sm font-medium leading-relaxed mb-6 flex-grow line-clamp-3">
+                    {blog.desc}
+                  </p>
+                  <Link to={`/blogs/${blog.slug}`} className="inline-flex items-center gap-2 text-sm font-black text-indigo-400 uppercase tracking-widest group-hover:text-indigo-300 transition-colors w-fit">
+                    Read Article <HiOutlineArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                  </Link>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
       </motion.section>
 
       {/* ❓ FAQ SECTION */}
@@ -391,11 +548,17 @@ const Home = () => {
             <p className="text-blue-200 text-lg md:text-xl font-medium mb-10 max-w-2xl mx-auto">
               Ready to take complete control of your expenses and crypto portfolio?
             </p>
+            
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               {user ? (
-                <Link to="/dashboard" className="w-full sm:w-auto px-10 py-5 bg-white text-blue-900 hover:bg-slate-200 rounded-2xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 shadow-xl flex items-center justify-center gap-2 group">
-                  Launch Dashboard <HiOutlineArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
-                </Link>
+                <>
+                  <Link to="/dashboard" className="w-full sm:w-auto px-10 py-5 bg-white text-blue-900 hover:bg-slate-200 rounded-2xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 shadow-xl flex items-center justify-center gap-2 group">
+                    Launch Dashboard <HiOutlineArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+                  </Link>
+                  <button onClick={logout} className="w-full sm:w-auto px-10 py-5 bg-transparent border border-slate-600 hover:border-red-500 hover:bg-red-500/10 text-slate-300 hover:text-red-400 rounded-2xl font-black text-sm uppercase tracking-widest transition-all shadow-xl flex items-center justify-center gap-2 group">
+                    <HiOutlineLogout size={18} className="group-hover:-translate-x-1 transition-transform" /> Log Out
+                  </button>
+                </>
               ) : (
                 <Link to="/signup" className="w-full sm:w-auto px-10 py-5 bg-blue-500 hover:bg-blue-400 text-white rounded-2xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 shadow-xl flex items-center justify-center gap-2 group border border-blue-400/50">
                   Start Tracking Now <HiOutlineLightningBolt size={18} className="group-hover:scale-125 transition-transform text-yellow-300" />

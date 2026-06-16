@@ -1,6 +1,6 @@
 // src/App.jsx
 import React, { Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, Link } from 'react-router-dom';
 import { useContext } from 'react';
 import { AuthContext } from './context/AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -30,7 +30,8 @@ const RouteLoader = () => (
 );
 
 // ─────────────────────────────────────────────
-// 404 Not Found (✅ Fixed Dark/Light Mode Visibility)
+// ─────────────────────────────────────────────
+// 404 Not Found (✅ Fixed: Replaced <a> with <Link> for SPA routing)
 // ─────────────────────────────────────────────
 const NotFound = () => (
   <div className="min-h-[100dvh] w-full flex items-center justify-center bg-slate-50 dark:bg-slate-950 transition-colors duration-300 px-4">
@@ -44,12 +45,13 @@ const NotFound = () => (
       <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-8 leading-relaxed">
         The financial coordinates you are looking for do not exist or have been moved.
       </p>
-      <a
-        href="/dashboard"
+      {/* 🔴 A Tag Hata Kar Link Tag Laga Diya Hai */}
+      <Link
+        to="/"
         className="inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-gradient-to-r from-slate-900 to-slate-800 dark:from-white dark:to-slate-200 hover:from-slate-800 hover:to-slate-700 dark:hover:from-slate-200 dark:hover:to-slate-300 text-white dark:text-slate-900 rounded-xl font-black text-[11px] uppercase tracking-wider transition-all active:scale-95 shadow-lg shadow-slate-900/20 dark:shadow-white/10 w-full"
       >
-        <HiOutlineArrowLeft size={16} /> Return to Dashboard
-      </a>
+        <HiOutlineArrowLeft size={16} /> Return to Home
+      </Link>
     </div>
   </div>
 );
