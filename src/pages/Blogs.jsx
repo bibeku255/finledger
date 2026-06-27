@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { db } from '../firebase/firebaseConfig';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { HiOutlineArrowRight, HiOutlineClock, HiOutlineTag } from 'react-icons/hi';
-
+import { collection, getDocs, query, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
+import emailjs from '@emailjs/browser';
 // Same categories as your Admin Panel
 const categories = ["All", "Tech & AI", "Crypto Strategies", "Wealth Management", "Platform Updates", "News"];
 
@@ -49,14 +49,39 @@ const Blogs = () => {
   const featuredPost = filteredBlogs[0]; 
   const gridPosts = filteredBlogs.slice(1);
 
-  const handleSubscribe = (e) => {
+  const handleSubscribe = async (e) => {
     e.preventDefault();
     if(!email) return;
-    setIsSubscribed(true);
-    setEmail('');
-    setTimeout(() => setIsSubscribed(false), 3000);
-  };
+    
+    try {
+      // 1. Pehle Firebase mein email save karo (Backup ke liye)
+      await addDoc(collection(db, 'subscribers'), {
+        email: email,
+        subscribedAt: serverTimestamp()
+      });
 
+      // 2. Ab user ko EmailJS ke through Welcome Email bhejo
+      const templateParams = {
+        user_email: email, // Yeh email sidha aapke template ke {{user_email}} mein jayega
+        // Agar aapne template mein {{message}} ya kuch aur lagaya hai, toh wo bhi yahan pass kar sakte hain
+      };
+
+      await emailjs.send(
+        'YOUR_SERVICE_ID',   // 👈 EmailJS se copy kiya hua Service ID yahan dalein
+        'YOUR_TEMPLATE_ID',  // 👈 EmailJS se copy kiya hua Template ID yahan dalein
+        templateParams,
+        'YOUR_PUBLIC_KEY'    // 👈 EmailJS se copy kiya hua Public Key yahan dalein
+      );
+
+      // 3. UI Update karo
+      setIsSubscribed(true);
+      setEmail('');
+      setTimeout(() => setIsSubscribed(false), 3000);
+      
+    } catch (error) {
+      console.error("Error subscribing: ", error);
+    }
+  };
   // Helper: Format Firebase Timestamp to Date string
   const formatDate = (timestamp) => {
     if (!timestamp) return "Just now";

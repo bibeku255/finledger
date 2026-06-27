@@ -1,8 +1,8 @@
 // src/context/AuthContext.jsx
 import React, { createContext, useState, useEffect, useCallback, useRef } from "react";
 import { onAuthStateChanged, onIdTokenChanged } from "firebase/auth";
-import { auth, db } from "../firebase/firebaseConfig"; 
-import { doc, onSnapshot, setDoc, updateDoc, collection, query, limit, getDocs } from "firebase/firestore"; 
+import { auth, db } from "../firebase/firebaseConfig";
+import { doc, onSnapshot, setDoc, updateDoc, collection, query, limit, getDocs, getDoc } from "firebase/firestore";  
 import { registerUser, loginUser, logoutUser, socialLogin, resetPasswordEmail } from "../firebase/auth";
 
 import { format } from 'date-fns';
@@ -84,23 +84,24 @@ export const AuthProvider = ({ children }) => {
     };
   }, [user]);
 
-  // ✅ Token changes detection for isAdmin
-  useEffect(() => {
-    const unsubscribe = onIdTokenChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        try {
-          const tokenResult = await currentUser.getIdTokenResult();
-          setIsAdmin(tokenResult.claims.admin === true);
-        } catch (error) {
-          console.error("Failed to get token claims:", error);
-          setIsAdmin(false);
-        }
-      } else {
+// ✅ NAYA LAGAO: Firestore admins collection check
+useEffect(() => {
+  const unsubscribe = onIdTokenChanged(auth, async (currentUser) => {
+    if (currentUser) {
+      try {
+        // 🔑 Firestore `admins` collection me UID check karo
+        const adminDoc = await getDoc(doc(db, "admins", currentUser.uid));
+        setIsAdmin(adminDoc.exists());
+      } catch (error) {
+        console.error("[AuthContext] Admin check failed:", error);
         setIsAdmin(false);
       }
-    });
-    return () => unsubscribe();
-  }, []);
+    } else {
+      setIsAdmin(false);
+    }
+  });
+  return () => unsubscribe();
+}, []);
 
   useEffect(() => {
     let unsubscribeSnapshot = null;
@@ -109,10 +110,12 @@ export const AuthProvider = ({ children }) => {
       try {
         if (currentUser) {
           setUser(currentUser);
-          try {
-            const tokenResult = await currentUser.getIdTokenResult();
-            setIsAdmin(tokenResult.claims.admin === true);
-          } catch (e) {}
+           try {
+          const adminDoc = await getDoc(doc(db, "admins", currentUser.uid));
+          setIsAdmin(adminDoc.exists());
+          } catch (e) {
+           console.error("[AuthContext] Admin check on auth state:", e);
+           }
 
           const userDocRef = doc(db, "users", currentUser.uid);
           unsubscribeSnapshot = onSnapshot(userDocRef, (docSnap) => {
