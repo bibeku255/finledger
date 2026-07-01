@@ -126,16 +126,16 @@ const Home = () => {
   const yHeroBg = useTransform(scrollYProgress, [0, 1], [0, 300]);
   const yImage = useTransform(scrollYProgress, [0, 1], [0, -150]);
 
-  // 🚀 FETCH LIVE BLOGS FROM FIREBASE
-  // 🚀 FETCH LIVE BLOGS FROM FIREBASE (✅ Matched exactly with Blogs.jsx logic)
+    // 🚀 FETCH LIVE BLOGS FROM FIRESTORE (✅ With status filter!)
   useEffect(() => {
     const fetchLatestBlogs = async () => {
       try {
         const blogsRef = collection(db, 'blogs');
         
-        // Exact same logic as Blogs.jsx, just added limit(3) for Home Page
+        // ✅ FIXED: Added status filter — same as Blogs.jsx
         const q = query(
-          blogsRef, 
+          blogsRef,
+          where('status', '==', 'published'),
           orderBy('createdAt', 'desc'),
           limit(3)
         );
@@ -145,7 +145,6 @@ const Home = () => {
         const blogsData = snapshot.docs.map(doc => {
           const data = doc.data();
           
-          // Format date safely (same as your Blogs.jsx logic)
           let formattedDate = 'Recent';
           if (data.createdAt?.toDate) {
             formattedDate = data.createdAt.toDate().toLocaleDateString('en-US', {
@@ -159,16 +158,16 @@ const Home = () => {
             category: data.category || 'Updates',
             date: formattedDate,
             image: data.coverImage || "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?q=80&w=2070&auto=format&fit=crop",
-            // excerpt use karo, warna kuch fallback text dikhao
             desc: data.excerpt || 'Read the full article to learn more...',
             slug: data.slug || doc.id, 
             color: getCategoryColor(data.category)
           };
         });
         
+        console.log(`[Home] Fetched ${blogsData.length} published blogs`);
         setRecentBlogs(blogsData);
       } catch (error) {
-        console.error("Error fetching live blogs:", error);
+        console.error("[Home] Error fetching blogs:", error.code, error.message);
       } finally {
         setLoadingBlogs(false);
       }
